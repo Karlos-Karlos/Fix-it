@@ -48,8 +48,10 @@ const isProduction = process.env.NODE_ENV === 'production';
 
 app.use(cors({
   origin: function (origin, callback) {
-    // In production, never allow null/file:// origins
-    if (!origin || origin === 'null') {
+    // Allow server-to-server requests (health checks, Railway internals) — no Origin header
+    if (!origin) return callback(null, true);
+    // Block file:// origins in production
+    if (origin === 'null') {
       if (isProduction) return callback(new Error('CORS: origin not allowed'));
       return callback(null, true);
     }
