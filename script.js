@@ -15486,15 +15486,20 @@ Please try again with a different photo.`;
                 const urlEl = document.getElementById('wearable-qr-url');
                 if (urlEl) urlEl.textContent = wearableUrl;
 
-                if (!_wearableScreenInitialized && window.QRCode) {
-                    const canvas = document.getElementById('wearable-qr-canvas');
-                    try {
-                        await QRCode.toCanvas(canvas, wearableUrl, {
-                            width: 180,
-                            margin: 2,
-                            color: { dark: '#1a1814', light: '#f5f0e8' }
-                        });
-                    } catch (e) { dbg.warn('QR generation failed', e); }
+                if (!_wearableScreenInitialized) {
+                    const img = document.getElementById('wearable-qr-img');
+                    const loading = document.getElementById('wearable-qr-loading');
+                    if (img) {
+                        const qrUrl = `https://api.qrserver.com/v1/create-qr-code/?size=180x180&margin=8&data=${encodeURIComponent(wearableUrl)}`;
+                        img.onload = () => {
+                            img.style.display = 'block';
+                            if (loading) loading.style.display = 'none';
+                        };
+                        img.onerror = () => {
+                            if (loading) loading.textContent = 'QR unavailable — use the Copy button below';
+                        };
+                        img.src = qrUrl;
+                    }
                 }
 
                 if (!_wearableScreenInitialized) {
