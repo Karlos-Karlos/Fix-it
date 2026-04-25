@@ -28,10 +28,15 @@ router.post('/register', authLimiter, validate(registerSchema), async (req, res,
 
     const passwordHash = await bcrypt.hash(password, SALT_ROUNDS);
 
+    // Auto-verify when SMTP is not configured (no email service available)
+    const smtpConfigured = !!process.env.SMTP_HOST;
+    const autoVerify = !smtpConfigured;
+
     const userResult = await client.query(
-      `INSERT INTO users (email, password_hash, display_name, gender, height, weight, age_range, activity_level, fitness_goal, experience_level)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) RETURNING id, email, display_name, role, created_at`,
-      [email, passwordHash, display_name || null, gender || null, height || null, weight || null, age_range || null, activity_level || null, fitness_goal || null, experience_level || 'intermediate']
+      `INSERT INTO users (email, password_hash, display_name, gender, height, weight, age_range, activity_level, fitness_goal, experience_level, email_verified, email_verified_at)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12) RETURNING id, email, display_name, role, created_at`,
+      [email, passwordHash, display_name || null, gender || null, height || null, weight || null, age_range || null, activity_level || null, fitness_goal || null, experience_level || 'intermediate',
+       autoVerify, autoVerify ? new Date() : null]
     );
     const user = userResult.rows[0];
 
@@ -39,21 +44,22 @@ router.post('/register', authLimiter, validate(registerSchema), async (req, res,
     await client.query('INSERT INTO user_preferences (user_id) VALUES ($1)', [user.id]);
     await client.query('INSERT INTO user_gamification (user_id) VALUES ($1)', [user.id]);
 
-    // Email verification code (6-digit)
-    const verificationCode = generateVerificationCode();
-    const tokenHash = hashToken(verificationCode);
-    await client.query(
-      `INSERT INTO email_verification_tokens (user_id, token_hash, token_type, expires_at)
-       VALUES ($1, $2, 'email_verification', NOW() + INTERVAL '24 hours')`,
-      [user.id, tokenHash]
-    );
-
-    await client.query('COMMIT');
-
-    // Send email (outside transaction)
-    await sendVerificationEmail(email, verificationCode);
-
-    res.status(201).json({ message: 'Account created. Check your email to verify.', user });
+    if (!autoVerify) {
+      // Email verification code (6-digit)
+      const verificationCode = generateVerificationCode();
+      const tokenHash = hashToken(verificationCode);
+      await client.query(
+        `INSERT INTO email_verification_tokens (user_id, token_hash, token_type, expires_at)
+         VALUES ($1, $2, 'email_verification', NOW() + INTERVAL '24 hours')`,
+        [user.id, tokenHash]
+      );
+      await client.query('COMMIT');
+      await sendVerificationEmail(email, verificationCode);
+      res.status(201).json({ message: 'Account created. Check your email to verify.', user });
+    } else {
+      await client.query('COMMIT');
+      res.status(201).json({ message: 'Account created successfully.', user });
+    }
   } catch (err) {
     if (client) await client.query('ROLLBACK').catch(() => {});
     next(err);
