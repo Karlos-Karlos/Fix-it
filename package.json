@@ -1,0 +1,8 @@
+{
+  "name": "fix-it",
+  "version": "1.0.0",
+  "description": "PHYSIQ AI Fitness App",
+  "engines": {
+    "node": ">=18.0.0"
+  }
+}

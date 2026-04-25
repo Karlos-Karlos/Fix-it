@@ -1,0 +1,15612 @@
+        console.log('%c[FiX-it] script.js LOADED at ' + new Date().toISOString(), 'color:lime;font-weight:bold');
+        // Debug mode: set to true during development for console output
+        const DEBUG = location.hostname === 'localhost' || location.hostname === '127.0.0.1';
+        const dbg = {
+            log: (...args) => DEBUG && console.log(...args),
+            warn: (...args) => DEBUG && console.warn(...args),
+            error: (...args) => DEBUG && console.error(...args),
+        };
+
+        // ========== THEME MANAGEMENT ==========
+        function initTheme() {
+            const validThemes = ['dark', 'light', 'midnight', 'ocean', 'lavender'];
+            const savedTheme = localStorage.getItem(userKey('fixit-theme'));
+            const systemPrefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
+            const fallback = systemPrefersDark ? 'dark' : 'light';
+            const theme = (savedTheme && validThemes.includes(savedTheme)) ? savedTheme : fallback;
+
+            applyTheme(theme);
+        }
+
+        function applyTheme(theme) {
+            document.documentElement.setAttribute('data-theme', theme);
+            localStorage.setItem(userKey('fixit-theme'), theme);
+
+            // Update active swatch in preferences modal
+            document.querySelectorAll('.pref-theme-card').forEach(s => {
+                s.classList.toggle('active', s.dataset.theme === theme);
+            });
+        }
+
+        // Application State — exposed on window so inline scripts can access it
+        const state = window.__state = {
+            currentScreen: 1,
+            hasImage: false,
+            selectedView: 'front',
+            explainabilityOn: false,
+            imageData: null,
+            analysisResult: null,
+            landmarks: null,
+            segmentationMask: null,
+            humanDetected: false,  // Track if a human body was detected
+            // User profile
+            gender: null,  // 'male' or 'female'
+            // BMI data
+            height: null,  // in cm
+            weight: null,  // in kg
+            bmi: null,
+            bmiCategory: null,
+            // Fitness goal
+            fitnessGoal: null,  // 'lose-weight', 'build-muscle', 'maintain', 'recomp'
+            // Experience level
+            experienceLevel: 'intermediate',  // 'beginner', 'intermediate', 'advanced'
+            // Coach
+            coachPersona: 'encouraging',
+            coachOpen: false,
+            coachRecentResponses: {},
+            // Auth
+            user: null,
+            accessToken: null,
+            refreshToken: null,
+            // Nutrition
+            macroTargets: null,
+            measurements: null,
+            age: null
+        };
+
+        // localStorage key helper — always uses a stable device ID so that
+        // saves and loads use the SAME key regardless of whether backend auth
+        // has completed. Server user ID changes mid-session cause key mismatches;
+        // the device ID never changes within a browser profile.
+        function _getDeviceId() {
+            let id = localStorage.getItem('fixit-device-id');
+            if (!id) {
+                id = Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
+                localStorage.setItem('fixit-device-id', id);
+            }
+            return id;
+        }
+        function userKey(base) {
+            return `${base}-${_getDeviceId()}`;
+        }
+
+        // ========== AUTH / API ==========
+        // Auto-detect backend URL: use current host in production, localhost in dev
+        const API_BASE = (location.hostname === 'localhost' || location.hostname === '127.0.0.1')
+            ? 'http://localhost:3000/api'
+            : `${location.origin}/api`;
+
+        // Helper: fetch with auth token, auto-refresh on 401, 30s timeout
+        async function apiFetch(path, options = {}) {
+            const headers = { 'Content-Type': 'application/json', ...(options.headers || {}) };
+            if (state.accessToken) {
+                headers['Authorization'] = 'Bearer ' + state.accessToken;
+            }
+
+            async function doFetch() {
+                const controller = new AbortController();
+                const timeoutId = setTimeout(() => controller.abort(), 30000);
+                try {
+                    const res = await fetch(API_BASE + path, { ...options, headers, signal: controller.signal });
+                    clearTimeout(timeoutId);
+                    return res;
+                } catch (err) {
+                    clearTimeout(timeoutId);
+                    if (err.name === 'AbortError') throw new Error('Request timed out. Please try again.');
+                    throw new Error('Cannot connect to server. Please make sure the backend is running.');
+                }
+            }
+
+            let res = await doFetch();
+
+            // Try refresh if 401
+            if (res.status === 401 && state.refreshToken) {
+                const refreshed = await tryRefreshToken();
+                if (refreshed) {
+                    headers['Authorization'] = 'Bearer ' + state.accessToken;
+                    res = await doFetch();
+                } else {
+                    // Refresh failed — force logout
+                    handleLogout();
+                    throw new Error('Session expired. Please log in again.');
+                }
+            }
+            return res;
+        }
+
+        async function tryRefreshToken() {
+            try {
+                const res = await fetch(API_BASE + '/auth/refresh', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ refreshToken: state.refreshToken })
+                });
+                if (!res.ok) return false;
+                const data = await res.json();
+                state.accessToken = data.accessToken;
+                if (data.refreshToken) state.refreshToken = data.refreshToken;
+                localStorage.setItem('fixit-access-token', state.accessToken);
+                if (data.refreshToken) localStorage.setItem('fixit-refresh-token', state.refreshToken);
+                return true;
+            } catch {
+                return false;
+            }
+        }
+
+        // Fire-and-forget API save — silently skips when offline or unauthenticated
+        function _apiSave(path, body, method = 'POST') {
+            if (!state.accessToken) return;
+            apiFetch(path, { method, body: JSON.stringify(body) }).catch(() => {});
+        }
+
+        // Fetch all tracking history from the server and seed localStorage
+        // Called once after login — server is the source of truth for history
+        async function syncTrackingDataFromServer() {
+            if (!state.accessToken) return;
+            try {
+                // Sleep log
+                const sleepRes = await apiFetch('/tracking/sleep?days=365');
+                if (sleepRes.ok) {
+                    const rows = await sleepRes.json();
+                    if (rows.length) {
+                        const existing = getSleepLog();
+                        const existingDates = new Set(existing.map(e => e.date));
+                        const merged = [...existing];
+                        rows.forEach(r => {
+                            if (!existingDates.has(r.date)) merged.push({ date: r.date, hours: parseFloat(r.hours), quality: r.quality });
+                        });
+                        merged.sort((a, b) => b.date.localeCompare(a.date));
+                        localStorage.setItem(userKey(SLEEP_LOG_KEY), JSON.stringify(merged));
+                    }
+                }
+            } catch (_) {}
+
+            try {
+                // Hydration history
+                const hydRes = await apiFetch('/tracking/hydration/history?days=30');
+                if (hydRes.ok) {
+                    const rows = await hydRes.json();
+                    rows.forEach(r => {
+                        const k = userKey('fixit-water-' + r.date);
+                        if (!localStorage.getItem(k)) localStorage.setItem(k, String(r.glasses_drunk));
+                    });
+                }
+            } catch (_) {}
+
+            try {
+                // Goal weight
+                const gwRes = await apiFetch('/tracking/goal-weight');
+                if (gwRes.ok) {
+                    const row = await gwRes.json();
+                    if (row && row.goal_kg) {
+                        const existing = loadGoalData();
+                        if (!existing) {
+                            localStorage.setItem(userKey('fixit-goal-weight'), JSON.stringify({
+                                goal: parseFloat(row.goal_kg),
+                                start: row.start_kg ? parseFloat(row.start_kg) : null,
+                                setAt: row.set_at,
+                            }));
+                        }
+                    }
+                }
+            } catch (_) {}
+
+            try {
+                // Weight log
+                const wlRes = await apiFetch('/tracking/weight-log?days=365');
+                if (wlRes.ok) {
+                    const rows = await wlRes.json();
+                    if (rows.length) {
+                        const existing = getWeightLog();
+                        const existingDates = new Set(existing.map(e => e.date));
+                        const merged = [...existing];
+                        rows.forEach(r => {
+                            if (!existingDates.has(r.date)) merged.push({ date: r.date, weight: parseFloat(r.weight) });
+                        });
+                        merged.sort((a, b) => b.date.localeCompare(a.date));
+                        localStorage.setItem(userKey(WEIGHT_LOG_KEY), JSON.stringify(merged));
+                    }
+                }
+            } catch (_) {}
+
+            try {
+                // Measurement log
+                const mlRes = await apiFetch('/tracking/measurements?days=365');
+                if (mlRes.ok) {
+                    const rows = await mlRes.json();
+                    if (rows.length) {
+                        const existing = getMeasurementLog();
+                        const existingDates = new Set(existing.map(e => e.date));
+                        const merged = [...existing];
+                        rows.forEach(r => {
+                            if (!existingDates.has(r.date)) {
+                                const entry = { date: r.date };
+                                if (r.chest) entry.chest = parseFloat(r.chest);
+                                if (r.waist) entry.waist = parseFloat(r.waist);
+                                if (r.hips)  entry.hips  = parseFloat(r.hips);
+                                if (r.arms)  entry.arms  = parseFloat(r.arms);
+                                merged.push(entry);
+                            }
+                        });
+                        merged.sort((a, b) => b.date.localeCompare(a.date));
+                        localStorage.setItem(userKey(MEAS_LOG_KEY), JSON.stringify(merged));
+                    }
+                }
+            } catch (_) {}
+
+            try {
+                // Workout sessions
+                const wsRes = await apiFetch('/workouts/sessions?limit=40');
+                if (wsRes.ok) {
+                    const wsData = await wsRes.json();
+                    const rows = wsData.data || [];
+                    if (rows.length) {
+                        const existing = getWorkoutLog();
+                        const existingDates = new Set(existing.map(e => (e.date || '').split('T')[0]));
+                        const merged = [...existing];
+                        rows.forEach(r => {
+                            // workout_date comes back as ISO string from JSON serialization
+                            const dateStr = typeof r.workout_date === 'string'
+                                ? r.workout_date.split('T')[0]
+                                : new Date(r.workout_date).toISOString().split('T')[0];
+                            if (!existingDates.has(dateStr)) {
+                                merged.push({
+                                    id: r.id,
+                                    date: dateStr + 'T12:00:00.000Z',
+                                    label: r.notes || r.workout_type || 'Workout',
+                                    exercises: [],
+                                    durationSec: r.duration_minutes ? r.duration_minutes * 60 : 0,
+                                    caloriesBurned: 0,
+                                    xp: r.xp_earned || 25,
+                                });
+                            }
+                        });
+                        merged.sort((a, b) => b.date.localeCompare(a.date));
+                        localStorage.setItem(userKey(WORKOUT_LOG_KEY), JSON.stringify(merged));
+                    }
+                }
+            } catch (_) {}
+
+            try {
+                // Lift log (Personal Records)
+                const liftRes = await apiFetch('/tracking/lifts');
+                if (liftRes.ok) {
+                    const rows = await liftRes.json();
+                    if (rows.length) {
+                        const existing = getLiftLog();
+                        rows.forEach(r => {
+                            const name = r.exercise_name;
+                            if (!existing[name]) existing[name] = [];
+                            const dateStr = typeof r.date === 'string' ? r.date.split('T')[0] : new Date(r.date).toISOString().split('T')[0];
+                            const alreadyHas = existing[name].some(e => e.date === dateStr);
+                            if (!alreadyHas) {
+                                existing[name].push({
+                                    date: dateStr,
+                                    weight: parseFloat(r.weight) || 0,
+                                    reps: parseInt(r.reps) || 0,
+                                    e1rm: r.e1rm != null ? parseFloat(r.e1rm) : 0,
+                                });
+                            }
+                        });
+                        // Sort each exercise by date desc
+                        Object.keys(existing).forEach(name => {
+                            existing[name].sort((a, b) => b.date.localeCompare(a.date));
+                            if (existing[name].length > 50) existing[name].length = 50;
+                        });
+                        saveLiftLog(existing);
+                    }
+                }
+            } catch (_) {}
+
+            try {
+                // Gamification XP — use server value if higher than local
+                const gamRes = await apiFetch('/users/me/gamification');
+                if (gamRes.ok) {
+                    const gam = await gamRes.json();
+                    if (gam && typeof gam.total_xp === 'number') {
+                        const localXP = parseInt(localStorage.getItem(userKey('fixit-total-xp')) || '0');
+                        const xp = Math.max(localXP, gam.total_xp);
+                        localStorage.setItem(userKey('fixit-total-xp'), String(xp));
+                    }
+                }
+            } catch (_) {}
+
+            try {
+                // Food / calorie log for today — not stored persistently like other logs,
+                // so we fetch it here so the Nutrition habit shows correctly on the progress screen
+                const today = new Date().toISOString().split('T')[0];
+                const foodRes = await apiFetch('/nutrition/food-log/daily?date=' + today);
+                if (foodRes.ok) {
+                    const data = await foodRes.json();
+                    const totals = data.totals || {};
+                    const tCal = parseFloat(totals.total_calories) || 0;
+                    const tP   = parseFloat(totals.total_protein)  || 0;
+                    const tC   = parseFloat(totals.total_carbs)    || 0;
+                    const tF   = parseFloat(totals.total_fats)     || 0;
+                    if (tCal > 0) saveCalorieLogEntry(today, tCal, tP, tC, tF);
+                }
+            } catch (_) {}
+
+            // Re-render after sync
+            try { renderGoalWeight(); } catch (_) {}
+            try { renderSleepTracker(); } catch (_) {}
+            try { renderWorkoutLog(); } catch (_) {}
+            try { renderPersonalRecords(); } catch (_) {}
+            try { renderLevelXP(); } catch (_) {}
+            try { renderHabitTracker(); } catch (_) {}
+        }
+
+        function isValidEmail(email) {
+            return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
+        }
+
+        function showAuthMessage(text, type) {
+            showToast(text, type);
+        }
+
+        function hideAuthMessage() {
+            // No-op: toasts auto-dismiss
+        }
+
+        function setAuthLoading(btn, loading) {
+            if (!btn) return;
+            const text = btn.querySelector('.auth-btn-text');
+            const spinner = btn.querySelector('.auth-btn-spinner');
+            if (text) text.style.display = loading ? 'none' : '';
+            if (spinner) spinner.style.display = loading ? 'inline-flex' : 'none';
+            btn.disabled = loading;
+        }
+
+        async function handleLogin(e) {
+            e.preventDefault();
+            hideAuthMessage();
+            const email = document.getElementById('login-email').value.trim();
+            const password = document.getElementById('login-password').value;
+            if (!email || !password) return showAuthMessage('Please fill in all fields.', 'error');
+            if (!isValidEmail(email)) return showAuthMessage('Please enter a valid email address.', 'error');
+
+            const btn = document.getElementById('login-submit');
+            setAuthLoading(btn, true);
+            try {
+                let res;
+                try {
+                    res = await fetch(API_BASE + '/auth/login', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ email, password })
+                    });
+                } catch (networkErr) {
+                    throw new Error('Cannot connect to server. Please make sure the backend is running.');
+                }
+                const data = await res.json().catch(() => ({}));
+                if (!res.ok) throw new Error((data.error && data.error.message) || data.message || 'Login failed');
+
+                state.accessToken = data.accessToken;
+                state.refreshToken = data.refreshToken;
+                state.user = data.user;
+                localStorage.setItem('fixit-access-token', data.accessToken);
+                localStorage.setItem('fixit-refresh-token', data.refreshToken);
+                localStorage.setItem('fixit-user', JSON.stringify(data.user));
+
+                enterApp();
+            } catch (err) {
+                showAuthMessage(err.message, 'error');
+            } finally {
+                setAuthLoading(btn, false);
+            }
+        }
+
+        async function handleRegister(e) {
+            e.preventDefault();
+            hideAuthMessage();
+            const displayName = document.getElementById('register-name').value.trim();
+            const email = document.getElementById('register-email').value.trim();
+            const password = document.getElementById('register-password').value;
+            const confirm = document.getElementById('register-confirm').value;
+
+            if (!displayName || !email || !password || !confirm) return showAuthMessage('Please fill in all required fields.', 'error');
+            if (!isValidEmail(email)) return showAuthMessage('Please enter a valid email address.', 'error');
+            if (password.length < 8) return showAuthMessage('Password must be at least 8 characters.', 'error');
+            if (!/[A-Z]/.test(password)) return showAuthMessage('Password must contain at least one uppercase letter.', 'error');
+            if (!/[a-z]/.test(password)) return showAuthMessage('Password must contain at least one lowercase letter.', 'error');
+            if (!/[0-9]/.test(password)) return showAuthMessage('Password must contain at least one number.', 'error');
+            if (password !== confirm) return showAuthMessage('Passwords do not match.', 'error');
+
+            const btn = document.getElementById('register-submit');
+            setAuthLoading(btn, true);
+            try {
+                const body = { email, password, display_name: displayName };
+                let res;
+                try {
+                    res = await fetch(API_BASE + '/auth/register', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify(body)
+                    });
+                } catch (networkErr) {
+                    throw new Error('Cannot connect to server. Please make sure the backend is running.');
+                }
+                const data = await res.json().catch(() => ({}));
+                if (!res.ok) throw new Error((data.error && data.error.message) || data.message || 'Registration failed');
+
+                // Show verification panel
+                document.getElementById('register-form').style.display = 'none';
+                document.getElementById('auth-verify').style.display = 'block';
+                document.querySelector('.auth-tabs').style.display = 'none';
+                showAuthMessage('Account created! Find the verification token in your backend server terminal.', 'success');
+            } catch (err) {
+                showAuthMessage(err.message, 'error');
+            } finally {
+                setAuthLoading(btn, false);
+            }
+        }
+
+        async function handleVerifyEmail() {
+            hideAuthMessage();
+            const token = document.getElementById('verify-token').value.trim();
+            if (!token) return showAuthMessage('Please paste the verification token.', 'error');
+
+            const btn = document.getElementById('verify-submit');
+            setAuthLoading(btn, true);
+            try {
+                let res;
+                try {
+                    res = await fetch(API_BASE + '/auth/verify-email', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ token })
+                    });
+                } catch (networkErr) {
+                    throw new Error('Cannot connect to server. Please make sure the backend is running.');
+                }
+                const data = await res.json().catch(() => ({}));
+                if (!res.ok) throw new Error((data.error && data.error.message) || data.message || 'Verification failed');
+
+                showAuthMessage('Email verified! You can now log in.', 'success');
+                // Switch back to login after a beat
+                setTimeout(() => {
+                    document.getElementById('auth-verify').style.display = 'none';
+                    document.getElementById('login-form').style.display = 'flex';
+                    document.querySelector('.auth-tabs').style.display = 'flex';
+                    document.querySelectorAll('.auth-tab').forEach(t => t.classList.toggle('active', t.dataset.tab === 'login'));
+                    hideAuthMessage();
+                }, 1500);
+            } catch (err) {
+                showAuthMessage(err.message, 'error');
+            } finally {
+                setAuthLoading(btn, false);
+            }
+        }
+
+        function handleLogout() {
+            // Revoke the session on the server (fire-and-forget — don't block UI on network failure)
+            if (state.accessToken) {
+                apiFetch('/auth/logout', { method: 'POST' }).catch(() => {});
+            }
+            state.accessToken = null;
+            state.refreshToken = null;
+            state.user = null;
+            localStorage.removeItem('fixit-access-token');
+            localStorage.removeItem('fixit-refresh-token');
+            localStorage.removeItem('fixit-user');
+            document.getElementById('user-menu-wrapper').style.display = 'none';
+            document.getElementById('user-menu-wrapper').classList.remove('open');
+            document.querySelector('.nav-steps').style.display = 'none';
+
+            // Hide all screens, show auth
+            document.querySelectorAll('.screen').forEach(s => s.classList.remove('active'));
+            document.getElementById('screen-auth').classList.add('active');
+        }
+
+        function enterApp() {
+            // Hide auth screen
+            document.getElementById('screen-auth').classList.remove('active');
+            document.querySelector('.nav-steps').style.display = 'flex';
+            // Re-load session state with the stable device-ID key
+            loadSessionState();
+            // Load this user's preferences (theme, coach persona, etc.)
+            initTheme();
+            state.coachPersona = localStorage.getItem(userKey('fixit-coach-persona')) || 'encouraging';
+            // Re-render all tracking widgets so they show persisted data
+            // (they may have rendered before with an empty store on first paint)
+            try { renderGoalWeight(); } catch(e) {}
+            try { renderWorkoutLog(); } catch(e) {}
+            try { renderSleepTracker(); } catch(e) {};
+            // Sync tracking history from server (fire-and-forget, non-blocking)
+            syncTrackingDataFromServer();
+            // Show user menu and populate it
+            document.getElementById('user-menu-wrapper').style.display = 'flex';
+            updateUserMenu();
+            // Route admins directly to admin dashboard
+            if (state.user && state.user.role === 'admin') {
+                goToAdmin();
+            } else {
+                // Check if returning user has previous scans
+                routeAfterLogin();
+            }
+        }
+
+        async function routeAfterLogin() {
+            // Wait until all setup*() functions in init() have run before routing.
+            await setupDonePromise;
+
+            // 1. Session state already loaded — go straight to Results
+            if (state.analysisResult) {
+                populateResults();
+                goToScreen(3);
+                return;
+            }
+
+            // 2. No session state — check IndexedDB for any previous scans
+            try {
+                const snapshots = await getAllSnapshots();
+                const latest = snapshots.find(s => s.analysisResult);
+                if (latest) {
+                    // Restore most recent scan into state
+                    state.analysisResult = latest.analysisResult;
+                    if (latest.userProfile) {
+                        state.gender        = latest.userProfile.gender  || state.gender;
+                        state.height        = latest.userProfile.height  || state.height;
+                        state.weight        = latest.userProfile.weight  || state.weight;
+                        state.bmi           = latest.userProfile.bmi     || state.bmi;
+                        state.fitnessGoal   = latest.userProfile.goal    || state.fitnessGoal;
+                    }
+                    populateResults();
+                    goToScreen(3);
+                    return;
+                }
+            } catch (e) {
+                // IndexedDB unavailable — fall through
+            }
+
+            // 3. No local data — check server for previous scans (handles cleared browser history)
+            if (state.accessToken) {
+                try {
+                    const serverScans = await fetchServerScans();
+                    if (serverScans.length > 0) {
+                        const latest = serverScans[0];
+                        state.analysisResult = latest.analysisResult;
+                        if (latest.imageData) {
+                            state.imageData = latest.imageData;
+                            state.hasImage = true;
+                        }
+                        if (latest.userProfile) {
+                            state.gender      = latest.userProfile.gender || state.gender;
+                            state.height      = latest.userProfile.height || state.height;
+                            state.weight      = latest.userProfile.weight || state.weight;
+                            state.bmi         = latest.userProfile.bmi    || state.bmi;
+                            state.fitnessGoal = latest.userProfile.goal   || state.fitnessGoal;
+                        }
+                        populateResults();
+                        goToScreen(3);
+                        return;
+                    }
+                } catch (e) { /* server unavailable or no scans — fall through */ }
+            }
+
+            // 4. Genuinely new user with no scans anywhere — go to Upload
+            goToScreen(1);
+        }
+
+        function updateUserMenu() {
+            const user = state.user;
+            const email = (user && user.email) || '';
+            const name = (user && (user.name || user.display_name || user.displayName)) || (email ? email.split('@')[0] : 'User');
+            const initials = getInitials(name);
+            const avatarUrl = (user && user.avatar_url) || null;
+
+            // Trigger button — avatar only
+            setAvatarContent('user-avatar', initials, avatarUrl);
+
+            // Dropdown greeting + header
+            document.getElementById('user-menu-greeting').textContent = 'Hello, ' + name;
+            document.getElementById('user-menu-header-email').textContent = email;
+            setAvatarContent('user-menu-header-avatar', initials, avatarUrl);
+
+            // Admin menu item
+            const adminItem = document.getElementById('user-menu-admin');
+            adminItem.style.display = (user && user.role === 'admin') ? 'flex' : 'none';
+        }
+
+        function getInitials(name) {
+            if (!name || name === 'User') return '';
+            const parts = name.trim().split(/\s+/);
+            if (parts.length >= 2) return (parts[0][0] + parts[parts.length - 1][0]).toUpperCase();
+            return parts[0][0].toUpperCase();
+        }
+
+        function setAvatarContent(elementId, initials, avatarUrl) {
+            const el = document.getElementById(elementId);
+            if (!el) return;
+            if (avatarUrl) {
+                const img = document.createElement('img');
+                img.src = avatarUrl;
+                img.alt = 'Avatar';
+                el.innerHTML = '';
+                el.appendChild(img);
+            } else if (initials) {
+                const span = document.createElement('span');
+                span.textContent = initials;
+                el.innerHTML = '';
+                el.appendChild(span);
+            }
+            // else keep the default SVG
+        }
+
+        function setupAuth() {
+            // Tab switching
+            document.querySelectorAll('.auth-tab').forEach(tab => {
+                tab.addEventListener('click', () => {
+                    const target = tab.dataset.tab;
+                    document.querySelectorAll('.auth-tab').forEach(t => t.classList.toggle('active', t === tab));
+                    document.getElementById('login-form').style.display = target === 'login' ? 'flex' : 'none';
+                    document.getElementById('register-form').style.display = target === 'register' ? 'flex' : 'none';
+                    document.getElementById('auth-verify').style.display = 'none';
+                    hideAuthMessage();
+                });
+            });
+
+            // Form submissions
+            document.getElementById('login-form').addEventListener('submit', handleLogin);
+            document.getElementById('register-form').addEventListener('submit', handleRegister);
+
+            // Password strength meter
+            document.getElementById('register-password').addEventListener('input', function () {
+                const pw = this.value;
+                const meter = document.getElementById('password-strength');
+                const label = document.getElementById('strength-label');
+                if (!pw) { meter.style.display = 'none'; return; }
+                meter.style.display = 'flex';
+                let score = 0;
+                if (pw.length >= 8) score++;
+                if (/[A-Z]/.test(pw) && /[a-z]/.test(pw)) score++;
+                if (/[0-9]/.test(pw)) score++;
+                if (/[^A-Za-z0-9]/.test(pw) && pw.length >= 12) score++;
+                const labels = ['', 'Weak', 'Fair', 'Good', 'Strong'];
+                meter.dataset.strength = score;
+                label.textContent = labels[score] || 'Weak';
+            });
+
+            document.getElementById('verify-submit').addEventListener('click', handleVerifyEmail);
+
+            // Back to login from verify
+            document.getElementById('back-to-login-link').addEventListener('click', () => {
+                document.getElementById('auth-verify').style.display = 'none';
+                document.getElementById('login-form').style.display = 'flex';
+                document.querySelector('.auth-tabs').style.display = 'flex';
+                document.querySelectorAll('.auth-tab').forEach(t => t.classList.toggle('active', t.dataset.tab === 'login'));
+                hideAuthMessage();
+            });
+
+            // Forgot password - show forgot password form
+            document.getElementById('forgot-password-link').addEventListener('click', () => {
+                document.getElementById('login-form').style.display = 'none';
+                document.querySelector('.auth-tabs').style.display = 'none';
+                document.getElementById('auth-forgot-password').style.display = 'block';
+            });
+
+            // Back to login from forgot password
+            document.getElementById('back-to-login-from-forgot').addEventListener('click', () => {
+                document.getElementById('auth-forgot-password').style.display = 'none';
+                document.getElementById('login-form').style.display = 'flex';
+                document.querySelector('.auth-tabs').style.display = 'flex';
+            });
+
+            // Forgot password submit
+            document.getElementById('forgot-submit').addEventListener('click', async () => {
+                const email = document.getElementById('forgot-email').value.trim();
+                if (!email) {
+                    showToast('Please enter your email address.', 'error');
+                    return;
+                }
+                if (!isValidEmail(email)) {
+                    showToast('Please enter a valid email address.', 'error');
+                    return;
+                }
+
+                const btn = document.getElementById('forgot-submit');
+                btn.querySelector('.auth-btn-text').style.display = 'none';
+                btn.querySelector('.auth-btn-spinner').style.display = 'inline-block';
+                btn.disabled = true;
+
+                try {
+                    const res = await apiFetch('/auth/forgot-password', {
+                        method: 'POST',
+                        body: JSON.stringify({ email }),
+                    });
+
+                    const data = await res.json().catch(() => ({}));
+                    showToast(data.message || 'If that email exists, a password reset link has been sent.', 'success');
+
+                    // Return to login after a moment
+                    setTimeout(() => {
+                        document.getElementById('auth-forgot-password').style.display = 'none';
+                        document.getElementById('login-form').style.display = 'flex';
+                        document.querySelector('.auth-tabs').style.display = 'flex';
+                    }, 2000);
+                } catch (err) {
+                    showToast(err.message || 'Failed to send reset email.', 'error');
+                } finally {
+                    btn.querySelector('.auth-btn-text').style.display = 'inline';
+                    btn.querySelector('.auth-btn-spinner').style.display = 'none';
+                    btn.disabled = false;
+                }
+            });
+
+            // Back to login from reset password
+            document.getElementById('back-to-login-from-reset').addEventListener('click', () => {
+                document.getElementById('auth-reset-password').style.display = 'none';
+                document.getElementById('login-form').style.display = 'flex';
+                document.querySelector('.auth-tabs').style.display = 'flex';
+                // Clear token from URL
+                window.history.replaceState({}, '', window.location.pathname);
+            });
+
+            // Reset password submit
+            document.getElementById('reset-password-submit').addEventListener('click', async () => {
+                const newPw = document.getElementById('reset-new-password').value;
+                const confirmPw = document.getElementById('reset-confirm-password').value;
+                const token = new URLSearchParams(window.location.search).get('reset_token');
+
+                if (!token) {
+                    showToast('Invalid reset link. Please request a new one.', 'error');
+                    return;
+                }
+                if (!newPw || !confirmPw) {
+                    showToast('Please fill in both password fields.', 'error');
+                    return;
+                }
+                if (newPw.length < 8) {
+                    showToast('Password must be at least 8 characters.', 'error');
+                    return;
+                }
+                if (!/[A-Z]/.test(newPw)) {
+                    showToast('Password must contain at least one uppercase letter.', 'error');
+                    return;
+                }
+                if (!/[a-z]/.test(newPw)) {
+                    showToast('Password must contain at least one lowercase letter.', 'error');
+                    return;
+                }
+                if (!/[0-9]/.test(newPw)) {
+                    showToast('Password must contain at least one number.', 'error');
+                    return;
+                }
+                if (newPw !== confirmPw) {
+                    showToast('Passwords do not match.', 'error');
+                    return;
+                }
+
+                const btn = document.getElementById('reset-password-submit');
+                btn.querySelector('.auth-btn-text').style.display = 'none';
+                btn.querySelector('.auth-btn-spinner').style.display = 'inline-block';
+                btn.disabled = true;
+
+                try {
+                    const res = await apiFetch('/auth/reset-password', {
+                        method: 'POST',
+                        body: JSON.stringify({ token, password: newPw }),
+                    });
+
+                    if (!res.ok) {
+                        const data = await res.json().catch(() => ({}));
+                        throw new Error((data.error && data.error.message) || data.message || 'Failed to reset password');
+                    }
+
+                    showToast('Password reset successfully! Please log in.', 'success');
+
+                    // Clear fields and go to login
+                    document.getElementById('reset-new-password').value = '';
+                    document.getElementById('reset-confirm-password').value = '';
+                    window.history.replaceState({}, '', window.location.pathname);
+
+                    setTimeout(() => {
+                        document.getElementById('auth-reset-password').style.display = 'none';
+                        document.getElementById('login-form').style.display = 'flex';
+                        document.querySelector('.auth-tabs').style.display = 'flex';
+                    }, 1500);
+                } catch (err) {
+                    showToast(err.message || 'Failed to reset password. The link may have expired.', 'error');
+                } finally {
+                    btn.querySelector('.auth-btn-text').style.display = 'inline';
+                    btn.querySelector('.auth-btn-spinner').style.display = 'none';
+                    btn.disabled = false;
+                }
+            });
+
+            // Check for reset_token in URL on page load
+            const resetToken = new URLSearchParams(window.location.search).get('reset_token');
+            if (resetToken) {
+                // Show the reset password form instead of login
+                document.getElementById('login-form').style.display = 'none';
+                document.getElementById('register-form').style.display = 'none';
+                document.querySelector('.auth-tabs').style.display = 'none';
+                document.getElementById('auth-reset-password').style.display = 'block';
+            }
+
+            // User menu setup
+            setupUserMenu();
+
+            // Auto-login: check localStorage for existing tokens (skip if resetting password)
+            const savedAccess = localStorage.getItem('fixit-access-token');
+            const savedRefresh = localStorage.getItem('fixit-refresh-token');
+            if (savedAccess && savedRefresh && !resetToken) {
+                state.accessToken = savedAccess;
+                state.refreshToken = savedRefresh;
+                // Validate token by trying to fetch user profile
+                apiFetch('/users/me').then(res => {
+                    if (res.ok) {
+                        return res.json().then(data => {
+                            state.user = data.user || data;
+                            // Keep cached user fresh for offline reloads
+                            localStorage.setItem('fixit-user', JSON.stringify(state.user));
+                            enterApp();
+                        });
+                    } else {
+                        // Tokens expired/invalid
+                        handleLogout();
+                    }
+                }).catch(() => {
+                    // Server unreachable — restore user from cache so userKey() works offline
+                    try {
+                        const cached = localStorage.getItem('fixit-user');
+                        if (cached) state.user = JSON.parse(cached);
+                    } catch (e) { /* ignore */ }
+                    enterApp();
+                });
+            } else {
+                // No tokens: hide nav steps, show auth
+                document.querySelector('.nav-steps').style.display = 'none';
+            }
+        }
+
+        // ========== PRE-BACKEND UTILITIES ==========
+
+        // Local Food Database Fallback (for offline/API failure — gets replaced by API data on load)
+        let LOCAL_FOOD_DATABASE = [
+            { name: 'Chicken Breast', calories: 165, protein: 31, carbs: 0, fats: 4, portion: '100g serving', icon: '🍗' },
+            { name: 'Salmon', calories: 208, protein: 20, carbs: 0, fats: 13, portion: '100g serving', icon: '🐟' },
+            { name: 'Brown Rice', calories: 112, protein: 2, carbs: 24, fats: 1, portion: '100g serving', icon: '🍚' },
+            { name: 'White Rice', calories: 130, protein: 3, carbs: 28, fats: 0, portion: '100g serving', icon: '🍚' },
+            { name: 'Eggs', calories: 155, protein: 13, carbs: 1, fats: 11, portion: '100g (2 eggs)', icon: '🥚' },
+            { name: 'Scrambled Eggs', calories: 149, protein: 10, carbs: 2, fats: 11, portion: '100g serving', icon: '🥚' },
+            { name: 'Boiled Eggs', calories: 155, protein: 13, carbs: 1, fats: 11, portion: '100g (2 eggs)', icon: '🥚' },
+            { name: 'Oatmeal', calories: 68, protein: 2, carbs: 12, fats: 1, portion: '100g serving', icon: '🥣' },
+            { name: 'Greek Yogurt', calories: 97, protein: 9, carbs: 4, fats: 5, portion: '100g serving', icon: '🥛' },
+            { name: 'Banana', calories: 89, protein: 1, carbs: 23, fats: 0, portion: '1 medium', icon: '🍌' },
+            { name: 'Apple', calories: 52, protein: 0, carbs: 14, fats: 0, portion: '1 medium', icon: '🍎' },
+            { name: 'Broccoli', calories: 34, protein: 3, carbs: 7, fats: 0, portion: '100g serving', icon: '🥦' },
+            { name: 'Sweet Potato', calories: 86, protein: 2, carbs: 20, fats: 0, portion: '100g serving', icon: '🍠' },
+            { name: 'Potato', calories: 77, protein: 2, carbs: 17, fats: 0, portion: '100g serving', icon: '🥔' },
+            { name: 'Beef Steak', calories: 271, protein: 26, carbs: 0, fats: 18, portion: '100g serving', icon: '🥩' },
+            { name: 'Ground Beef', calories: 250, protein: 26, carbs: 0, fats: 15, portion: '100g serving', icon: '🥩' },
+            { name: 'Turkey Breast', calories: 135, protein: 30, carbs: 0, fats: 1, portion: '100g serving', icon: '🍗' },
+            { name: 'Tuna', calories: 132, protein: 28, carbs: 0, fats: 1, portion: '100g serving', icon: '🐟' },
+            { name: 'Shrimp', calories: 85, protein: 20, carbs: 0, fats: 0, portion: '100g serving', icon: '🦐' },
+            { name: 'Pasta', calories: 131, protein: 5, carbs: 25, fats: 1, portion: '100g serving', icon: '🍝' },
+            { name: 'Bread', calories: 265, protein: 9, carbs: 49, fats: 3, portion: '100g (2-3 slices)', icon: '🍞' },
+            { name: 'Whole Wheat Bread', calories: 247, protein: 13, carbs: 41, fats: 3, portion: '100g serving', icon: '🍞' },
+            { name: 'Avocado', calories: 160, protein: 2, carbs: 9, fats: 15, portion: '100g serving', icon: '🥑' },
+            { name: 'Almonds', calories: 579, protein: 21, carbs: 22, fats: 50, portion: '100g serving', icon: '🥜' },
+            { name: 'Peanut Butter', calories: 588, protein: 25, carbs: 20, fats: 50, portion: '100g serving', icon: '🥜' },
+            { name: 'Milk', calories: 42, protein: 3, carbs: 5, fats: 1, portion: '100ml', icon: '🥛' },
+            { name: 'Cheese', calories: 402, protein: 25, carbs: 1, fats: 33, portion: '100g serving', icon: '🧀' },
+            { name: 'Cottage Cheese', calories: 98, protein: 11, carbs: 3, fats: 4, portion: '100g serving', icon: '🧀' },
+            { name: 'Pizza', calories: 266, protein: 11, carbs: 33, fats: 10, portion: '1 slice (100g)', icon: '🍕' },
+            { name: 'Burger', calories: 295, protein: 17, carbs: 24, fats: 14, portion: '1 patty with bun', icon: '🍔' },
+            { name: 'Salad', calories: 20, protein: 2, carbs: 3, fats: 0, portion: '100g serving', icon: '🥗' },
+            { name: 'Orange', calories: 47, protein: 1, carbs: 12, fats: 0, portion: '1 medium', icon: '🍊' },
+            { name: 'Grapes', calories: 69, protein: 1, carbs: 18, fats: 0, portion: '100g serving', icon: '🍇' },
+            { name: 'Strawberries', calories: 32, protein: 1, carbs: 8, fats: 0, portion: '100g serving', icon: '🍓' },
+            { name: 'Spinach', calories: 23, protein: 3, carbs: 4, fats: 0, portion: '100g serving', icon: '🥬' },
+            { name: 'Carrots', calories: 41, protein: 1, carbs: 10, fats: 0, portion: '100g serving', icon: '🥕' },
+            { name: 'Corn', calories: 86, protein: 3, carbs: 19, fats: 1, portion: '100g serving', icon: '🌽' },
+            { name: 'Beans', calories: 127, protein: 9, carbs: 23, fats: 0, portion: '100g serving', icon: '🫘' },
+            { name: 'Lentils', calories: 116, protein: 9, carbs: 20, fats: 0, portion: '100g serving', icon: '🫘' },
+            { name: 'Tofu', calories: 76, protein: 8, carbs: 2, fats: 5, portion: '100g serving', icon: '🧈' },
+            { name: 'Quinoa', calories: 120, protein: 4, carbs: 21, fats: 2, portion: '100g serving', icon: '🌾' },
+            { name: 'Coffee', calories: 2, protein: 0, carbs: 0, fats: 0, portion: '1 cup (240ml)', icon: '☕' },
+            { name: 'Orange Juice', calories: 45, protein: 1, carbs: 10, fats: 0, portion: '100ml', icon: '🍊' },
+            { name: 'Protein Shake', calories: 120, protein: 25, carbs: 3, fats: 1, portion: '1 scoop (30g)', icon: '🥤' },
+            { name: 'Whey Protein', calories: 120, protein: 24, carbs: 3, fats: 2, portion: '1 scoop (30g)', icon: '🥤' }
+        ];
+
+        let _foodDbLoaded = false;
+
+        async function loadFoodDatabase() {
+            if (_foodDbLoaded) return;
+            try {
+                const res = await fetch('/api/nutrition/foods');
+                if (!res.ok) return;
+                const rows = await res.json();
+                if (rows.length > 0) {
+                    LOCAL_FOOD_DATABASE = rows.map(r => ({
+                        name: r.name,
+                        calories: r.calories,
+                        protein: r.protein,
+                        carbs: r.carbs,
+                        fats: r.fats,
+                        portion: r.portion || '100g serving',
+                        icon: r.icon || '🍽️',
+                    }));
+                    _foodDbLoaded = true;
+                }
+            } catch (e) {
+                console.warn('Could not load food database from API:', e);
+            }
+        }
+
+        // Search local food database
+        function searchLocalFoods(query) {
+            const q = query.toLowerCase().trim();
+            if (!q) return [];
+            return LOCAL_FOOD_DATABASE.filter(food =>
+                food.name.toLowerCase().includes(q)
+            ).slice(0, 10);
+        }
+
+        // Nutrition API key for api-ninjas.com (free tier, client-side only).
+        // NOTE: In production, this should be proxied through the backend to avoid exposure.
+        // For this school project, it's acceptable as a free API key with rate limits.
+        const _NUTRITION_API_KEY = 'dVJQPgDsCyccGlMqeVhAU3tdWzNtolzSrcVQLggN';
+
+        function getApiKey() {
+            return _NUTRITION_API_KEY;
+        }
+
+        // State Persistence Functions
+        function saveSessionState() {
+            try {
+                const sessionData = {
+                    gender: state.gender,
+                    height: state.height,
+                    weight: state.weight,
+                    age: state.age,
+                    bmi: state.bmi,
+                    bmiCategory: state.bmiCategory,
+                    fitnessGoal: state.fitnessGoal,
+                    experienceLevel: state.experienceLevel,
+                    analysisResult: state.analysisResult,
+                    landmarks: state.landmarks,
+                    currentScreen: state.currentScreen,
+                    coachPersona: state.coachPersona,
+                    savedAt: new Date().toISOString()
+                };
+                localStorage.setItem(userKey('fixit-session-state'), JSON.stringify(sessionData));
+
+                // Save image separately (can be large)
+                if (state.imageData) {
+                    try {
+                        localStorage.setItem(userKey('fixit-session-image'), state.imageData);
+                    } catch (e) {
+                        dbg.warn('Image too large for localStorage, skipping image persistence');
+                    }
+                }
+            } catch (e) {
+                dbg.warn('Failed to save session state:', e);
+            }
+        }
+
+        function loadSessionState() {
+            try {
+                const saved = localStorage.getItem(userKey('fixit-session-state'));
+                if (!saved) return false;
+
+                const sessionData = JSON.parse(saved);
+
+                // Check if session is recent
+                const SESSION_EXPIRY_HOURS = 24;
+                const savedAt = new Date(sessionData.savedAt);
+                const hoursSince = (Date.now() - savedAt.getTime()) / (1000 * 60 * 60);
+                if (hoursSince > SESSION_EXPIRY_HOURS) {
+                    clearSessionState();
+                    return false;
+                }
+
+                // Restore state
+                state.gender = sessionData.gender;
+                state.height = sessionData.height;
+                state.weight = sessionData.weight;
+                state.age = sessionData.age || null;
+                state.bmi = sessionData.bmi;
+                state.bmiCategory = sessionData.bmiCategory;
+                state.fitnessGoal = sessionData.fitnessGoal;
+                state.experienceLevel = sessionData.experienceLevel || 'intermediate';
+                state.analysisResult = sessionData.analysisResult;
+                state.landmarks = sessionData.landmarks || null;
+                state.coachPersona = sessionData.coachPersona || 'encouraging';
+
+                // Restore image
+                const savedImage = localStorage.getItem(userKey('fixit-session-image'));
+                if (savedImage) {
+                    state.imageData = savedImage;
+                    state.hasImage = true;
+                }
+
+                return sessionData.analysisResult !== null;
+            } catch (e) {
+                dbg.warn('Failed to load session state:', e);
+                return false;
+            }
+        }
+
+        function clearSessionState() {
+            localStorage.removeItem(userKey('fixit-session-state'));
+            localStorage.removeItem(userKey('fixit-session-image'));
+        }
+
+        function restoreUIFromState() {
+            // Restore form inputs
+            if (state.height) {
+                const heightInput = document.getElementById('height-input');
+                if (heightInput) heightInput.value = state.height;
+            }
+            if (state.weight) {
+                const weightInput = document.getElementById('weight-input');
+                if (weightInput) weightInput.value = state.weight;
+            }
+            if (state.gender) {
+                const genderSelect = document.getElementById('gender-select');
+                if (genderSelect) genderSelect.value = state.gender;
+            }
+            if (state.age) {
+                // Find the age-range option whose midpoint matches stored age
+                const ageRangeEl = document.getElementById('age-range');
+                if (ageRangeEl) {
+                    const map = { 21: '18-24', 29: '25-34', 39: '35-44', 49: '45-54', 57: '55+' };
+                    ageRangeEl.value = map[state.age] || '';
+                }
+            }
+            if (state.fitnessGoal) {
+                document.querySelectorAll('.goal-option').forEach(btn => {
+                    btn.classList.toggle('active', btn.dataset.goal === state.fitnessGoal);
+                });
+            }
+
+            // Restore image preview
+            if (state.imageData) {
+                const uploadPreview = document.getElementById('upload-preview');
+                const previewImage = document.getElementById('preview-image');
+                const uploadZone = document.getElementById('upload-zone');
+                if (uploadPreview && previewImage && uploadZone) {
+                    previewImage.src = state.imageData;
+                    uploadPreview.classList.add('has-image');
+                    uploadZone.style.display = 'none';
+                    state.hasImage = true;
+                }
+            }
+
+            // Update BMI preview
+            updateBMIPreview();
+            updateAnalyzeButton();
+        }
+
+        // Data Export Function - Generates PDF Report
+        async function exportUserData() {
+            try {
+                const { jsPDF } = window.jspdf;
+                const doc = new jsPDF();
+                const pageWidth = doc.internal.pageSize.getWidth();
+                const margin = 20;
+                let y = 20;
+
+                // Helper functions
+                const addTitle = (text, size = 16) => {
+                    doc.setFontSize(size);
+                    doc.setFont('helvetica', 'bold');
+                    doc.setTextColor(40, 40, 40);
+                    doc.text(text, margin, y);
+                    y += size * 0.5 + 4;
+                };
+
+                const addText = (text, indent = 0) => {
+                    doc.setFontSize(11);
+                    doc.setFont('helvetica', 'normal');
+                    doc.setTextColor(60, 60, 60);
+                    const lines = doc.splitTextToSize(text, pageWidth - margin * 2 - indent);
+                    doc.text(lines, margin + indent, y);
+                    y += lines.length * 6;
+                };
+
+                const addLabelValue = (label, value, indent = 0) => {
+                    doc.setFontSize(11);
+                    doc.setFont('helvetica', 'bold');
+                    doc.setTextColor(80, 80, 80);
+                    doc.text(label + ':', margin + indent, y);
+                    doc.setFont('helvetica', 'normal');
+                    doc.setTextColor(40, 40, 40);
+                    doc.text(String(value || 'N/A'), margin + indent + 50, y);
+                    y += 7;
+                };
+
+                const addSectionDivider = () => {
+                    y += 5;
+                    doc.setDrawColor(200, 200, 200);
+                    doc.line(margin, y, pageWidth - margin, y);
+                    y += 10;
+                };
+
+                const checkPageBreak = (needed = 40) => {
+                    if (y + needed > doc.internal.pageSize.getHeight() - 20) {
+                        doc.addPage();
+                        y = 20;
+                    }
+                };
+
+                // Header
+                doc.setFillColor(201, 169, 98); // Champagne gold
+                doc.rect(0, 0, pageWidth, 35, 'F');
+                doc.setFontSize(24);
+                doc.setFont('helvetica', 'bold');
+                doc.setTextColor(255, 255, 255);
+                doc.text('FiX-it', margin, 22);
+                doc.setFontSize(12);
+                doc.setFont('helvetica', 'normal');
+                doc.text('Body Analysis Report', margin, 30);
+                doc.setFontSize(10);
+                doc.text(new Date().toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' }), pageWidth - margin - 50, 26);
+                y = 50;
+
+                // Profile Section
+                addTitle('Your Profile');
+                const goalLabels = { 'lose-weight': 'Lose Weight', 'build-muscle': 'Build Muscle', 'maintain': 'Maintain', 'recomp': 'Body Recomposition' };
+                addLabelValue('Height', state.height ? `${state.height} cm` : 'Not set');
+                addLabelValue('Weight', state.weight ? `${state.weight} kg` : 'Not set');
+                addLabelValue('BMI', state.bmi ? `${state.bmi.toFixed(1)}` : 'Not calculated');
+                addLabelValue('Gender', state.gender ? state.gender.charAt(0).toUpperCase() + state.gender.slice(1) : 'Not set');
+                addLabelValue('Fitness Goal', goalLabels[state.fitnessGoal] || 'Not set');
+
+                addSectionDivider();
+
+                // Analysis Results
+                if (state.analysisResult) {
+                    checkPageBreak(80);
+                    addTitle('Latest Analysis Results');
+                    const r = state.analysisResult;
+                    const bodyComp = r.bodyComposition || {};
+                    const muscleTone = r.muscleTone || {};
+                    const posture = r.posture || {};
+                    const overview = r.overview || {};
+
+                    // Main scores
+                    addLabelValue('Fitness Index', overview.fitnessIndex || 'N/A');
+                    addLabelValue('Overall Grade', overview.overallGrade || 'N/A');
+                    addLabelValue('Body Composition Score', bodyComp.score ? `${bodyComp.score}/100` : 'N/A');
+                    addLabelValue('Muscle Tone Score', muscleTone.score ? `${muscleTone.score}/100` : 'N/A');
+                    addLabelValue('Posture Score', posture.score ? `${posture.score}/100` : 'N/A');
+                    addLabelValue('Symmetry', overview.symmetryScore ? `${overview.symmetryScore}%` : 'N/A');
+                    addLabelValue('Visual Age', overview.visualAge ? `${overview.visualAge} years` : 'N/A');
+
+                    y += 5;
+                    addText('Body Composition Details:');
+                    addLabelValue('Body Type', bodyComp.bodyType || 'N/A', 10);
+                    addLabelValue('Category', bodyComp.category || 'N/A', 10);
+                    addLabelValue('Lean Mass Estimate', bodyComp.leanMassEstimate || 'N/A', 10);
+
+                    y += 5;
+                    addText('Muscle Tone Distribution:');
+                    addLabelValue('Upper Body', muscleTone.upperBody || 'N/A', 10);
+                    addLabelValue('Core', muscleTone.core || 'N/A', 10);
+                    addLabelValue('Lower Body', muscleTone.lowerBody || 'N/A', 10);
+
+                    y += 5;
+                    addText('Posture Analysis:');
+                    addLabelValue('Shoulder Alignment', posture.shoulderAlignment || 'N/A', 10);
+                    addLabelValue('Spine Assessment', posture.spineAssessment || 'N/A', 10);
+                    addLabelValue('Hip Alignment', posture.hipAlignment || 'N/A', 10);
+
+                    addSectionDivider();
+                }
+
+                // Gamification Stats
+                checkPageBreak(60);
+                addTitle('Your Progress Stats');
+                const totalXP = localStorage.getItem(userKey('fixit-total-xp')) || '0';
+                const currentStreak = localStorage.getItem(userKey('fixit-workout-streak')) || '0';
+                const bestStreak = localStorage.getItem(userKey('fixit-best-streak')) || '0';
+                const totalWorkouts = localStorage.getItem(userKey('fixit-total-workouts')) || '0';
+                const totalAnalyses = localStorage.getItem(userKey('fixit-total-analyses')) || '0';
+
+                addLabelValue('Total XP', `${totalXP} XP`);
+                addLabelValue('Current Streak', `${currentStreak} days`);
+                addLabelValue('Best Streak', `${bestStreak} days`);
+                addLabelValue('Total Workouts', totalWorkouts);
+                addLabelValue('Total Analyses', totalAnalyses);
+
+                // Achievements
+                const achievements = JSON.parse(localStorage.getItem(userKey('fixit-achievements')) || '[]');
+                if (achievements.length > 0) {
+                    y += 5;
+                    addText('Unlocked Achievements:');
+                    achievements.forEach(a => {
+                        addText(`• ${a}`, 10);
+                    });
+                }
+
+                addSectionDivider();
+
+                // Scan History
+                checkPageBreak(40);
+                addTitle('Scan History');
+                try {
+                    const snapshots = await getMergedSnapshots();
+                    if (snapshots.length > 0) {
+                        addText(`You have ${snapshots.length} saved scan(s).`);
+                        y += 5;
+                        snapshots.slice(0, 10).forEach((s, i) => {
+                            checkPageBreak(25);
+                            const date = new Date(s.date).toLocaleDateString('en-US', { year: 'numeric', month: 'short', day: 'numeric' });
+                            const fitnessIndex = s.analysisResult?.overview?.fitnessIndex || 'N/A';
+                            const bodyScore = s.analysisResult?.bodyComposition?.score || 'N/A';
+                            addText(`${i + 1}. ${date} - Fitness: ${fitnessIndex}, Body Score: ${bodyScore}/100`, 5);
+                        });
+                        if (snapshots.length > 10) {
+                            addText(`... and ${snapshots.length - 10} more scans`, 5);
+                        }
+                    } else {
+                        addText('No scans saved yet. Complete an analysis to start tracking your progress!');
+                    }
+                } catch (e) {
+                    addText('Could not load scan history.');
+                }
+
+                // ---- Weekly Report ----
+                checkPageBreak(60);
+                addTitle('This Week\'s Report');
+                const now = new Date();
+                const sow = new Date(now); sow.setDate(now.getDate() - now.getDay()); sow.setHours(0,0,0,0);
+                const sowStr = sow.toISOString().split('T')[0];
+                const wkWorkouts = getWorkoutLog().filter(s => s.date && s.date >= sowStr).length;
+                const wkSleepEntries = getSleepLog().filter(e => e.date >= sowStr);
+                const wkAvgSleep = wkSleepEntries.length
+                    ? (wkSleepEntries.reduce((s,e) => s+e.hours,0)/wkSleepEntries.length).toFixed(1) : 'N/A';
+                addLabelValue('Workouts This Week', wkWorkouts);
+                addLabelValue('Avg Sleep This Week', wkAvgSleep !== 'N/A' ? `${wkAvgSleep}h` : 'N/A');
+                addLabelValue('Current Streak', `${currentStreak} days`);
+                addSectionDivider();
+
+                // ---- Goal Weight & Weight Log ----
+                checkPageBreak(70);
+                addTitle('Weight Tracker');
+                const goalData = JSON.parse(localStorage.getItem(userKey('fixit-goal-weight')) || 'null');
+                if (goalData) {
+                    addLabelValue('Start Weight', `${goalData.start} kg`);
+                    addLabelValue('Goal Weight', `${goalData.goal} kg`);
+                }
+                const wLog = getWeightLog();
+                if (wLog.length > 0) {
+                    addLabelValue('Current Weight', `${wLog[0].weight} kg (logged ${wLog[0].date})`);
+                    if (goalData) {
+                        const pct = Math.min(100, Math.round(
+                            Math.abs(wLog[0].weight - goalData.start) /
+                            Math.max(0.1, Math.abs(goalData.goal - goalData.start)) * 100
+                        ));
+                        addLabelValue('Goal Progress', `${pct}%`);
+                    }
+                    y += 4;
+                    addText('Recent Entries (newest first):');
+                    wLog.slice(0,10).forEach(e => { addText(`• ${e.date}  —  ${e.weight} kg`, 10); });
+                } else {
+                    addText('No weight entries logged yet.');
+                }
+                addSectionDivider();
+
+                // ---- Sleep & Recovery ----
+                checkPageBreak(70);
+                addTitle('Sleep & Recovery');
+                const sLog = getSleepLog();
+                if (sLog.length > 0) {
+                    const last7 = sLog.slice(0,7);
+                    const avgH = (last7.reduce((s,e)=>s+e.hours,0)/last7.length).toFixed(1);
+                    const recov = computeRecoveryScore(sLog);
+                    addLabelValue('7-Day Avg Sleep', `${avgH}h`);
+                    addLabelValue('Recovery Score', recov !== null ? `${recov}/100` : 'N/A');
+                    let goodStreak = 0;
+                    for (const e of sLog) { if(e.hours>=7&&e.quality!=='poor') goodStreak++; else break; }
+                    addLabelValue('Good Nights Streak', `${goodStreak} nights`);
+                    y += 4;
+                    addText('Recent Nights (newest first):');
+                    sLog.slice(0,10).forEach(e => {
+                        addText(`• ${e.date}  —  ${e.hours}h  (${e.quality})`, 10);
+                    });
+                } else {
+                    addText('No sleep entries logged yet.');
+                }
+                addSectionDivider();
+
+                // ---- Personal Records ----
+                checkPageBreak(60);
+                addTitle('Personal Records (PRs)');
+                const liftData = JSON.parse(localStorage.getItem(userKey('fixit-lift-log')) || '{}');
+                const liftEntries = Object.entries(liftData);
+                if (liftEntries.length > 0) {
+                    addText(`${liftEntries.length} exercise(s) tracked:`);
+                    y += 4;
+                    liftEntries.sort((a,b) => new Date(b[1].date||0) - new Date(a[1].date||0))
+                        .slice(0,15).forEach(([name, pr]) => {
+                            checkPageBreak(10);
+                            const e1rm = pr.reps === 1 ? pr.weight : Math.round(pr.weight*(1+pr.reps/30));
+                            addText(`• ${name}: ${pr.weight}kg × ${pr.reps} reps  (e1RM: ${e1rm}kg,  ${pr.date||'—'})`, 10);
+                        });
+                } else {
+                    addText('No lift records yet. Log lifts after completing a workout.');
+                }
+                addSectionDivider();
+
+                // ---- Body Measurements ----
+                checkPageBreak(60);
+                addTitle('Body Measurements');
+                const measLog = getMeasurementLog();
+                if (measLog.length > 0) {
+                    const latest = measLog[0];
+                    const prev   = measLog[1] || {};
+                    addLabelValue('Logged On', latest.date);
+                    ['chest','waist','hips','arms'].forEach(k => {
+                        if (latest[k] != null) {
+                            const delta = prev[k] != null ? ` (${latest[k]-prev[k] > 0 ? '+':''}${(latest[k]-prev[k]).toFixed(1)} cm)` : '';
+                            addLabelValue(k.charAt(0).toUpperCase()+k.slice(1), `${latest[k]} cm${delta}`, 10);
+                        }
+                    });
+                    addLabelValue('Total Entries', measLog.length);
+                } else {
+                    addText('No measurements logged yet.');
+                }
+                addSectionDivider();
+
+                // ---- Nutrition History ----
+                checkPageBreak(70);
+                addTitle('Nutrition History');
+                const cLog = getCalorieLog();
+                if (cLog.length > 0) {
+                    const goalCalStr = state.macroTargets?.calories ? `${state.macroTargets.calories} kcal` : 'not set';
+                    addLabelValue('Daily Calorie Goal', goalCalStr);
+                    const last7cal = cLog.slice(0, 7);
+                    const avg7 = Math.round(last7cal.reduce((s,e) => s + e.calories, 0) / last7cal.length);
+                    addLabelValue('7-Day Avg Calories', `${avg7} kcal`);
+                    y += 4;
+                    addText('Recent Days (newest first):');
+                    cLog.slice(0, 14).forEach(e => {
+                        checkPageBreak(8);
+                        addText(`• ${e.date}  —  ${e.calories} kcal  (P:${e.protein}g  C:${e.carbs}g  F:${e.fats}g)`, 10);
+                    });
+                    if (cLog.length > 14) addText(`... and ${cLog.length - 14} more days`, 5);
+                } else {
+                    addText('No nutrition data cached yet. Open the Nutrition screen while logged in to start tracking.');
+                }
+                addSectionDivider();
+
+                // ---- Workout History ----
+                checkPageBreak(60);
+                addTitle('Recent Workouts');
+                const wkLog = getWorkoutLog();
+                if (wkLog.length > 0) {
+                    addText(`${wkLog.length} workout session(s) on record:`);
+                    y += 4;
+                    wkLog.slice(0,10).forEach((s, i) => {
+                        checkPageBreak(18);
+                        const dur = s.duration ? `${Math.floor(s.duration/60)}m` : '—';
+                        const cal = s.caloriesBurned ? `  ${s.caloriesBurned} kcal` : '';
+                        const exCount = s.exercises?.length || 0;
+                        addText(`${i+1}. ${s.date||'—'}  —  ${s.label||'Workout'}  ·  ${dur}  ·  ${exCount} exercises${cal}`, 5);
+                    });
+                    if (wkLog.length > 10) addText(`... and ${wkLog.length-10} more sessions`, 5);
+                } else {
+                    addText('No workout sessions logged yet.');
+                }
+                addSectionDivider();
+
+                // Footer
+                const footerY = doc.internal.pageSize.getHeight() - 25;
+                if (y < footerY - 10) y = footerY;
+                checkPageBreak(25);
+                y = doc.internal.pageSize.getHeight() - 25;
+                doc.setDrawColor(200, 200, 200);
+                doc.line(margin, y, pageWidth - margin, y);
+                y += 8;
+                doc.setFontSize(9);
+                doc.setTextColor(150, 150, 150);
+                doc.text('Generated by FiX-it Body Analysis App', margin, y);
+                doc.text('Educational Use Only - Not Medical Advice', pageWidth - margin - 60, y);
+
+                // Save the PDF
+                doc.save(`FiX-it-Report-${new Date().toISOString().split('T')[0]}.pdf`);
+
+                return true;
+            } catch (e) {
+                dbg.error('Export failed:', e);
+                showToast('Failed to export PDF. Please try again.', 'error');
+                return false;
+            }
+        }
+
+        // Clear All Data Function
+        async function clearAllData() {
+            try {
+                // Clear only the current user's localStorage items (keep theme, keep other users' data)
+                const uid = state.user && state.user.id;
+                const keysToRemove = [];
+                for (let i = 0; i < localStorage.length; i++) {
+                    const key = localStorage.key(i);
+                    if (!key || !key.startsWith('fixit-')) continue;
+                    // Skip auth tokens (shared)
+                    if (key === 'fixit-access-token' || key === 'fixit-refresh-token') continue;
+                    // Skip theme keys (keep per-user themes)
+                    if (key.startsWith('fixit-theme')) continue;
+                    // If user is logged in, only remove keys belonging to this user
+                    if (uid) {
+                        if (key.endsWith('-' + uid)) keysToRemove.push(key);
+                    } else {
+                        // No user context — remove unscoped keys only
+                        keysToRemove.push(key);
+                    }
+                }
+                keysToRemove.forEach(key => localStorage.removeItem(key));
+
+                // Clear IndexedDB
+                try {
+                    const db = await openSnapshotDB();
+                    const tx = db.transaction(SNAPSHOT_STORE, 'readwrite');
+                    tx.objectStore(SNAPSHOT_STORE).clear();
+                    await new Promise((resolve, reject) => {
+                        tx.oncomplete = resolve;
+                        tx.onerror = reject;
+                    });
+                } catch (e) {
+                    dbg.warn('Could not clear IndexedDB:', e);
+                }
+
+                // Reset state
+                state.gender = null;
+                state.height = null;
+                state.weight = null;
+                state.bmi = null;
+                state.bmiCategory = null;
+                state.fitnessGoal = null;
+                state.imageData = null;
+                state.hasImage = false;
+                state.analysisResult = null;
+                state.landmarks = null;
+
+                return true;
+            } catch (e) {
+                dbg.error('Clear data failed:', e);
+                return false;
+            }
+        }
+
+        // Storage Quota Management
+        async function checkStorageQuota() {
+            if (!navigator.storage || !navigator.storage.estimate) {
+                return { used: 0, quota: 0, percentUsed: 0, warning: false };
+            }
+            try {
+                const estimate = await navigator.storage.estimate();
+                const used = estimate.usage || 0;
+                const quota = estimate.quota || 0;
+                const percentUsed = quota > 0 ? Math.round((used / quota) * 100) : 0;
+                return {
+                    used,
+                    quota,
+                    percentUsed,
+                    usedMB: Math.round(used / (1024 * 1024)),
+                    quotaMB: Math.round(quota / (1024 * 1024)),
+                    warning: percentUsed > 80,
+                    critical: percentUsed > 95
+                };
+            } catch (e) {
+                return { used: 0, quota: 0, percentUsed: 0, warning: false };
+            }
+        }
+
+        async function showStorageWarningIfNeeded() {
+            const storage = await checkStorageQuota();
+            if (storage.critical) {
+                const msg = `Storage is almost full (${storage.percentUsed}% used). Consider deleting old scans to free up space. Open Progress screen to manage scans?`;
+                const yes = await showConfirmModal(msg, { okLabel: 'Open Progress', safe: true });
+                if (yes) goToScreen(8);
+            } else if (storage.warning) {
+                dbg.warn(`Storage usage: ${storage.percentUsed}% (${storage.usedMB}MB / ${storage.quotaMB}MB)`);
+            }
+        }
+
+        // Error Handling with Retries
+        async function fetchWithRetry(url, options = {}, maxRetries = 3) {
+            let lastError;
+            for (let attempt = 1; attempt <= maxRetries; attempt++) {
+                try {
+                    // Create timeout signal with browser compatibility fallback
+                    let timeoutSignal;
+                    let timeoutId;
+                    if (typeof AbortSignal.timeout === 'function') {
+                        timeoutSignal = AbortSignal.timeout(10000);
+                    } else {
+                        // Fallback for older browsers
+                        const controller = new AbortController();
+                        timeoutSignal = controller.signal;
+                        timeoutId = setTimeout(() => controller.abort(), 10000);
+                    }
+
+                    const response = await fetch(url, {
+                        ...options,
+                        signal: timeoutSignal
+                    });
+
+                    if (timeoutId) clearTimeout(timeoutId);
+
+                    if (!response.ok && attempt < maxRetries) {
+                        throw new Error(`HTTP ${response.status}`);
+                    }
+                    return response;
+                } catch (e) {
+                    lastError = e;
+                    if (attempt < maxRetries) {
+                        // Exponential backoff: 1s, 2s, 4s
+                        await new Promise(r => setTimeout(r, 1000 * Math.pow(2, attempt - 1)));
+                    }
+                }
+            }
+            throw lastError;
+        }
+
+        // Audio Cues for Workout Player
+        const audioContext = typeof AudioContext !== 'undefined' ? new AudioContext() : null;
+
+        function playBeep(frequency = 800, duration = 150, volume = 0.3) {
+            if (!audioContext) return;
+            try {
+                // Resume context if suspended (required for user interaction policy)
+                if (audioContext.state === 'suspended') {
+                    audioContext.resume();
+                }
+
+                const oscillator = audioContext.createOscillator();
+                const gainNode = audioContext.createGain();
+
+                oscillator.connect(gainNode);
+                gainNode.connect(audioContext.destination);
+
+                oscillator.frequency.value = frequency;
+                oscillator.type = 'sine';
+
+                gainNode.gain.setValueAtTime(volume, audioContext.currentTime);
+                gainNode.gain.exponentialRampToValueAtTime(0.01, audioContext.currentTime + duration / 1000);
+
+                oscillator.start(audioContext.currentTime);
+                oscillator.stop(audioContext.currentTime + duration / 1000);
+            } catch (e) {
+                // Silent fail - audio is non-critical
+            }
+        }
+
+        function playCountdownBeep() {
+            playBeep(600, 100, 0.2); // Short low beep
+        }
+
+        function playStartBeep() {
+            playBeep(880, 200, 0.3); // Higher beep for start
+        }
+
+        function playCompleteBeep() {
+            // Play a pleasant two-tone
+            playBeep(523, 150, 0.25); // C5
+            setTimeout(() => playBeep(659, 200, 0.25), 150); // E5
+        }
+
+        function playRestBeep() {
+            playBeep(440, 150, 0.2); // A4 - rest notification
+        }
+
+        // Toast Notification System
+        function showToast(message, type = 'info', duration = 4000) {
+            const container = document.getElementById('toast-container');
+            if (!container) return;
+
+            const icons = {
+                success: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>',
+                error: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="15" y1="9" x2="9" y2="15"/><line x1="9" y1="9" x2="15" y2="15"/></svg>',
+                warning: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>',
+                info: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg>'
+            };
+
+            const toast = document.createElement('div');
+            toast.className = `toast toast-${type}`;
+            toast.innerHTML = `
+                <span class="toast-icon">${icons[type] || icons.info}</span>
+                <span class="toast-message">${escapeHtml(message)}</span>
+                <button class="toast-close" aria-label="Close">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/>
+                    </svg>
+                </button>
+            `;
+
+            const closeBtn = toast.querySelector('.toast-close');
+            const removeToast = () => {
+                toast.classList.add('hiding');
+                setTimeout(() => toast.remove(), 300);
+            };
+
+            closeBtn.addEventListener('click', removeToast);
+            container.appendChild(toast);
+
+            if (duration > 0) {
+                setTimeout(removeToast, duration);
+            }
+
+            return toast;
+        }
+
+        function showConfirmModal(message, { okLabel = 'Confirm', cancelLabel = 'Cancel', safe = false } = {}) {
+            return new Promise(resolve => {
+                const overlay = document.getElementById('confirm-overlay');
+                const msgEl = document.getElementById('confirm-message');
+                const okBtn = document.getElementById('confirm-ok');
+                const cancelBtn = document.getElementById('confirm-cancel');
+                msgEl.textContent = message;
+                okBtn.textContent = okLabel;
+                cancelBtn.textContent = cancelLabel;
+                okBtn.classList.toggle('confirm-btn--safe', safe);
+                overlay.style.display = 'flex';
+                function cleanup(val) {
+                    overlay.style.display = 'none';
+                    okBtn.removeEventListener('click', onOk);
+                    cancelBtn.removeEventListener('click', onCancel);
+                    overlay.removeEventListener('click', onOverlay);
+                    resolve(val);
+                }
+                function onOk() { cleanup(true); }
+                function onCancel() { cleanup(false); }
+                function onOverlay(e) { if (e.target === overlay) cleanup(false); }
+                okBtn.addEventListener('click', onOk);
+                cancelBtn.addEventListener('click', onCancel);
+                overlay.addEventListener('click', onOverlay);
+            });
+        }
+
+        // Input Quality Guidance
+        function analyzeImageQuality(imageData) {
+            return new Promise((resolve) => {
+                const img = new Image();
+                img.onload = () => {
+                    const canvas = document.createElement('canvas');
+                    const ctx = canvas.getContext('2d');
+
+                    // Sample at reduced size for performance
+                    const sampleSize = 200;
+                    canvas.width = sampleSize;
+                    canvas.height = sampleSize;
+                    ctx.drawImage(img, 0, 0, sampleSize, sampleSize);
+
+                    const imageData = ctx.getImageData(0, 0, sampleSize, sampleSize);
+                    const data = imageData.data;
+
+                    // Calculate brightness
+                    let totalBrightness = 0;
+                    let brightPixels = 0;
+                    let darkPixels = 0;
+
+                    for (let i = 0; i < data.length; i += 4) {
+                        const r = data[i];
+                        const g = data[i + 1];
+                        const b = data[i + 2];
+                        const brightness = (r + g + b) / 3;
+                        totalBrightness += brightness;
+                        if (brightness > 200) brightPixels++;
+                        if (brightness < 50) darkPixels++;
+                    }
+
+                    const pixelCount = data.length / 4;
+                    const avgBrightness = totalBrightness / pixelCount;
+                    const overexposedRatio = brightPixels / pixelCount;
+                    const underexposedRatio = darkPixels / pixelCount;
+
+                    // Calculate contrast (standard deviation of brightness)
+                    let varianceSum = 0;
+                    for (let i = 0; i < data.length; i += 4) {
+                        const brightness = (data[i] + data[i + 1] + data[i + 2]) / 3;
+                        varianceSum += Math.pow(brightness - avgBrightness, 2);
+                    }
+                    const contrast = Math.sqrt(varianceSum / pixelCount);
+
+                    // Calculate resolution score
+                    const resolutionScore = Math.min(100, Math.round((img.width * img.height) / 10000));
+
+                    // Determine quality issues
+                    const issues = [];
+                    let overallScore = 100;
+
+                    if (avgBrightness < 60) {
+                        issues.push({ type: 'lighting', message: 'Image is too dark - try better lighting', severity: 'warning' });
+                        overallScore -= 20;
+                    } else if (avgBrightness > 200) {
+                        issues.push({ type: 'lighting', message: 'Image is overexposed - reduce lighting', severity: 'warning' });
+                        overallScore -= 15;
+                    }
+
+                    if (overexposedRatio > 0.3) {
+                        issues.push({ type: 'exposure', message: 'Parts of image are washed out', severity: 'info' });
+                        overallScore -= 10;
+                    }
+
+                    if (underexposedRatio > 0.4) {
+                        issues.push({ type: 'shadows', message: 'Too many dark areas - improve lighting', severity: 'warning' });
+                        overallScore -= 15;
+                    }
+
+                    if (contrast < 30) {
+                        issues.push({ type: 'contrast', message: 'Low contrast - ensure background differs from subject', severity: 'info' });
+                        overallScore -= 10;
+                    }
+
+                    if (img.width < 400 || img.height < 500) {
+                        issues.push({ type: 'resolution', message: 'Image resolution is low - use higher quality photo', severity: 'warning' });
+                        overallScore -= 20;
+                    }
+
+                    // Aspect ratio check (should be roughly portrait)
+                    const aspectRatio = img.width / img.height;
+                    if (aspectRatio > 1.2) {
+                        issues.push({ type: 'orientation', message: 'Use portrait orientation for better results', severity: 'info' });
+                        overallScore -= 5;
+                    }
+
+                    resolve({
+                        score: Math.max(0, overallScore),
+                        brightness: Math.round(avgBrightness),
+                        contrast: Math.round(contrast),
+                        resolution: resolutionScore,
+                        width: img.width,
+                        height: img.height,
+                        issues,
+                        isGood: issues.filter(i => i.severity === 'warning').length === 0
+                    });
+                };
+                img.onerror = () => resolve({ score: 50, issues: [], isGood: true });
+                img.src = imageData;
+            });
+        }
+
+        function renderQualityIndicator(quality) {
+            const container = document.getElementById('image-quality-indicator');
+            if (!container) return;
+
+            container.style.display = 'block';
+
+            let scoreClass = 'good';
+            let scoreLabel = 'Good';
+            if (quality.score < 60) {
+                scoreClass = 'poor';
+                scoreLabel = 'Poor';
+            } else if (quality.score < 80) {
+                scoreClass = 'fair';
+                scoreLabel = 'Fair';
+            }
+
+            let issuesHTML = '';
+            if (quality.issues.length > 0) {
+                issuesHTML = '<div class="quality-issues">' +
+                    quality.issues.map(i => `<div class="quality-issue ${i.severity}">${i.message}</div>`).join('') +
+                    '</div>';
+            }
+
+            container.innerHTML = `
+                <div class="quality-score ${scoreClass}">
+                    <span class="quality-label">Image Quality:</span>
+                    <span class="quality-value">${scoreLabel}</span>
+                    <span class="quality-percent">${quality.score}%</span>
+                </div>
+                ${issuesHTML}
+            `;
+        }
+
+        // AI Models
+        let poseDetector = null;
+        let coachModel = null;
+        let coachVocab = null;
+
+        // Initialize MediaPipe Pose (for POSTURE analysis only)
+        async function initMediaPipe() {
+            poseDetector = new Pose({
+                locateFile: (file) => {
+                    return `https://cdn.jsdelivr.net/npm/@mediapipe/pose@0.5.1675469404/${file}`;
+                }
+            });
+
+            poseDetector.setOptions({
+                modelComplexity: 1,
+                smoothLandmarks: true,
+                enableSegmentation: false,
+                minDetectionConfidence: 0.5,
+                minTrackingConfidence: 0.5
+            });
+
+            poseDetector.onResults(onPoseResults);
+        }
+
+
+        // ========== BMI CALCULATION ==========
+        function calculateBMI(heightCm, weightKg) {
+            if (!heightCm || !weightKg || heightCm <= 0 || weightKg <= 0) return null;
+            const heightM = heightCm / 100;
+            return weightKg / (heightM * heightM);
+        }
+
+        function getBMICategory(bmi) {
+            if (bmi < 18.5) return { category: 'Underweight', class: 'athletic', score: 45 };
+            if (bmi < 25) return { category: 'Normal', class: 'fit', score: 85 };
+            if (bmi < 30) return { category: 'Overweight', class: 'overweight', score: 45 };
+            if (bmi < 35) return { category: 'Obese Class I', class: 'obese', score: 30 };
+            if (bmi < 40) return { category: 'Obese Class II', class: 'obese', score: 22 };
+            return { category: 'Obese Class III', class: 'obese', score: 15 };
+        }
+
+        function ageRangeToMidpoint(range) {
+            const map = { '18-24': 21, '25-34': 29, '35-44': 39, '45-54': 49, '55+': 57 };
+            return map[range] || null;
+        }
+
+        function updateBMIPreview() {
+            const heightInput = document.getElementById('height-input');
+            const weightInput = document.getElementById('weight-input');
+            const bmiPreview = document.getElementById('bmi-preview');
+            const bmiValue = document.getElementById('bmi-value');
+            const bmiCategory = document.getElementById('bmi-category');
+
+            const height = parseFloat(heightInput?.value);
+            const weight = parseFloat(weightInput?.value);
+
+            if (height && weight && height > 0 && weight > 0) {
+                const bmi = calculateBMI(height, weight);
+                const category = getBMICategory(bmi);
+
+                state.height = height;
+                state.weight = weight;
+                state.age = ageRangeToMidpoint(document.getElementById('age-range')?.value || '');
+                state.bmi = bmi;
+                state.bmiCategory = category;
+
+                bmiPreview.style.display = 'block';
+                bmiValue.textContent = bmi.toFixed(1);
+                bmiCategory.textContent = category.category;
+                bmiCategory.className = 'bmi-category ' + category.class;
+
+            } else {
+                bmiPreview.style.display = 'none';
+                state.bmi = null;
+                state.bmiCategory = null;
+            }
+
+            updateAnalyzeButton();
+        }
+
+        function updateAnalyzeButton() {
+            const analyzeBtn = document.getElementById('analyze-btn');
+            const hasImage = state.hasImage;
+            const hasBMI = state.bmi !== null;
+            const hasGoal = state.fitnessGoal !== null;
+            const hasGender = state.gender !== null;
+
+            if (analyzeBtn) {
+                analyzeBtn.disabled = !(hasImage && hasBMI && hasGoal && hasGender);
+                const svgIcon = '<svg viewBox="0 0 24 24" fill="none" stroke-width="2"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>';
+                let label;
+                if (!hasImage) label = 'Upload Photo First';
+                else if (!hasBMI) label = 'Enter Height & Weight';
+                else if (!hasGender) label = 'Select Gender';
+                else if (!hasGoal) label = 'Select Fitness Goal';
+                else label = 'Analyze Photo';
+                analyzeBtn.innerHTML = `${svgIcon} <span class="btn-text">${label}</span>`;
+            }
+        }
+
+        // ========== GOAL SELECTOR ==========
+        function setupGoalSelector() {
+            const goalOptions = document.querySelectorAll('.goal-option');
+
+            goalOptions.forEach(option => {
+                option.addEventListener('click', () => {
+                    // Remove selected from all
+                    goalOptions.forEach(opt => opt.classList.remove('selected'));
+                    // Add selected to clicked
+                    option.classList.add('selected');
+                    // Update state
+                    state.fitnessGoal = option.dataset.goal;
+                    updateAnalyzeButton();
+                });
+            });
+        }
+
+        // ========== GENDER SELECTOR ==========
+        function setupGenderSelector() {
+            const genderSelect = document.getElementById('gender-select');
+            if (genderSelect) {
+                genderSelect.addEventListener('change', () => {
+                    state.gender = genderSelect.value || null;
+                    updateAnalyzeButton();
+                });
+            }
+        }
+
+        // Get goal-specific configurations
+        function getGoalConfig(goal) {
+            const configs = {
+                'lose-weight': {
+                    name: 'Weight Loss',
+                    calorieAdjustment: -500, // Caloric deficit
+                    proteinMultiplier: 1.0, // g per lb bodyweight
+                    carbPercentage: 0.35,
+                    fatPercentage: 0.30,
+                    workoutFocus: ['cardio', 'hiit', 'full-body'],
+                    workoutFrequency: '4-5 days/week',
+                    primaryMessage: 'Focus on caloric deficit while maintaining muscle mass',
+                    exercises: ['Jumping Jacks', 'Burpees', 'Mountain Climbers', 'High Knees', 'Bodyweight Squats', 'Lunges']
+                },
+                'build-muscle': {
+                    name: 'Muscle Building',
+                    calorieAdjustment: 300, // Caloric surplus
+                    proteinMultiplier: 1.2, // Higher protein
+                    carbPercentage: 0.45,
+                    fatPercentage: 0.25,
+                    workoutFocus: ['strength', 'hypertrophy', 'compound'],
+                    workoutFrequency: '4-5 days/week',
+                    primaryMessage: 'Focus on progressive overload and protein intake',
+                    exercises: ['Push-ups', 'Pull-ups', 'Squats', 'Deadlifts', 'Bench Press', 'Rows']
+                },
+                'maintain': {
+                    name: 'Maintenance',
+                    calorieAdjustment: 0, // Maintenance calories
+                    proteinMultiplier: 0.8,
+                    carbPercentage: 0.40,
+                    fatPercentage: 0.30,
+                    workoutFocus: ['balanced', 'flexibility', 'endurance'],
+                    workoutFrequency: '3-4 days/week',
+                    primaryMessage: 'Maintain current physique with balanced nutrition',
+                    exercises: ['Walking', 'Yoga', 'Swimming', 'Cycling', 'Light Weights', 'Stretching']
+                },
+                'recomp': {
+                    name: 'Body Recomposition',
+                    calorieAdjustment: 0, // Slight deficit or maintenance
+                    proteinMultiplier: 1.1, // High protein crucial
+                    carbPercentage: 0.35,
+                    fatPercentage: 0.30,
+                    workoutFocus: ['strength', 'hiit', 'compound'],
+                    workoutFrequency: '5-6 days/week',
+                    primaryMessage: 'Build muscle while losing fat - prioritize protein',
+                    exercises: ['Compound Lifts', 'HIIT', 'Resistance Training', 'Circuit Training', 'Core Work', 'Plyometrics']
+                }
+            };
+            return configs[goal] || configs['maintain'];
+        }
+
+        // Handle pose detection results
+        function onPoseResults(results) {
+            if (results.poseLandmarks && results.poseLandmarks.length >= 25) {
+                // Validate key body landmarks are visible with reasonable confidence
+                const keyLandmarks = [
+                    results.poseLandmarks[11], // left shoulder
+                    results.poseLandmarks[12], // right shoulder
+                    results.poseLandmarks[23], // left hip
+                    results.poseLandmarks[24], // right hip
+                ];
+
+                // Check if key landmarks have sufficient visibility
+                const minVisibility = 0.3;
+                const validLandmarks = keyLandmarks.filter(lm =>
+                    lm && lm.visibility && lm.visibility > minVisibility
+                );
+
+                if (validLandmarks.length >= 3) {
+                    // Valid human body detected
+                    state.humanDetected = true;
+                    state.landmarks = results.poseLandmarks;
+                    state.segmentationMask = results.segmentationMask || null;
+                    state.analysisResult = calculateBodyMetrics(results.poseLandmarks, results.segmentationMask, results.image);
+                } else {
+                    // Landmarks detected but not a valid body pose
+                    state.humanDetected = false;
+                    state.landmarks = null;
+                    state.analysisResult = null;
+                }
+            } else {
+                // No pose detected at all
+                state.humanDetected = false;
+                state.landmarks = null;
+                state.analysisResult = null;
+            }
+        }
+
+        // Calculate body metrics from pose landmarks and segmentation
+        function calculateBodyMetrics(landmarks, segmentationMask, image) {
+            // MediaPipe Pose landmarks indices:
+            // 11 = left shoulder, 12 = right shoulder
+            // 23 = left hip, 24 = right hip
+            // 0 = nose, 7 = left ear, 8 = right ear
+            // 25 = left knee, 26 = right knee
+            // 27 = left ankle, 28 = right ankle
+
+            const leftShoulder = landmarks[11];
+            const rightShoulder = landmarks[12];
+            const leftHip = landmarks[23];
+            const rightHip = landmarks[24];
+            const nose = landmarks[0];
+            const leftElbow = landmarks[13];
+            const rightElbow = landmarks[14];
+            const leftKnee = landmarks[25];
+            const rightKnee = landmarks[26];
+            const leftAnkle = landmarks[27];
+            const rightAnkle = landmarks[28];
+            const leftWrist = landmarks[15];
+            const rightWrist = landmarks[16];
+
+            // Calculate SKELETON distances (bone structure)
+            const skeletonShoulderWidth = Math.abs(rightShoulder.x - leftShoulder.x);
+            const skeletonHipWidth = Math.abs(rightHip.x - leftHip.x);
+
+            // Calculate body HEIGHT (head to ankle)
+            const bodyHeight = Math.abs(leftAnkle.y - nose.y);
+
+            // Calculate torso length
+            const torsoLength = Math.abs(leftHip.y - leftShoulder.y);
+
+            // IMPROVED: Use elbow position to estimate actual body width
+            // On larger bodies, elbows are pushed outward by torso mass
+            const leftElbowOffset = Math.abs(leftElbow.x - leftShoulder.x);
+            const rightElbowOffset = Math.abs(rightElbow.x - rightShoulder.x);
+            const elbowSpread = leftElbowOffset + rightElbowOffset;
+
+            // Check if arms are by sides (wrists near hips) - indicates relaxed pose
+            const armsAtSides = Math.abs(leftWrist.y - leftHip.y) < 0.15 && Math.abs(rightWrist.y - rightHip.y) < 0.15;
+
+            // Calculate actual body width estimate
+            // If elbows are spread wide relative to shoulders, indicates larger body
+            const elbowToShoulderRatio = elbowSpread / skeletonShoulderWidth;
+
+            // Body width to height ratio (key indicator of body composition)
+            const torsoWidthRatio = skeletonHipWidth / torsoLength;
+            const shoulderToHeightRatio = skeletonShoulderWidth / bodyHeight;
+            const hipToHeightRatio = skeletonHipWidth / bodyHeight;
+
+            // Calculate waist-to-hip indicator (shoulder to hip ratio)
+            const waistHipIndicator = skeletonHipWidth / skeletonShoulderWidth;
+
+            // Posture analysis
+            const shoulderDiff = Math.abs(leftShoulder.y - rightShoulder.y);
+            const hipDiff = Math.abs(leftHip.y - rightHip.y);
+            const shoulderMidX = (leftShoulder.x + rightShoulder.x) / 2;
+            const headForward = nose.x - shoulderMidX;
+
+            // BODY COMPOSITION SCORING
+            // PRIMARY: BMI from user-provided height/weight (accurate)
+            // SECONDARY: Skeleton geometry analysis
+            let bodyCompScore;
+            let category;
+            let bodyType;
+
+            // Use BMI as the PRIMARY metric (this is ACCURATE)
+            if (state.bmi && state.bmiCategory) {
+                const bmi = state.bmi;
+                const bmiCat = state.bmiCategory;
+
+
+                // Score based on BMI categories (WHO standards)
+                if (bmi < 18.5) {
+                    // Underweight
+                    bodyCompScore = Math.round(45 + Math.random() * 10);
+                    category = 'Underweight';
+                    bodyType = 'Ectomorph';
+                } else if (bmi < 25) {
+                    // Normal weight
+                    bodyCompScore = Math.round(78 + Math.random() * 12);
+                    category = 'Healthy';
+                    bodyType = 'Mesomorph';
+                } else if (bmi < 30) {
+                    // Overweight
+                    bodyCompScore = Math.round(42 + Math.random() * 10);
+                    category = 'Overweight';
+                    bodyType = 'Endomorph';
+                } else if (bmi < 35) {
+                    // Obese Class I
+                    bodyCompScore = Math.round(28 + Math.random() * 8);
+                    category = 'Obese';
+                    bodyType = 'Endomorph';
+                } else if (bmi < 40) {
+                    // Obese Class II
+                    bodyCompScore = Math.round(18 + Math.random() * 8);
+                    category = 'Severely Obese';
+                    bodyType = 'Endomorph';
+                } else {
+                    // Obese Class III
+                    bodyCompScore = Math.round(10 + Math.random() * 8);
+                    category = 'Morbidly Obese';
+                    bodyType = 'Endomorph';
+                }
+
+
+            } else {
+                // Fallback if no BMI provided (shouldn't happen with required fields)
+                bodyCompScore = 50;
+                category = 'Unknown';
+                bodyType = 'Unknown';
+            }
+
+            // Posture scoring
+            const postureScore = Math.min(95, Math.max(40, 100 - Math.round(shoulderDiff * 500) - Math.round(Math.abs(headForward) * 100)));
+            const symmetryScore = Math.min(98, Math.max(50, 100 - Math.round(shoulderDiff * 300) - Math.round(hipDiff * 300)));
+
+            // Muscle tone estimate (harder to determine from pose alone)
+            const avgConfidence = landmarks.reduce((sum, l) => sum + (l.visibility || 0.5), 0) / landmarks.length;
+            const muscleScore = Math.round(Math.min(bodyCompScore * 0.8, 70) + avgConfidence * 20);
+
+            // Determine lean mass estimate based on score
+            let leanMassEstimate;
+            if (bodyCompScore >= 75) leanMassEstimate = "High";
+            else if (bodyCompScore >= 60) leanMassEstimate = "Above Average";
+            else if (bodyCompScore >= 45) leanMassEstimate = "Average";
+            else if (bodyCompScore >= 30) leanMassEstimate = "Below Average";
+            else leanMassEstimate = "Low";
+
+            // Upper body assessment
+            let upperBodyAssessment;
+            if (waistHipIndicator < 0.9 && bodyCompScore >= 65) upperBodyAssessment = "Well Developed";
+            else if (bodyCompScore >= 50) upperBodyAssessment = "Moderate";
+            else upperBodyAssessment = "Needs Development";
+
+            // Core assessment
+            let coreAssessment;
+            if (bodyCompScore >= 70) coreAssessment = "Defined";
+            else if (bodyCompScore >= 50) coreAssessment = "Moderate";
+            else coreAssessment = "Needs Work";
+
+            // Lower body assessment
+            let lowerBodyAssessment;
+            if (hipToHeightRatio < 0.14) lowerBodyAssessment = "Lean";
+            else if (hipToHeightRatio < 0.18) lowerBodyAssessment = "Moderate";
+            else lowerBodyAssessment = "Heavy";
+
+            // Calculate confidence based on multiple input quality factors
+            let confidenceScore = 0;
+            const confidenceFactors = [];
+
+            // Factor 1: BMI data provided (height + weight) — strongest signal
+            if (state.bmi) {
+                confidenceScore += 40;
+                confidenceFactors.push('Height & weight provided');
+            } else {
+                confidenceFactors.push('No height/weight — relying on skeleton only');
+            }
+
+            // Factor 2: Key landmark visibility quality
+            const keyLmks = [leftShoulder, rightShoulder, leftHip, rightHip];
+            const avgVisibility = keyLmks.reduce((sum, lm) => sum + (lm?.visibility || 0), 0) / keyLmks.length;
+            if (avgVisibility > 0.8) {
+                confidenceScore += 25;
+                confidenceFactors.push('Excellent pose visibility');
+            } else if (avgVisibility > 0.5) {
+                confidenceScore += 15;
+                confidenceFactors.push('Good pose visibility');
+            } else {
+                confidenceScore += 5;
+                confidenceFactors.push('Low pose visibility — try better lighting');
+            }
+
+            // Factor 3: Full body detected (ankles visible)
+            const anklesVisible = (leftAnkle?.visibility || 0) > 0.3 && (rightAnkle?.visibility || 0) > 0.3;
+            if (anklesVisible) {
+                confidenceScore += 15;
+                confidenceFactors.push('Full body visible');
+            } else {
+                confidenceFactors.push('Feet not fully visible — stand further back');
+            }
+
+            // Factor 4: Gender provided (affects body comp norms)
+            if (state.gender) {
+                confidenceScore += 10;
+            } else {
+                confidenceFactors.push('Gender not specified');
+            }
+
+            // Factor 5: Fitness goal set (affects recommendations quality)
+            if (state.fitnessGoal) {
+                confidenceScore += 10;
+            }
+
+            const confidenceLevel = confidenceScore >= 70 ? 'high' : confidenceScore >= 40 ? 'medium' : 'low';
+
+            return {
+                confidence: confidenceLevel,
+                confidenceScore: confidenceScore,
+                confidenceFactors: confidenceFactors,
+                analysisMethod: state.bmi ? 'bmi-calculation' : 'skeleton-only',
+                bmi: state.bmi || null,
+                bmiCategory: state.bmiCategory?.category || null,
+                bodyComposition: {
+                    score: bodyCompScore,
+                    category: category,
+                    bodyType: bodyType,
+                    bmiValue: state.bmi?.toFixed(1) || "N/A",
+                    leanMassEstimate: leanMassEstimate
+                },
+                muscleTone: {
+                    score: muscleScore,
+                    upperBody: upperBodyAssessment,
+                    core: coreAssessment,
+                    lowerBody: lowerBodyAssessment
+                },
+                posture: {
+                    score: postureScore,
+                    shoulderAlignment: shoulderDiff < 0.02 ? "Aligned" : shoulderDiff < 0.05 ? "Slight Imbalance" : "Noticeable Imbalance",
+                    spineAssessment: Math.abs(headForward) < 0.03 ? "Good" : headForward > 0 ? "Minor Forward" : "Minor Backward",
+                    hipAlignment: hipDiff < 0.02 ? "Balanced" : "Slight Tilt"
+                },
+                overview: {
+                    fitnessIndex: (bodyCompScore * 0.1).toFixed(1),
+                    visualAge: Math.round(30 + (60 - bodyCompScore) * 0.3),
+                    overallGrade: Math.round(bodyCompScore) + '%',
+                    symmetryScore: symmetryScore
+                },
+                bodyZones: {
+                    shoulders: shoulderDiff < 0.02 ? "Balanced" : "Slight asymmetry",
+                    chest: waistHipIndicator < 0.9 ? "V-Taper" : waistHipIndicator < 1.05 ? "Straight" : "Wide",
+                    core: bodyCompScore >= 65 ? "Defined" : bodyCompScore >= 45 ? "Soft" : "Large",
+                    legs: hipToHeightRatio < 0.15 ? "Lean" : hipToHeightRatio < 0.2 ? "Average" : "Heavy"
+                },
+                recommendations: generateRecommendations(bodyCompScore, postureScore, muscleScore, category, state.fitnessGoal),
+                landmarks: landmarks
+            };
+        }
+
+
+        // Generate personalized recommendations based on body + goal
+        function generateRecommendations(bodyScore, postureScore, muscleScore, category, goal) {
+            const recs = [];
+
+            // Goal-specific recommendations take priority
+            if (goal === 'lose-weight') {
+                recs.push("Focus on creating a caloric deficit through balanced nutrition");
+                recs.push("Combine cardio (3-4x/week) with strength training to preserve muscle");
+                recs.push("Track daily intake and aim for high-protein meals to stay satiated");
+            } else if (goal === 'build-muscle') {
+                recs.push("Follow a progressive overload strength program 4-5 days per week");
+                recs.push("Eat in a caloric surplus with 1g protein per lb of bodyweight");
+                recs.push("Prioritize compound lifts: squats, deadlifts, bench press, rows");
+            } else if (goal === 'maintain') {
+                recs.push("Maintain current activity level with balanced nutrition at maintenance calories");
+                recs.push("Mix cardio and resistance training 3-4x per week for overall fitness");
+                recs.push("Focus on sleep quality and recovery for sustained health");
+            } else if (goal === 'recomp') {
+                recs.push("Eat at maintenance calories with high protein (1g per lb bodyweight)");
+                recs.push("Combine heavy strength training with moderate cardio for body recomposition");
+                recs.push("Be patient — recomposition is gradual but builds a lean, strong physique");
+            } else {
+                // Fallback: category-based if no goal set
+                if (category === 'Overweight' || category === 'Above Average Weight') {
+                    recs.push("Start with low-impact cardio like walking or swimming 30 min daily");
+                    recs.push("Focus on creating a caloric deficit through balanced nutrition");
+                    recs.push("Incorporate strength training 2-3x per week to build lean muscle");
+                } else if (category === 'Average') {
+                    recs.push("Add cardio exercises 3-4x per week to improve body composition");
+                    recs.push("Consider a structured resistance training program");
+                    recs.push("Focus on protein intake to support muscle development");
+                } else if (category === 'Fit') {
+                    recs.push("Continue current training with progressive overload");
+                    recs.push("Add HIIT sessions for enhanced fat burning");
+                    recs.push("Focus on weak muscle groups for balanced development");
+                } else if (category === 'Athletic') {
+                    recs.push("Maintain current training routine to preserve muscle mass");
+                    recs.push("Consider periodization to prevent plateaus");
+                    recs.push("Focus on mobility and recovery for longevity");
+                }
+            }
+
+            // Posture recommendations
+            if (postureScore < 70) {
+                recs.push("Prioritize posture correction - try wall angels and chin tucks daily");
+            }
+
+            return recs.slice(0, 3);
+        }
+
+
+        // DOM Elements
+        const screens = {
+            auth: document.getElementById('screen-auth'),
+            upload: document.getElementById('screen-upload'),
+            analysis: document.getElementById('screen-analysis'),
+            results: document.getElementById('screen-results'),
+            breakdown: document.getElementById('screen-breakdown'),
+            simulator: document.getElementById('screen-simulator'),
+            workout: document.getElementById('screen-workout'),
+            nutrition: document.getElementById('screen-nutrition'),
+            progress: document.getElementById('screen-progress'),
+            wearable: document.getElementById('screen-wearable'),
+            admin: document.getElementById('screen-admin')
+        };
+
+        const uploadZone = document.getElementById('upload-zone');
+        const fileInput = document.getElementById('file-input');
+        const uploadPreview = document.getElementById('upload-preview');
+        const previewImage = document.getElementById('preview-image');
+        const removePreview = document.getElementById('remove-preview');
+        const analyzeBtn = document.getElementById('analyze-btn');
+        const viewBtns = document.querySelectorAll('.view-btn');
+        const navSteps = document.querySelectorAll('.nav-step');
+
+        // Camera elements
+        const cameraZone = document.getElementById('camera-zone');
+        const cameraVideo = document.getElementById('camera-video');
+        const cameraCanvas = document.getElementById('camera-canvas');
+        const uploadModeBtn = document.getElementById('upload-mode-btn');
+        const cameraModeBtn = document.getElementById('camera-mode-btn');
+        const captureBtn = document.getElementById('capture-btn');
+        const switchCameraBtn = document.getElementById('switch-camera-btn');
+        const closeCameraBtn = document.getElementById('close-camera-btn');
+
+        // Camera state
+        let cameraStream = null;
+        let currentFacingMode = 'environment'; // 'environment' = back camera, 'user' = front camera
+
+        // Analysis steps
+        const analysisSteps = ['step-pose', 'step-extract', 'step-analyze', 'step-generate'];
+
+        // Resolves after all setup*() functions in init() have run.
+        // routeAfterLogin() awaits this so it never calls goToScreen() before
+        // event listeners are attached.
+        let _setupDoneResolve;
+        const setupDonePromise = new Promise(resolve => { _setupDoneResolve = resolve; });
+
+        // Initialize
+        async function init() {
+            // Initialize theme
+            initTheme();
+
+            // Setup auth (login/register/auto-login)
+            setupAuth();
+
+            // Try to restore session state
+            const hasSession = loadSessionState();
+            state.measurements = getMeasurements();
+
+            // Attach all UI event listeners BEFORE loading the AI model.
+            // MediaPipe WASM compilation can block the main thread for several
+            // seconds — having listeners ready first means the page is interactive
+            // immediately and routeAfterLogin() can navigate without waiting.
+            // initCoachModel() intentionally omitted — TF.js training (600+ phrases,
+            // large vocab) blocks the main thread even with epoch-level yields.
+            // detectIntent() uses keyword matching as primary path and only falls back
+            // to the neural net when coachModel is non-null, so the coach works fully
+            // without the model trained.
+
+            setupUpload();
+            setupCamera();
+            setupNavigation();
+            setupResults();
+            setupBreakdown();
+            setupSimulator();
+            setupWorkout();
+            setupNutrition();
+            setupGenderConfirmation();
+            setupCoach();
+            setupProgress();
+            setupAdmin();
+            setupDataManagement();
+            setupWaterTracker();
+            setupMeasurements();
+            setupShareCard();
+            setupProgressCharts();
+            setupFoodLog();
+            setupGoalWeight();
+            loadPresetsFromDB(); // fetch foods & exercises from DB, overrides hardcoded fallbacks
+            setupWorkoutLog();
+            setupExerciseLog();
+            setupLiftTracker();
+            setupMeasurementsTracker();
+            setupSleepTracker();
+            setupHabitTracker();
+            animateGauges();
+            showOnboardingIfNeeded();
+            registerServiceWorker();
+
+            // Setup BMI input listeners with 3-digit limit and range clamping
+            const heightInput = document.getElementById('height-input');
+            const weightInput = document.getElementById('weight-input');
+
+            function limitInput(input, max) {
+                input.addEventListener('input', () => {
+                    // Limit to 3 digits
+                    if (input.value.length > 3) {
+                        input.value = input.value.slice(0, 3);
+                    }
+                    // Clamp to max
+                    const val = parseInt(input.value);
+                    if (val > max) input.value = max;
+                    if (val < 0) input.value = '';
+                    updateBMIPreview();
+                });
+            }
+
+            if (heightInput) limitInput(heightInput, 272); // Tallest person ever: 272 cm
+            if (weightInput) limitInput(weightInput, 300); // Max 300 kg
+
+            // Setup gender and goal selectors
+            setupGenderSelector();
+            setupGoalSelector();
+
+            // Age-range change listener — update state.age live
+            document.getElementById('age-range')?.addEventListener('change', e => {
+                state.age = ageRangeToMidpoint(e.target.value);
+            });
+
+            // Setup BMR calculator controls on the nutrition screen
+            setupBMRCalculator();
+
+            // Initial button state
+            updateAnalyzeButton();
+
+            // Restore UI if session was loaded
+            if (hasSession) {
+                restoreUIFromState();
+            }
+
+            // Check storage quota in background
+            showStorageWarningIfNeeded();
+
+            // Auto-save state periodically and on page unload
+            window.addEventListener('beforeunload', saveSessionState);
+            setInterval(saveSessionState, 60000); // Auto-save every minute
+
+            // All event listeners are attached — routeAfterLogin() can now navigate.
+            _setupDoneResolve();
+
+            // Load MediaPipe after UI is ready. WASM compilation may block the
+            // main thread briefly but the page is already interactive by this point.
+            try {
+                await initMediaPipe();
+            } catch (err) {
+                dbg.error('MediaPipe failed to load:', err);
+                showToast('AI model failed to load. Please refresh the page.', 'error');
+            }
+        }
+
+        // Upload functionality
+        function setupUpload() {
+            uploadZone.addEventListener('click', () => fileInput.click());
+
+            uploadZone.addEventListener('dragover', (e) => {
+                e.preventDefault();
+                uploadZone.classList.add('dragover');
+            });
+
+            uploadZone.addEventListener('dragleave', () => {
+                uploadZone.classList.remove('dragover');
+            });
+
+            uploadZone.addEventListener('drop', (e) => {
+                e.preventDefault();
+                uploadZone.classList.remove('dragover');
+                const files = e.dataTransfer.files;
+                if (files.length) handleFile(files[0]);
+            });
+
+            fileInput.addEventListener('change', (e) => {
+                if (e.target.files.length) handleFile(e.target.files[0]);
+            });
+
+            removePreview.addEventListener('click', (e) => {
+                e.stopPropagation();
+                clearPreview();
+            });
+
+            viewBtns.forEach(btn => {
+                btn.addEventListener('click', () => {
+                    viewBtns.forEach(b => b.classList.remove('active'));
+                    btn.classList.add('active');
+                    state.selectedView = btn.dataset.view;
+                });
+            });
+
+            analyzeBtn.addEventListener('click', startAnalysis);
+        }
+
+        function handleFile(file) {
+            if (!file.type.startsWith('image/')) {
+                showToast('Please upload an image file', 'warning');
+                return;
+            }
+
+            const reader = new FileReader();
+            reader.onload = async (e) => {
+                previewImage.src = e.target.result;
+                state.imageData = e.target.result;
+                uploadPreview.classList.add('has-image');
+                uploadZone.style.display = 'none';
+                state.hasImage = true;
+                updateAnalyzeButton(); // Check if both image AND BMI are ready
+
+                // Analyze image quality and show feedback
+                try {
+                    const quality = await analyzeImageQuality(e.target.result);
+                    renderQualityIndicator(quality);
+                } catch (err) {
+                    dbg.warn('Image quality check failed:', err);
+                }
+            };
+            reader.readAsDataURL(file);
+        }
+
+        function clearPreview() {
+            previewImage.src = '';
+            uploadPreview.classList.remove('has-image');
+            state.hasImage = false;
+            updateAnalyzeButton();
+            uploadZone.style.display = 'flex';
+            state.hasImage = false;
+            state.imageData = null;
+            state.analysisResult = null;
+            analyzeBtn.disabled = true;
+            const btnTxt = analyzeBtn.querySelector('.btn-text');
+            if (btnTxt) btnTxt.textContent = 'Analyze';
+            fileInput.value = '';
+            const qi = document.getElementById('image-quality-indicator');
+            if (qi) { qi.style.display = 'none'; qi.innerHTML = ''; }
+        }
+
+        // Camera functionality
+        function setupCamera() {
+            if (!uploadModeBtn || !cameraModeBtn) return;
+
+            // Mode toggle buttons
+            uploadModeBtn.addEventListener('click', () => {
+                setInputMode('upload');
+                // Also trigger file picker when clicking upload button
+                if (fileInput) fileInput.click();
+            });
+
+            cameraModeBtn.addEventListener('click', () => {
+                setInputMode('camera');
+            });
+
+            // Camera control buttons
+            if (captureBtn) {
+                captureBtn.addEventListener('click', capturePhoto);
+            }
+
+            if (switchCameraBtn) {
+                switchCameraBtn.addEventListener('click', switchCamera);
+            }
+
+            if (closeCameraBtn) {
+                closeCameraBtn.addEventListener('click', () => {
+                    setInputMode('upload');
+                });
+            }
+        }
+
+        function setInputMode(mode) {
+            if (mode === 'camera') {
+                // Switch to camera mode
+                uploadModeBtn.classList.remove('active');
+                cameraModeBtn.classList.add('active');
+                uploadZone.style.display = 'none';
+                uploadPreview.classList.remove('has-image');
+                cameraZone.style.display = 'block';
+                startCamera();
+            } else {
+                // Switch to upload mode
+                cameraModeBtn.classList.remove('active');
+                uploadModeBtn.classList.add('active');
+                cameraZone.style.display = 'none';
+                stopCamera();
+                if (!state.hasImage) {
+                    uploadZone.style.display = 'flex';
+                } else {
+                    uploadPreview.classList.add('has-image');
+                }
+            }
+        }
+
+        async function startCamera() {
+            try {
+                // Check if mediaDevices API is available
+                if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+                    showToast('Camera is not supported on this browser. Please use Chrome, Safari, or Firefox.', 'error');
+                    setInputMode('upload');
+                    return;
+                }
+
+                // Stop any existing stream
+                stopCamera();
+
+                const constraints = {
+                    video: {
+                        facingMode: currentFacingMode,
+                        width: { ideal: 1280 },
+                        height: { ideal: 1920 }
+                    }
+                };
+
+                cameraStream = await navigator.mediaDevices.getUserMedia(constraints);
+                cameraVideo.srcObject = cameraStream;
+                await cameraVideo.play();
+            } catch (err) {
+                dbg.error('Camera error:', err);
+                let errorMessage = 'Could not access camera.\n\n';
+
+                if (err.name === 'NotAllowedError' || err.name === 'PermissionDeniedError') {
+                    errorMessage += 'Camera permission was denied.\n\n';
+                    errorMessage += 'To fix this:\n';
+                    errorMessage += '• iPhone/iPad: Go to Settings > Safari > Camera, set to "Allow"\n';
+                    errorMessage += '• Android: Tap the lock icon in the address bar and allow camera\n';
+                    errorMessage += '• Then refresh this page and try again';
+                } else if (err.name === 'NotFoundError' || err.name === 'DevicesNotFoundError') {
+                    errorMessage += 'No camera found on this device.';
+                } else if (err.name === 'NotReadableError' || err.name === 'TrackStartError') {
+                    errorMessage += 'Camera is being used by another app. Please close other apps using the camera and try again.';
+                } else if (err.name === 'OverconstrainedError') {
+                    errorMessage += 'Camera does not support the requested settings. Trying with default settings...';
+                    // Try again with simpler constraints
+                    try {
+                        cameraStream = await navigator.mediaDevices.getUserMedia({ video: true });
+                        cameraVideo.srcObject = cameraStream;
+                        await cameraVideo.play();
+                        return;
+                    } catch (fallbackErr) {
+                        errorMessage = 'Could not access camera with any settings. Please try again.';
+                    }
+                } else {
+                    errorMessage += 'Error: ' + err.message;
+                }
+
+                showToast(errorMessage, 'error');
+                setInputMode('upload');
+            }
+        }
+
+        function stopCamera() {
+            if (cameraStream) {
+                cameraStream.getTracks().forEach(track => track.stop());
+                cameraStream = null;
+            }
+            if (cameraVideo) {
+                cameraVideo.srcObject = null;
+            }
+        }
+
+        async function switchCamera() {
+            currentFacingMode = currentFacingMode === 'environment' ? 'user' : 'environment';
+            await startCamera();
+        }
+
+        function capturePhoto() {
+            if (!cameraVideo || !cameraCanvas) return;
+
+            // Set canvas size to video size
+            cameraCanvas.width = cameraVideo.videoWidth;
+            cameraCanvas.height = cameraVideo.videoHeight;
+
+            // Draw video frame to canvas
+            const ctx = cameraCanvas.getContext('2d');
+
+            // Mirror the image if using front camera
+            if (currentFacingMode === 'user') {
+                ctx.translate(cameraCanvas.width, 0);
+                ctx.scale(-1, 1);
+            }
+
+            ctx.drawImage(cameraVideo, 0, 0);
+
+            // Convert to data URL
+            const imageData = cameraCanvas.toDataURL('image/jpeg', 0.9);
+
+            // Set preview image
+            previewImage.src = imageData;
+            state.imageData = imageData;
+            state.hasImage = true;
+
+            // Stop camera and show preview
+            stopCamera();
+            cameraZone.style.display = 'none';
+            uploadPreview.classList.add('has-image');
+            uploadZone.style.display = 'none';
+
+            // Reset mode buttons
+            cameraModeBtn.classList.remove('active');
+            uploadModeBtn.classList.add('active');
+
+            updateAnalyzeButton();
+        }
+
+        // Navigation
+        function setupNavigation() {
+            navSteps.forEach(step => {
+                step.addEventListener('click', () => {
+                    const stepNum = parseInt(step.dataset.step);
+                    // Only allow going back to completed steps
+                    if (stepNum < state.currentScreen) {
+                        goToScreen(stepNum);
+                    }
+                });
+            });
+        }
+
+        function goToScreen(num) {
+            // Block non-admin users from admin screen
+            if (num === 10 && (!state.user || state.user.role !== 'admin')) {
+                showToast('You do not have permission to access the admin panel.', 'error');
+                return;
+            }
+
+            // Cleanup: stop workout timer if navigating away from workout screen
+            if (state.currentScreen === 6 && num !== 6 && workoutPlayerState.timerInterval) {
+                clearInterval(workoutPlayerState.timerInterval);
+                workoutPlayerState.timerInterval = null;
+                workoutPlayerState.isPlaying = false;
+            }
+
+            // Hide all screens
+            Object.values(screens).forEach(s => s.classList.remove('active'));
+
+            // Show target screen
+            const screenMap = {1: 'upload', 2: 'analysis', 3: 'results', 4: 'breakdown', 5: 'simulator', 6: 'workout', 7: 'nutrition', 8: 'progress', 9: 'wearable', 10: 'admin'};
+            screens[screenMap[num]].classList.add('active');
+
+            // Update nav
+            navSteps.forEach(step => {
+                const stepNum = parseInt(step.dataset.step);
+                step.classList.remove('active', 'completed');
+                if (stepNum === num) step.classList.add('active');
+                if (stepNum < num) step.classList.add('completed');
+            });
+
+            state.currentScreen = num;
+            document.dispatchEvent(new CustomEvent('screenChange', { detail: { screen: num } }));
+
+            // Show/hide nav steps (hidden for admin screen)
+            if (num !== 10) {
+                document.querySelector('.nav-steps').style.display = 'flex';
+            }
+
+            // Animate gauges + position zone dots when results screen shows
+            if (num === 3) {
+                setTimeout(animateGauges, 300);
+                if (state.landmarks) {
+                    setTimeout(() => positionZoneDots(state.landmarks), 150);
+                }
+            }
+
+            // Update simulator current state image when entering simulator
+            if (num === 5) {
+                updateSimulatorCurrentState();
+            }
+
+
+            // Refresh progress screen data + charts
+            if (num === 8) {
+                refreshProgressScreen();
+            }
+
+            // Track nutrition views
+            if (num === 7) {
+                const nv = parseInt(localStorage.getItem(userKey('fixit-nutrition-views')) || '0') + 1;
+                localStorage.setItem(userKey('fixit-nutrition-views'), nv);
+            }
+
+            // Load wearable data when entering wearable screen
+            if (num === 9) {
+                initWearableScreen();
+            }
+
+            // Show/hide coach FAB for screens 3-9 when analysis is done
+            showCoachFab(num >= 3 && num <= 9 && state.analysisResult);
+        }
+
+        // Update simulator with current uploaded image and stats
+        function updateSimulatorCurrentState() {
+            const currentImg = document.getElementById('current-state-image');
+            const currentPlaceholder = document.getElementById('current-placeholder');
+
+            if (currentImg && currentPlaceholder) {
+                if (state.imageData) {
+                    currentImg.src = state.imageData;
+                    currentImg.style.display = 'block';
+                    currentPlaceholder.style.display = 'none';
+                } else {
+                    currentImg.style.display = 'none';
+                    currentPlaceholder.style.display = 'flex';
+                }
+            }
+
+            // Update stats from analysis result
+            if (state.analysisResult) {
+                const result = state.analysisResult;
+                const currentFitness = document.getElementById('current-fitness');
+                const currentMuscle = document.getElementById('current-muscle');
+                const currentAge = document.getElementById('current-age');
+
+                // Extract muscle tone score (muscleTone is an object with score property)
+                const muscleScore = result.muscleTone && result.muscleTone.score ? result.muscleTone.score : 68;
+
+                if (currentFitness) currentFitness.textContent = result.fitnessIndex || '7.2';
+                if (currentMuscle) currentMuscle.textContent = muscleScore + '%';
+                if (currentAge) currentAge.textContent = result.visualAge || '28';
+            }
+        }
+
+        // Analysis with MediaPipe (Free AI)
+        async function startAnalysis() {
+            if (analyzeBtn) {
+                analyzeBtn.disabled = true;
+                const txt = analyzeBtn.querySelector('.btn-text');
+                if (txt) txt.textContent = 'Analyzing...';
+            }
+            goToScreen(2);
+
+            // Reset all steps first
+            analysisSteps.forEach(id => {
+                document.getElementById(id).classList.remove('active', 'completed');
+            });
+
+            // Start visual progress
+            runAnalysisSteps();
+
+            // Process image with MediaPipe
+            try {
+
+                // Create an image element from the uploaded data
+                const img = new Image();
+                img.src = state.imageData;
+
+                await new Promise((resolve, reject) => {
+                    img.onload = resolve;
+                    img.onerror = reject;
+                });
+
+                // Send to MediaPipe for pose detection
+                await poseDetector.send({ image: img });
+
+
+            } catch (error) {
+                dbg.error('MediaPipe analysis failed:', error);
+                // Mark as no human detected - error will be shown by runAnalysisSteps
+                state.humanDetected = false;
+                state.analysisResult = null;
+            }
+        }
+
+        function runAnalysisSteps() {
+            let currentStep = 0;
+            const stepDuration = 1500; // Longer to allow API time
+
+            function advanceStep() {
+                // Only continue if still on analysis screen (screen 2)
+                if (state.currentScreen !== 2) {
+                    return;
+                }
+
+                if (currentStep > 0) {
+                    document.getElementById(analysisSteps[currentStep - 1]).classList.remove('active');
+                    document.getElementById(analysisSteps[currentStep - 1]).classList.add('completed');
+                }
+
+                if (currentStep < analysisSteps.length) {
+                    document.getElementById(analysisSteps[currentStep]).classList.add('active');
+                    currentStep++;
+                    setTimeout(advanceStep, stepDuration);
+                } else {
+                    // Analysis complete - check if human was detected
+                    setTimeout(() => {
+                        // Only proceed if still on analysis screen
+                        if (state.currentScreen !== 2) {
+                            return;
+                        }
+
+                        if (!state.humanDetected || !state.analysisResult) {
+                            // No human body detected - show error and return to upload
+                            showNoHumanDetectedError();
+                        } else {
+                            // Valid analysis - show gender confirmation first
+                            showGenderConfirmation();
+                        }
+                    }, 500);
+                }
+            }
+
+            advanceStep();
+        }
+
+        // Show error when no human body is detected
+        function showNoHumanDetectedError() {
+            // Only show error if still on analysis-related screens (1, 2, or 3)
+            if (state.currentScreen > 3) {
+                return;
+            }
+
+            const errorMessage = `No Human Body Detected
+
+The AI could not detect a human body in your photo.
+
+Please ensure:
+• Your FULL BODY is visible (head to feet)
+• You are facing the camera
+• Good lighting with minimal shadows
+• Plain background if possible
+• Photo is not blurry
+
+Please try again with a different photo.`;
+
+            showToast(errorMessage, 'error');
+
+            // Reset state and return to upload screen
+            state.humanDetected = false;
+            state.analysisResult = null;
+            state.landmarks = null;
+            goToScreen(1);
+        }
+
+        // Show goal recommendation modal after analysis (if applicable)
+        function showGenderConfirmation() {
+            const modal = document.getElementById('gender-confirm-modal');
+
+            // Check if there's a goal recommendation to show
+            const hasRecommendation = checkGoalRecommendation();
+
+            if (hasRecommendation) {
+                // Show recommendation modal
+                showGoalRecommendationInModal();
+                modal.classList.add('active');
+            } else {
+                // No recommendation needed - proceed directly to results
+                populateResults();
+                goToScreen(3);
+            }
+        }
+
+        // Check if a goal recommendation is needed (without displaying it)
+        function checkGoalRecommendation() {
+            if (!state.bmi || !state.fitnessGoal) return false;
+            const bmi = state.bmi;
+            const goal = state.fitnessGoal;
+
+            if (bmi >= 28 && goal === 'build-muscle') return true;
+            if (bmi < 18.5 && goal === 'lose-weight') return true;
+            if (bmi >= 30 && goal === 'maintain') return true;
+            return false;
+        }
+
+        // Show AI goal recommendation inside the modal
+        function showGoalRecommendationInModal() {
+            const recText = document.getElementById('goal-rec-text-modal');
+            const recAction = document.getElementById('goal-rec-action-modal');
+            const recDismiss = document.getElementById('goal-rec-dismiss-modal');
+            const goalSwitcher = document.getElementById('modal-goal-switcher');
+
+            // Reset goal switcher
+            if (goalSwitcher) goalSwitcher.classList.remove('active');
+
+            const bmi = state.bmi;
+            const goal = state.fitnessGoal;
+            let recommendation = null;
+            let suggestedGoal = null;
+
+            // Overweight person selecting Build Muscle
+            if (bmi >= 28 && goal === 'build-muscle') {
+                recommendation = 'Your BMI of ' + bmi.toFixed(1) + ' suggests you may benefit from fat loss before building muscle. Reducing body fat first improves health, reveals muscle definition, and builds a stronger foundation for future gains. If your weight is primarily from muscle mass, you can keep your current goal.';
+                suggestedGoal = 'lose-weight';
+            }
+            // Underweight person selecting Lose Weight
+            else if (bmi < 18.5 && goal === 'lose-weight') {
+                recommendation = 'Your BMI of ' + bmi.toFixed(1) + ' indicates you are underweight. Further weight loss could be harmful. We recommend building muscle to reach a healthier body composition.';
+                suggestedGoal = 'build-muscle';
+            }
+            // Obese person selecting Maintain
+            else if (bmi >= 30 && goal === 'maintain') {
+                recommendation = 'Your BMI of ' + bmi.toFixed(1) + ' suggests elevated health risks at current weight. We recommend starting with a weight loss plan for better long-term health outcomes. If your weight is primarily from muscle mass, you can keep your current goal.';
+                suggestedGoal = 'lose-weight';
+            }
+
+            if (recommendation && recText) {
+                recText.textContent = recommendation;
+
+                // Reset all modal goal buttons
+                const goalBtns = goalSwitcher.querySelectorAll('.modal-goal-btn');
+                goalBtns.forEach(btn => {
+                    btn.classList.remove('recommended', 'active-goal');
+                    const oldBadge = btn.querySelector('.goal-btn-badge');
+                    if (oldBadge) oldBadge.remove();
+
+                    if (btn.dataset.goal === suggestedGoal) {
+                        btn.classList.add('recommended');
+                        const badge = document.createElement('span');
+                        badge.className = 'goal-btn-badge';
+                        badge.textContent = 'Recommended';
+                        btn.appendChild(badge);
+                    }
+                });
+
+                // Store suggested goal and clear any previous selection
+                const modal = document.getElementById('gender-confirm-modal');
+                modal.dataset.suggestedGoal = suggestedGoal;
+                delete modal.dataset.switchedGoal;
+                goalSwitcher.classList.remove('active');
+            }
+        }
+
+        // Setup recommendation modal handlers (called once on init)
+        function setupGenderConfirmation() {
+            const modal = document.getElementById('gender-confirm-modal');
+            const proceedBtn = document.getElementById('gender-confirm-proceed');
+            const goalSwitcher = document.getElementById('modal-goal-switcher');
+            const switchBtn = document.getElementById('goal-rec-action-modal');
+            const keepBtn = document.getElementById('goal-rec-dismiss-modal');
+
+            // Goal button clicks — store selection on modal dataset
+            document.querySelectorAll('.modal-goal-btn').forEach(btn => {
+                btn.addEventListener('click', () => {
+                    // Store the new goal on the modal element
+                    modal.dataset.switchedGoal = btn.dataset.goal;
+
+                    // Visual feedback: highlight selected button
+                    document.querySelectorAll('.modal-goal-btn').forEach(b => b.classList.remove('active-goal'));
+                    btn.classList.add('active-goal');
+
+                });
+            });
+
+            // Switch Goal button — show options and auto-select recommended goal
+            switchBtn.addEventListener('click', () => {
+                goalSwitcher.classList.toggle('active');
+
+                // Auto-select the recommended goal when opening the switcher
+                if (goalSwitcher.classList.contains('active') && modal.dataset.suggestedGoal) {
+                    const suggested = modal.dataset.suggestedGoal;
+                    modal.dataset.switchedGoal = suggested;
+
+                    // Highlight the recommended button as selected
+                    document.querySelectorAll('.modal-goal-btn').forEach(b => {
+                        b.classList.remove('active-goal');
+                        if (b.dataset.goal === suggested) b.classList.add('active-goal');
+                    });
+
+                }
+            });
+
+            // Keep Goal button — hide options and clear selection
+            keepBtn.addEventListener('click', () => {
+                goalSwitcher.classList.remove('active');
+                delete modal.dataset.switchedGoal;
+                document.querySelectorAll('.modal-goal-btn').forEach(b => b.classList.remove('active-goal'));
+            });
+
+            // Close button — dismiss modal without changes
+            document.getElementById('gender-confirm-close')?.addEventListener('click', () => {
+                modal.classList.remove('active');
+                delete modal.dataset.switchedGoal;
+                populateResults();
+                goToScreen(3);
+            });
+
+            // Continue to Results — apply switched goal if any
+            proceedBtn.addEventListener('click', () => {
+                // If user switched the goal, apply it now
+                if (modal.dataset.switchedGoal) {
+                    const newGoal = modal.dataset.switchedGoal;
+                    state.fitnessGoal = newGoal;
+
+                    // Update Screen 1 goal selector to match
+                    document.querySelectorAll('.goal-option').forEach(opt => {
+                        opt.classList.remove('selected');
+                        if (opt.dataset.goal === newGoal) opt.classList.add('selected');
+                    });
+
+                }
+
+
+                // Hide modal and clean up
+                modal.classList.remove('active');
+                delete modal.dataset.switchedGoal;
+
+                // Populate results with the final goal
+                populateResults();
+                goToScreen(3);
+            });
+        }
+
+        // Position zone dots on the body photo using MediaPipe landmark coordinates.
+        // The photo uses width:100% height:auto so it fills the container with no
+        // letterboxing — normalised landmark coords map directly to % positions.
+        function positionZoneDots(landmarks) {
+            const container = document.querySelector('.body-photo-wrap');
+            const img = document.getElementById('body-result-photo');
+            if (!container || !img || !landmarks || landmarks.length < 27) {
+                console.warn('[dots] early exit — missing container/img/landmarks', { container: !!container, img: !!img, lmCount: landmarks?.length });
+                return;
+            }
+            if (!img.naturalWidth || !img.naturalHeight) {
+                console.warn('[dots] early exit — img dimensions zero', img.naturalWidth, img.naturalHeight);
+                return;
+            }
+            if (!container.clientWidth || !container.clientHeight) {
+                console.warn('[dots] early exit — container dimensions zero', container.clientWidth, container.clientHeight);
+                return;
+            }
+            console.log('[dots] running — container', container.clientWidth, 'x', container.clientHeight, 'img', img.naturalWidth, 'x', img.naturalHeight);
+
+            // Direct mapping: lx/ly (0–1) → left%/top% with clamping
+            function toContainerPct(lx, ly) {
+                return {
+                    left: Math.min(Math.max(lx * 100, 2), 85),
+                    top:  Math.min(Math.max(ly * 100, 2), 95)
+                };
+            }
+
+            const L = landmarks;
+
+            const lShoulder = L[11], rShoulder = L[12];
+            const lHip = L[23], rHip = L[24];
+
+            if (!lShoulder || !rShoulder || !lHip || !rHip) return;
+
+            const shoulderMidX = (lShoulder.x + rShoulder.x) / 2;
+            const shoulderMidY = (lShoulder.y + rShoulder.y) / 2;
+            const hipMidX      = (lHip.x + rHip.x) / 2;
+            const hipMidY      = (lHip.y + rHip.y) / 2;
+            const torsoLen     = hipMidY - shoulderMidY;
+            // Stable body centerline X: average all 4 torso landmarks to cancel
+            // out running-pose hip/shoulder rotation that skews midX left or right
+            const bodyMidX = (lShoulder.x + rShoulder.x + lHip.x + rHip.x) / 4;
+
+            // ── Zone 1: Shoulders — midpoint between both shoulders (robust to mirroring)
+            const shoulderPt = toContainerPct(shoulderMidX, shoulderMidY);
+
+            // ── Zone 2: Upper Body — body centerline, 22% down from shoulders
+            const chestPt = toContainerPct(bodyMidX, shoulderMidY + torsoLen * 0.22);
+
+            // ── Zone 3: Core — body centerline, 62% down from shoulders (navel area)
+            const corePt = toContainerPct(bodyMidX, shoulderMidY + torsoLen * 0.62);
+
+            // ── Zone 4: Legs — use knee Y for height but hipMidX for horizontal so
+            //    the dot stays on the body even when legs are spread in a running pose
+            let legPt;
+            const lKnee = L[25], rKnee = L[26];
+            const kneeY = lKnee && rKnee
+                ? (lKnee.y + rKnee.y) / 2
+                : (lKnee || rKnee)?.y ?? (hipMidY + torsoLen * 0.7);
+            legPt = toContainerPct(hipMidX, kneeY);
+
+            const zoneMap = {
+                'zone-shoulders': shoulderPt,
+                'zone-chest':     chestPt,
+                'zone-core':      corePt,
+                'zone-legs':      legPt
+            };
+
+            console.log('[dots] positions', JSON.stringify(zoneMap));
+
+            Object.entries(zoneMap).forEach(([cls, pos]) => {
+                const el = document.querySelector('.' + cls);
+                if (el) {
+                    el.style.top  = pos.top  + '%';
+                    el.style.left = pos.left + '%';
+                } else {
+                    console.warn('[dots] element not found:', cls);
+                }
+            });
+        }
+
+        // Populate results from AI analysis
+        function populateResults() {
+            const result = state.analysisResult;
+            if (!result) return;
+
+            // Show the analysed photo in the body viz card
+            const bodyPhoto = document.getElementById('body-result-photo');
+            if (bodyPhoto && state.imageData) {
+                bodyPhoto.src = state.imageData;
+                // Position zone dots AFTER goToScreen(3) makes the container visible.
+                // RAF fires after the current call stack (which includes goToScreen) clears,
+                // ensuring container.clientWidth/Height are non-zero.
+                // Zone dots are positioned from goToScreen(3) after screen is visible
+            }
+
+            // Track analysis for gamification
+            const ta = parseInt(localStorage.getItem(userKey('fixit-total-analyses')) || '0') + 1;
+            localStorage.setItem(userKey('fixit-total-analyses'), ta);
+            awardXP(30, 'analysis');
+            checkAchievements();
+
+            // Save analysis snapshot for progress comparison
+            saveSnapshot(state.analysisResult, state.imageData, {
+                gender: state.gender,
+                height: state.height,
+                weight: state.weight,
+                bmi: state.bmi,
+                goal: state.fitnessGoal
+            });
+
+            // Save session state for persistence across page refresh
+            saveSessionState();
+
+            const bodyComp = result.bodyComposition || {};
+            const muscleTone = result.muscleTone || {};
+            const posture = result.posture || {};
+            const overview = result.overview || {};
+            const zones = result.bodyZones || {};
+
+            // ========== CONFIDENCE BADGE ==========
+            const confDot = document.getElementById('confidence-dot');
+            const confText = document.getElementById('confidence-text');
+            const confDesc = document.getElementById('confidence-description');
+            if (confDot && confText && confDesc) {
+                const level = result.confidence || 'low';
+                confDot.classList.remove('medium', 'low');
+                if (level === 'medium') confDot.classList.add('medium');
+                else if (level === 'low') confDot.classList.add('low');
+
+                const labels = { high: 'High Confidence', medium: 'Medium Confidence', low: 'Low Confidence' };
+                confText.textContent = labels[level] || 'Low Confidence';
+
+                if (result.confidenceFactors && result.confidenceFactors.length) {
+                    confDesc.textContent = result.confidenceFactors.join(' · ');
+                } else {
+                    confDesc.textContent = 'Analysis based on AI skeleton detection and user input.';
+                }
+            }
+
+            // ========== RESULTS SCREEN (Screen 3) ==========
+
+            // Update body composition metric card
+            const metricValues = document.querySelectorAll('.metric-card .metric-value');
+            if (metricValues[0]) metricValues[0].textContent = bodyComp.category || 'Average';
+            if (metricValues[1]) metricValues[1].textContent = muscleTone.score ? muscleTone.score + '%' : '50%';
+
+            // Update gauge data values
+            const gaugeFills = document.querySelectorAll('.gauge-fill');
+            if (gaugeFills[0]) gaugeFills[0].dataset.value = bodyComp.score || 50;
+            if (gaugeFills[1]) gaugeFills[1].dataset.value = muscleTone.score || 50;
+            if (gaugeFills[2]) gaugeFills[2].dataset.value = posture.score || 50;
+
+            // Update gauge center values
+            const gaugeValues = document.querySelectorAll('.gauge-value');
+            if (gaugeValues[0]) gaugeValues[0].textContent = bodyComp.score || 50;
+            if (gaugeValues[1]) gaugeValues[1].textContent = muscleTone.score || 50;
+            if (gaugeValues[2]) gaugeValues[2].textContent = posture.score || 50;
+
+            // Update gauge stats for body composition
+            const gaugeInfos = document.querySelectorAll('.gauge-info');
+            if (gaugeInfos[0]) {
+                const stats = gaugeInfos[0].querySelectorAll('.stat-value');
+                if (stats[0]) stats[0].textContent = bodyComp.leanMassEstimate || 'Average';
+                if (stats[1]) stats[1].textContent = overview.symmetryScore ? 'Symmetrical' : 'Asymmetrical';
+                if (stats[2]) stats[2].textContent = bodyComp.bodyType || 'Mixed';
+            }
+            // Update gauge stats for muscle tone
+            if (gaugeInfos[1]) {
+                const stats = gaugeInfos[1].querySelectorAll('.stat-value');
+                if (stats[0]) stats[0].textContent = muscleTone.upperBody || 'Moderate';
+                if (stats[1]) stats[1].textContent = muscleTone.core || 'Moderate';
+                if (stats[2]) stats[2].textContent = muscleTone.lowerBody || 'Moderate';
+            }
+            // Update gauge stats for posture
+            if (gaugeInfos[2]) {
+                const stats = gaugeInfos[2].querySelectorAll('.stat-value');
+                if (stats[0]) stats[0].textContent = posture.shoulderAlignment || 'Unknown';
+                if (stats[1]) stats[1].textContent = posture.spineAssessment || 'Unknown';
+                if (stats[2]) stats[2].textContent = posture.hipAlignment || 'Unknown';
+            }
+
+            // Update posture metric value
+            const postureMetricValue = document.querySelectorAll('.metric-card')[2]?.querySelector('.metric-value');
+            if (postureMetricValue) {
+                postureMetricValue.textContent = posture.score >= 75 ? 'Good' : posture.score >= 50 ? 'Fair' : 'Poor';
+            }
+
+            // Update body zones on silhouette
+            const shoulderZone = document.querySelector('.zone-shoulders .zone-label');
+            const chestZone = document.querySelector('.zone-chest .zone-label');
+            const coreZone = document.querySelector('.zone-core .zone-label');
+            const legsZone = document.querySelector('.zone-legs .zone-label');
+
+            if (shoulderZone) shoulderZone.textContent = `Shoulders: ${zones.shoulders || 'Unknown'}`;
+            if (chestZone) chestZone.textContent = `Upper Body: ${zones.chest || 'Unknown'}`;
+            if (coreZone) coreZone.textContent = `Core: ${zones.core || 'Unknown'}`;
+            if (legsZone) legsZone.textContent = `Lower Body: ${zones.legs || 'Unknown'}`;
+
+            // Update overview stats
+            const overviewItems = document.querySelectorAll('.overview-item .overview-value');
+            if (overviewItems[0]) overviewItems[0].textContent = overview.fitnessIndex || 'N/A';
+            if (overviewItems[1]) overviewItems[1].textContent = overview.visualAge || 'N/A';
+            if (overviewItems[2]) overviewItems[2].textContent = overview.overallGrade || 'N/A';
+            if (overviewItems[3]) overviewItems[3].textContent = overview.symmetryScore ? overview.symmetryScore + '%' : 'N/A';
+
+            // Update confidence badge with analysis method
+            const confidenceBadge = document.querySelector('.confidence-text');
+            if (confidenceBadge) {
+                confidenceBadge.textContent = result.bmi ? 'BMI Verified' : 'Estimated';
+            }
+
+            // Update confidence description
+            const confidenceDesc = document.querySelector('.confidence-description');
+            if (confidenceDesc) {
+                if (result.bmi) {
+                    confidenceDesc.textContent = `BMI: ${result.bmi.toFixed(1)} (${result.bmiCategory}). Posture analysis by AI.`;
+                } else {
+                    confidenceDesc.textContent = 'Enter height & weight for accurate body composition analysis.';
+                }
+            }
+
+            // ========== DETAILED BREAKDOWN SCREEN (Screen 4) ==========
+
+            // Update score values in breakdown sections
+            const scoreValues = document.querySelectorAll('.score-value');
+            if (scoreValues[0]) scoreValues[0].textContent = `${bodyComp.score || 50}/100`;
+            if (scoreValues[1]) scoreValues[1].textContent = `${muscleTone.score || 50}/100`;
+            if (scoreValues[2]) scoreValues[2].textContent = `${posture.score || 50}/100`;
+
+            // Update detail values in breakdown
+            const detailValues = document.querySelectorAll('.detail-value');
+
+            // Body Composition section (indices 0-3)
+            if (detailValues[0]) {
+                detailValues[0].textContent = bodyComp.bodyType || 'Unknown';
+                detailValues[0].className = 'detail-value ' + getValueClass(bodyComp.score);
+            }
+            if (detailValues[1]) {
+                detailValues[1].textContent = `${bodyComp.shoulderWaistRatio || 'N/A'} (${bodyComp.category || 'Unknown'})`;
+                detailValues[1].className = 'detail-value ' + getValueClass(bodyComp.score);
+            }
+            if (detailValues[2]) {
+                detailValues[2].textContent = bodyComp.leanMassEstimate || 'Unknown';
+                detailValues[2].className = 'detail-value ' + getValueClass(bodyComp.score);
+            }
+            if (detailValues[3]) {
+                detailValues[3].textContent = `${bodyComp.score || 50}/100`;
+            }
+
+            // Muscle Tone section (indices 4-7)
+            if (detailValues[4]) {
+                detailValues[4].textContent = muscleTone.upperBody || 'Unknown';
+                detailValues[4].className = 'detail-value ' + getValueClass(muscleTone.score, 'upper');
+            }
+            if (detailValues[5]) {
+                detailValues[5].textContent = muscleTone.core || 'Unknown';
+                detailValues[5].className = 'detail-value ' + getValueClass(muscleTone.score, 'core');
+            }
+            if (detailValues[6]) {
+                detailValues[6].textContent = muscleTone.lowerBody || 'Unknown';
+                detailValues[6].className = 'detail-value ' + getValueClass(muscleTone.score, 'lower');
+            }
+            if (detailValues[7]) {
+                detailValues[7].textContent = `${muscleTone.score || 50}/100`;
+            }
+
+            // Posture section (indices 8-11)
+            if (detailValues[8]) {
+                detailValues[8].textContent = posture.shoulderAlignment || 'Unknown';
+                detailValues[8].className = 'detail-value ' + (posture.shoulderAlignment === 'Aligned' ? 'good' : 'warning');
+            }
+            if (detailValues[9]) {
+                detailValues[9].textContent = posture.spineAssessment || 'Unknown';
+                detailValues[9].className = 'detail-value ' + (posture.spineAssessment === 'Good' ? 'good' : 'warning');
+            }
+            if (detailValues[10]) {
+                detailValues[10].textContent = posture.hipAlignment || 'Unknown';
+                detailValues[10].className = 'detail-value ' + (posture.hipAlignment === 'Balanced' ? 'good' : 'warning');
+            }
+            if (detailValues[11]) {
+                detailValues[11].textContent = `${posture.score || 50}/100`;
+            }
+
+            // Re-generate recommendations using the CURRENT goal (may have been switched in modal)
+            const currentGoal = state.fitnessGoal;
+            const freshRecs = generateRecommendations(
+                bodyComp.score || 50,
+                posture.score || 50,
+                muscleTone.score || 50,
+                bodyComp.category || 'Average',
+                currentGoal
+            );
+            updateRecommendations(freshRecs);
+
+            // Update AI reasoning explainability text
+            updateExplainabilityText(result);
+
+            // Animate gauges with new values
+            animateGauges();
+
+            // Populate goal-based nutrition targets
+            populateGoalBasedNutrition();
+
+            // Update workout screen with current goal
+            updateWorkoutForGoal(currentGoal);
+
+            // Update simulator label with current goal
+            updateSimulatorForGoal(currentGoal);
+        }
+
+        // Update explainability text based on analysis
+        function updateExplainabilityText(result) {
+            const bodyComp = result.bodyComposition || {};
+            const muscleTone = result.muscleTone || {};
+            const posture = result.posture || {};
+
+            // Body composition explanation
+            const bodyExplain = document.getElementById('explain-body-comp');
+            if (bodyExplain) {
+                let text = `The <strong>${bodyComp.category || 'Unknown'}</strong> classification is based on detected `;
+                text += `<strong>hip-to-height ratio</strong> and <strong>body width proportions</strong>. `;
+                text += `Body type identified as <strong>${bodyComp.bodyType || 'Unknown'}</strong> `;
+                text += `with ${bodyComp.leanMassEstimate || 'unknown'} lean mass estimation.`;
+                bodyExplain.innerHTML = text;
+            }
+
+            // Muscle tone explanation
+            const muscleExplain = document.getElementById('explain-muscle-tone');
+            if (muscleExplain) {
+                let text = `Upper body assessment: <strong>${muscleTone.upperBody || 'Unknown'}</strong> based on shoulder width analysis. `;
+                text += `Core assessment: <strong>${muscleTone.core || 'Unknown'}</strong>. `;
+                text += `Lower body: <strong>${muscleTone.lowerBody || 'Unknown'}</strong> based on hip and leg proportions.`;
+                muscleExplain.innerHTML = text;
+            }
+
+            // Posture explanation
+            const postureExplain = document.getElementById('explain-posture');
+            if (postureExplain) {
+                let text = `Shoulder alignment: <strong>${posture.shoulderAlignment || 'Unknown'}</strong>. `;
+                text += `Spine assessment: <strong>${posture.spineAssessment || 'Unknown'}</strong>. `;
+                text += `Hip alignment: <strong>${posture.hipAlignment || 'Unknown'}</strong>.`;
+                postureExplain.innerHTML = text;
+            }
+        }
+
+        // Helper function to determine value class (good/warning/alert)
+        function getValueClass(score, type = null) {
+            if (score >= 65) return 'good';
+            if (score >= 45) return 'warning';
+            return 'alert';
+        }
+
+        // Update recommendation lists in breakdown
+        function updateRecommendations(recommendations) {
+            const recLists = document.querySelectorAll('.recommendation-list');
+            recLists.forEach(list => {
+                const items = list.querySelectorAll('.recommendation-item span');
+                recommendations.forEach((rec, index) => {
+                    if (items[index]) {
+                        items[index].textContent = rec;
+                    }
+                });
+            });
+        }
+
+
+        // Update workout screen to reflect the current goal
+        function updateWorkoutForGoal(goal) {
+            if (!goal) return;
+            const goalLabels = {
+                'lose-weight': 'Fat Loss',
+                'build-muscle': 'Muscle Building',
+                'maintain': 'Maintenance',
+                'recomp': 'Body Recomposition'
+            };
+            const goalDescriptions = {
+                'lose-weight': 'Personalized exercise plan focused on burning fat while preserving lean muscle mass.',
+                'build-muscle': 'Personalized exercise plan focused on progressive overload and muscle hypertrophy.',
+                'maintain': 'Personalized exercise plan focused on maintaining your current fitness and overall health.',
+                'recomp': 'Personalized exercise plan focused on building muscle while reducing body fat.'
+            };
+            // Update workout subtitle
+            const workoutSubtitle = document.querySelector('#screen-workout .subtitle');
+            if (workoutSubtitle) {
+                workoutSubtitle.textContent = goalDescriptions[goal] || workoutSubtitle.textContent;
+            }
+        }
+
+        // Update simulator screen to reflect the current goal
+        function updateSimulatorForGoal(goal) {
+            if (!goal) return;
+            const goalLabels = {
+                'lose-weight': 'Goal: Fat Loss',
+                'build-muscle': 'Goal: Muscle Building',
+                'maintain': 'Goal: Maintenance',
+                'recomp': 'Goal: Body Recomposition'
+            };
+            const goalDescriptions = {
+                'lose-weight': 'See how a focused fat loss lifestyle may transform your body over time.',
+                'build-muscle': 'See how a muscle-building lifestyle may transform your body over time.',
+                'maintain': 'See how maintaining a healthy lifestyle keeps your body balanced over time.',
+                'recomp': 'See how body recomposition may reshape your physique over time.'
+            };
+            const simSubtitle = document.querySelector('#screen-simulator .subtitle');
+            if (simSubtitle) {
+                simSubtitle.textContent = goalDescriptions[goal] || simSubtitle.textContent;
+            }
+            const simGoalBadge = document.getElementById('sim-goal-badge');
+            if (simGoalBadge) {
+                simGoalBadge.textContent = goalLabels[goal] || '';
+            }
+        }
+
+        // Calculate and populate goal-based nutrition
+        function populateGoalBasedNutrition() {
+            const goal = state.fitnessGoal;
+            const weight = state.weight; // in kg
+            const height = state.height; // in cm
+            const gender = state.gender || 'male';
+            const age = state.age || 29; // default to mid-20s if no age provided
+            const activityLevel = document.getElementById('activity-level')?.value || 'moderate';
+
+            if (!goal || !weight) return;
+
+            const config = getGoalConfig(goal);
+            const weightLbs = weight * 2.205; // Convert to lbs for protein calc
+
+            const activityMultipliers = {
+                'sedentary': 1.2,
+                'light': 1.375,
+                'moderate': 1.55,
+                'very': 1.725,
+                'athlete': 1.9
+            };
+            const multiplier = activityMultipliers[activityLevel] || 1.55;
+
+            // Mifflin-St Jeor BMR formula
+            let bmr;
+            if (height) {
+                bmr = 10 * weight + 6.25 * height - 5 * age + (gender === 'male' ? 5 : -161);
+            } else {
+                // Fallback if height not set: use weight-only estimate
+                bmr = weight * 24;
+            }
+            bmr = Math.round(bmr);
+            const tdee = Math.round(bmr * multiplier);
+            const targetCalories = Math.round(tdee + config.calorieAdjustment);
+
+            // Store BMR/TDEE for the BMR card
+            state._bmr = bmr;
+            state._tdee = tdee;
+
+            // Calculate macros
+            const proteinGrams = Math.round(weightLbs * config.proteinMultiplier);
+            const proteinCalories = proteinGrams * 4;
+            const remainingCalories = targetCalories - proteinCalories;
+            const carbCalories = Math.round(remainingCalories * (config.carbPercentage / (config.carbPercentage + config.fatPercentage)));
+            const fatCalories = remainingCalories - carbCalories;
+            const carbGrams = Math.round(carbCalories / 4);
+            const fatGrams = Math.round(fatCalories / 9);
+
+            // Update UI elements
+            const calorieDisplay = document.getElementById('calorie-target-display');
+            const proteinTarget = document.getElementById('protein-target-display');
+            const proteinMacro = document.getElementById('protein-macro-display');
+            const carbsMacro = document.getElementById('carbs-macro-display');
+            const fatsMacro = document.getElementById('fats-macro-display');
+            const goalTitle = document.getElementById('nutrition-goal-title');
+            const goalMessage = document.getElementById('nutrition-goal-message');
+
+            // Store targets for food log live tracking
+            state.macroTargets = { calories: targetCalories, protein: proteinGrams, carbs: carbGrams, fats: fatGrams };
+            localStorage.setItem(userKey('fixit-macro-targets'), JSON.stringify(state.macroTargets));
+
+            if (calorieDisplay) calorieDisplay.textContent = targetCalories.toLocaleString();
+            if (proteinTarget) proteinTarget.textContent = `${proteinGrams}g`;
+            if (proteinMacro) proteinMacro.innerHTML = `<span id="macro-eaten-protein">0g</span> / ${proteinGrams}g target`;
+            if (carbsMacro) carbsMacro.innerHTML = `<span id="macro-eaten-carbs">0g</span> / ${carbGrams}g target`;
+            if (fatsMacro) fatsMacro.innerHTML = `<span id="macro-eaten-fats">0g</span> / ${fatGrams}g target`;
+
+            // Update goal-specific messaging
+            const goalTitles = {
+                'lose-weight': 'Caloric Deficit for Fat Loss',
+                'build-muscle': 'Caloric Surplus for Muscle Growth',
+                'maintain': 'Balanced Nutrition for Maintenance',
+                'recomp': 'High Protein for Body Recomposition'
+            };
+            const goalMessages = {
+                'lose-weight': `Based on your ${config.name} goal, we recommend a ${Math.abs(config.calorieAdjustment)} calorie deficit while maintaining high protein to preserve muscle mass.`,
+                'build-muscle': `For ${config.name}, you need a ${config.calorieAdjustment} calorie surplus with emphasis on protein (${config.proteinMultiplier}g per lb) for optimal muscle growth.`,
+                'maintain': `For weight maintenance, we've calculated your daily needs to keep your current physique while supporting overall health.`,
+                'recomp': `Body recomposition requires precise nutrition - high protein to build muscle while eating at maintenance to gradually lose fat.`
+            };
+
+            if (goalTitle) goalTitle.textContent = goalTitles[goal] || 'Your Nutrition Plan';
+            if (goalMessage) goalMessage.textContent = goalMessages[goal] || config.primaryMessage;
+
+            // Update BMR card with fresh values
+            renderBMRCard();
+        }
+
+        // ========== BMR / TDEE CARD ==========
+        function computeBMR(weight, height, age, gender) {
+            if (!weight) return null;
+            const w = weight; // kg
+            const h = height || (weight * 2.3); // rough cm estimate if missing (won't be used if height set)
+            const a = age || 29;
+            const g = gender || 'male';
+            if (!height) return Math.round(w * 24); // fallback
+            return Math.round(10 * w + 6.25 * h - 5 * a + (g === 'male' ? 5 : -161));
+        }
+
+        function renderBMRCard() {
+            const bmrCard = document.getElementById('bmr-card');
+            if (!bmrCard) return;
+
+            const weight = state.weight;
+            const height = state.height;
+            const gender = state.gender || 'male';
+            const age = state.age || 29;
+            const goal = state.fitnessGoal || 'maintain';
+
+            if (!weight) {
+                // No data yet — leave card in placeholder state
+                return;
+            }
+
+            // Sync selects to current state
+            const actSel = document.getElementById('bmr-activity-select');
+            const goalSel = document.getElementById('bmr-goal-select');
+            const activityLevel = actSel?.value || document.getElementById('activity-level')?.value || 'moderate';
+
+            // Sync goal select to current fitness goal if not yet touched
+            if (goalSel && !goalSel._userChanged) {
+                goalSel.value = goal;
+            }
+
+            const activityMultipliers = { sedentary: 1.2, light: 1.375, moderate: 1.55, very: 1.725, athlete: 1.9 };
+            const mult = activityMultipliers[activityLevel] || 1.55;
+
+            const bmr = state._bmr || computeBMR(weight, height, age, gender);
+            const tdee = Math.round(bmr * mult);
+            const goalAdjustments = { 'lose-weight': -500, 'build-muscle': 300, 'maintain': 0, 'recomp': 0 };
+            const selectedGoal = goalSel?.value || goal;
+            const adj = goalAdjustments[selectedGoal] ?? 0;
+            const target = tdee + adj;
+
+            // Update stat blocks
+            const bmrEl = document.getElementById('bmr-display');
+            const tdeeEl = document.getElementById('tdee-display');
+            const targetEl = document.getElementById('bmr-target-display');
+            if (bmrEl) bmrEl.textContent = bmr.toLocaleString();
+            if (tdeeEl) tdeeEl.textContent = tdee.toLocaleString();
+            if (targetEl) targetEl.textContent = target.toLocaleString();
+
+            // Update formula text
+            const formulaEl = document.getElementById('bmr-formula-text');
+            if (formulaEl && height) {
+                const genderConst = gender === 'male' ? '+5' : '−161';
+                formulaEl.textContent = `10×${weight} + 6.25×${height} − 5×${age} ${genderConst} = ${bmr} kcal`;
+            }
+
+            // Show card
+            bmrCard.style.display = '';
+        }
+
+        function setupBMRCalculator() {
+            const recalcBtn = document.getElementById('bmr-recalc-btn');
+            const goalSel = document.getElementById('bmr-goal-select');
+
+            if (goalSel) {
+                goalSel.addEventListener('change', () => { goalSel._userChanged = true; });
+            }
+
+            if (recalcBtn) {
+                recalcBtn.addEventListener('click', () => {
+                    const actSel = document.getElementById('bmr-activity-select');
+                    const goalSel = document.getElementById('bmr-goal-select');
+                    const activityLevel = actSel?.value || 'moderate';
+                    const selectedGoal = goalSel?.value || state.fitnessGoal || 'maintain';
+
+                    const weight = state.weight;
+                    const height = state.height;
+                    const gender = state.gender || 'male';
+                    const age = state.age || 29;
+
+                    if (!weight) return;
+
+                    const activityMultipliers = { sedentary: 1.2, light: 1.375, moderate: 1.55, very: 1.725, athlete: 1.9 };
+                    const mult = activityMultipliers[activityLevel] || 1.55;
+                    const bmr = computeBMR(weight, height, age, gender);
+                    const tdee = Math.round(bmr * mult);
+                    const goalAdjustments = { 'lose-weight': -500, 'build-muscle': 300, 'maintain': 0, 'recomp': 0 };
+                    const adj = goalAdjustments[selectedGoal] ?? 0;
+                    const targetCalories = tdee + adj;
+
+                    // Apply to macro targets
+                    const config = getGoalConfig(selectedGoal);
+                    const weightLbs = weight * 2.205;
+                    const proteinGrams = Math.round(weightLbs * config.proteinMultiplier);
+                    const proteinCalories = proteinGrams * 4;
+                    const remaining = targetCalories - proteinCalories;
+                    const carbCalories = Math.round(remaining * (config.carbPercentage / (config.carbPercentage + config.fatPercentage)));
+                    const fatCalories = remaining - carbCalories;
+                    const carbGrams = Math.round(carbCalories / 4);
+                    const fatGrams = Math.round(fatCalories / 9);
+
+                    state._bmr = bmr;
+                    state._tdee = tdee;
+                    state.macroTargets = { calories: targetCalories, protein: proteinGrams, carbs: carbGrams, fats: fatGrams };
+                    localStorage.setItem(userKey('fixit-macro-targets'), JSON.stringify(state.macroTargets));
+
+                    // Update macro targets display
+                    const calorieDisplay = document.getElementById('calorie-target-display');
+                    const proteinMacro = document.getElementById('protein-macro-display');
+                    const carbsMacro = document.getElementById('carbs-macro-display');
+                    const fatsMacro = document.getElementById('fats-macro-display');
+                    if (calorieDisplay) calorieDisplay.textContent = targetCalories.toLocaleString();
+                    if (proteinMacro) proteinMacro.innerHTML = `<span id="macro-eaten-protein">0g</span> / ${proteinGrams}g target`;
+                    if (carbsMacro) carbsMacro.innerHTML = `<span id="macro-eaten-carbs">0g</span> / ${carbGrams}g target`;
+                    if (fatsMacro) fatsMacro.innerHTML = `<span id="macro-eaten-fats">0g</span> / ${fatGrams}g target`;
+
+                    // Re-render the BMR card with updated values
+                    renderBMRCard();
+
+                    // Visual feedback
+                    recalcBtn.textContent = 'Applied!';
+                    recalcBtn.style.background = 'var(--accent-success)';
+                    setTimeout(() => {
+                        recalcBtn.textContent = 'Recalculate & Apply';
+                        recalcBtn.style.background = '';
+                    }, 1800);
+                });
+            }
+        }
+
+        // Mock data fallback
+        // Results
+        function setupResults() {
+            document.getElementById('view-details-btn').addEventListener('click', () => {
+                goToScreen(4);
+            });
+
+            document.getElementById('open-simulator-btn').addEventListener('click', () => {
+                goToScreen(5);
+            });
+
+            document.getElementById('open-workout-btn').addEventListener('click', () => {
+                goToScreen(6);
+            });
+
+            document.getElementById('open-nutrition-btn').addEventListener('click', () => {
+                goToScreen(7);
+            });
+
+            document.getElementById('open-progress-btn').addEventListener('click', () => {
+                goToScreen(8);
+            });
+
+            document.getElementById('open-wearable-btn').addEventListener('click', () => {
+                goToScreen(9);
+            });
+
+            document.getElementById('new-analysis-btn').addEventListener('click', () => {
+                clearPreview();
+                goToScreen(1);
+            });
+        }
+
+        // Animate gauges
+        function animateGauges() {
+            const gauges = document.querySelectorAll('.gauge-fill');
+            gauges.forEach(gauge => {
+                const value = parseInt(gauge.dataset.value) || 0;
+                const circumference = 2 * Math.PI * 40;
+                const offset = circumference - (value / 100) * circumference;
+                gauge.style.strokeDashoffset = offset;
+
+                // Apply score-based gradient class
+                gauge.classList.remove('score-low', 'score-medium', 'score-high');
+                if (value < 40) {
+                    gauge.classList.add('score-low');
+                } else if (value < 70) {
+                    gauge.classList.add('score-medium');
+                } else {
+                    gauge.classList.add('score-high');
+                }
+            });
+        }
+
+        // Breakdown
+        function setupBreakdown() {
+            document.getElementById('back-to-results').addEventListener('click', () => {
+                goToScreen(3);
+            });
+
+            // Explainability toggle
+            const toggle = document.getElementById('explainability-toggle');
+            toggle.addEventListener('click', () => {
+                state.explainabilityOn = !state.explainabilityOn;
+                toggle.classList.toggle('active', state.explainabilityOn);
+
+                document.querySelectorAll('.explainability-box').forEach(box => {
+                    box.classList.toggle('visible', state.explainabilityOn);
+                });
+            });
+
+            // Section expansion
+            document.querySelectorAll('.section-header').forEach(header => {
+                header.addEventListener('click', () => {
+                    const section = header.parentElement;
+                    section.classList.toggle('expanded');
+                });
+            });
+        }
+
+        // Simulator
+        function setupSimulator() {
+            // Scenario data with AI transformation prompts
+            const scenarios = {
+                active: {
+                    fitness: { value: 8.1, change: '+0.9', pct: '+12.5%' },
+                    muscle: { value: 78, change: '+10%', pct: 'Improved' },
+                    posture: { value: 88, change: '+10', pct: '+13%' },
+                    age: { value: 25, change: '-3', pct: 'Years Younger' },
+                    positive: true,
+                    prompt: 'Transform this person to look more fit and athletic with improved muscle tone, better posture, healthier skin, and a more energetic appearance'
+                },
+                sedentary: {
+                    fitness: { value: 6.4, change: '-0.8', pct: '-11%' },
+                    muscle: { value: 60, change: '-8%', pct: 'Declined' },
+                    posture: { value: 70, change: '-8', pct: '-10%' },
+                    age: { value: 31, change: '+3', pct: 'Years Older' },
+                    positive: false,
+                    prompt: 'Transform this person to look slightly less fit with reduced muscle definition, slightly slouched posture, and a more tired appearance'
+                },
+                intensive: {
+                    fitness: { value: 8.8, change: '+1.6', pct: '+22%' },
+                    muscle: { value: 88, change: '+20%', pct: 'Significant' },
+                    posture: { value: 93, change: '+15', pct: '+19%' },
+                    age: { value: 23, change: '-5', pct: 'Years Younger' },
+                    positive: true,
+                    prompt: 'Transform this person to look very fit and muscular with well-defined muscles, excellent posture, vibrant healthy skin, and a strong athletic physique'
+                },
+                nutrition: {
+                    fitness: { value: 7.8, change: '+0.6', pct: '+8%' },
+                    muscle: { value: 75, change: '+7%', pct: 'Moderate' },
+                    posture: { value: 80, change: '+2', pct: '+3%' },
+                    age: { value: 26, change: '-2', pct: 'Years Younger' },
+                    positive: true,
+                    prompt: 'Transform this person to look healthier with better skin tone, slightly leaner appearance, and a more refreshed energetic look'
+                }
+            };
+
+            // Visual transformation configuration (CSS-based for reliability)
+            let isGenerating = false;
+
+            // Scenario-specific transformations based on timeline
+            // For muscle gain: use high contrast for definition (no horizontal stretch to avoid cropping)
+            // For weight loss: compress horizontally (body appears slimmer)
+            const scenarioTransforms = {
+                // Active lifestyle: Leaner, more toned (compress horizontally)
+                active: {
+                    1: { scaleX: 0.96, brightness: 1.02, contrast: 1.08, saturate: 1.08 },
+                    2: { scaleX: 0.92, brightness: 1.03, contrast: 1.12, saturate: 1.1 },
+                    3: { scaleX: 0.88, brightness: 1.04, contrast: 1.15, saturate: 1.12 },
+                    4: { scaleX: 0.84, brightness: 1.05, contrast: 1.18, saturate: 1.14 },
+                    5: { scaleX: 0.80, brightness: 1.06, contrast: 1.2, saturate: 1.16 }
+                },
+                // Intensive training: adapts based on user's fitness goal (set in generateProjection)
+                // Default = body recomposition (lose fat + gain definition)
+                intensive: {
+                    1: { scaleX: 0.97, brightness: 1.03, contrast: 1.18, saturate: 1.10 },
+                    2: { scaleX: 0.93, brightness: 1.05, contrast: 1.25, saturate: 1.14 },
+                    3: { scaleX: 0.89, brightness: 1.06, contrast: 1.32, saturate: 1.18 },
+                    4: { scaleX: 0.85, brightness: 1.07, contrast: 1.38, saturate: 1.22 },
+                    5: { scaleX: 0.80, brightness: 1.08, contrast: 1.44, saturate: 1.25 }
+                },
+                // Nutrition focus: Healthier appearance, slight slimming
+                nutrition: {
+                    1: { scaleX: 0.97, brightness: 1.02, contrast: 1.05, saturate: 1.1 },
+                    2: { scaleX: 0.94, brightness: 1.03, contrast: 1.08, saturate: 1.12 },
+                    3: { scaleX: 0.91, brightness: 1.04, contrast: 1.1, saturate: 1.14 },
+                    4: { scaleX: 0.88, brightness: 1.05, contrast: 1.12, saturate: 1.16 },
+                    5: { scaleX: 0.85, brightness: 1.06, contrast: 1.14, saturate: 1.18 }
+                },
+                // Sedentary: Body gets wider (weight gain) + duller appearance
+                sedentary: {
+                    1: { scaleX: 1.02, brightness: 0.98, contrast: 0.95, saturate: 0.94 },
+                    2: { scaleX: 1.05, brightness: 0.97, contrast: 0.92, saturate: 0.90 },
+                    3: { scaleX: 1.08, brightness: 0.96, contrast: 0.90, saturate: 0.87 },
+                    4: { scaleX: 1.12, brightness: 0.95, contrast: 0.88, saturate: 0.84 },
+                    5: { scaleX: 1.16, brightness: 0.94, contrast: 0.86, saturate: 0.82 }
+                }
+            };
+
+            const timelineLabels = ['1 Month', '6 Months', '1 Year', '2 Years', '5 Years'];
+            const timelineMultipliers = [0.15, 1, 1.8, 2.5, 3.5];
+
+            // Goal-specific overrides for positive scenarios (active, intensive, nutrition)
+            // Each goal changes how the body transformation looks
+            const goalOverrides = {
+                'build-muscle': {
+                    active: {
+                        1: { scaleX: 1.01, brightness: 1.02, contrast: 1.10, saturate: 1.06 },
+                        2: { scaleX: 1.03, brightness: 1.03, contrast: 1.14, saturate: 1.08 },
+                        3: { scaleX: 1.05, brightness: 1.04, contrast: 1.18, saturate: 1.10 },
+                        4: { scaleX: 1.07, brightness: 1.05, contrast: 1.22, saturate: 1.12 },
+                        5: { scaleX: 1.10, brightness: 1.06, contrast: 1.26, saturate: 1.14 }
+                    },
+                    intensive: {
+                        1: { scaleX: 1.02, brightness: 1.02, contrast: 1.15, saturate: 1.10 },
+                        2: { scaleX: 1.05, brightness: 1.03, contrast: 1.22, saturate: 1.14 },
+                        3: { scaleX: 1.08, brightness: 1.04, contrast: 1.28, saturate: 1.18 },
+                        4: { scaleX: 1.11, brightness: 1.05, contrast: 1.34, saturate: 1.22 },
+                        5: { scaleX: 1.15, brightness: 1.06, contrast: 1.40, saturate: 1.25 }
+                    },
+                    nutrition: {
+                        1: { scaleX: 1.01, brightness: 1.02, contrast: 1.08, saturate: 1.08 },
+                        2: { scaleX: 1.03, brightness: 1.03, contrast: 1.12, saturate: 1.10 },
+                        3: { scaleX: 1.05, brightness: 1.04, contrast: 1.15, saturate: 1.12 },
+                        4: { scaleX: 1.07, brightness: 1.05, contrast: 1.18, saturate: 1.14 },
+                        5: { scaleX: 1.10, brightness: 1.06, contrast: 1.20, saturate: 1.16 }
+                    }
+                },
+                'lose-weight': {
+                    active: {
+                        1: { scaleX: 0.95, brightness: 1.02, contrast: 1.10, saturate: 1.08 },
+                        2: { scaleX: 0.90, brightness: 1.03, contrast: 1.15, saturate: 1.10 },
+                        3: { scaleX: 0.85, brightness: 1.04, contrast: 1.18, saturate: 1.12 },
+                        4: { scaleX: 0.80, brightness: 1.05, contrast: 1.22, saturate: 1.14 },
+                        5: { scaleX: 0.75, brightness: 1.06, contrast: 1.25, saturate: 1.16 }
+                    },
+                    intensive: {
+                        1: { scaleX: 0.96, brightness: 1.03, contrast: 1.18, saturate: 1.10 },
+                        2: { scaleX: 0.91, brightness: 1.05, contrast: 1.25, saturate: 1.14 },
+                        3: { scaleX: 0.86, brightness: 1.06, contrast: 1.32, saturate: 1.18 },
+                        4: { scaleX: 0.81, brightness: 1.07, contrast: 1.38, saturate: 1.22 },
+                        5: { scaleX: 0.76, brightness: 1.08, contrast: 1.44, saturate: 1.25 }
+                    },
+                    nutrition: {
+                        1: { scaleX: 0.96, brightness: 1.02, contrast: 1.06, saturate: 1.10 },
+                        2: { scaleX: 0.92, brightness: 1.03, contrast: 1.10, saturate: 1.12 },
+                        3: { scaleX: 0.88, brightness: 1.04, contrast: 1.14, saturate: 1.14 },
+                        4: { scaleX: 0.84, brightness: 1.05, contrast: 1.16, saturate: 1.16 },
+                        5: { scaleX: 0.80, brightness: 1.06, contrast: 1.18, saturate: 1.18 }
+                    }
+                },
+                'recomp': {
+                    intensive: {
+                        1: { scaleX: 0.97, brightness: 1.03, contrast: 1.18, saturate: 1.10 },
+                        2: { scaleX: 0.93, brightness: 1.05, contrast: 1.25, saturate: 1.14 },
+                        3: { scaleX: 0.89, brightness: 1.06, contrast: 1.32, saturate: 1.18 },
+                        4: { scaleX: 0.85, brightness: 1.07, contrast: 1.38, saturate: 1.22 },
+                        5: { scaleX: 0.80, brightness: 1.08, contrast: 1.44, saturate: 1.25 }
+                    }
+                    // active and nutrition use defaults
+                },
+                'maintain': {
+                    active: {
+                        1: { scaleX: 1.0, brightness: 1.01, contrast: 1.05, saturate: 1.04 },
+                        2: { scaleX: 1.0, brightness: 1.02, contrast: 1.08, saturate: 1.06 },
+                        3: { scaleX: 1.0, brightness: 1.02, contrast: 1.10, saturate: 1.07 },
+                        4: { scaleX: 1.0, brightness: 1.03, contrast: 1.12, saturate: 1.08 },
+                        5: { scaleX: 1.0, brightness: 1.03, contrast: 1.14, saturate: 1.10 }
+                    },
+                    intensive: {
+                        1: { scaleX: 0.99, brightness: 1.01, contrast: 1.08, saturate: 1.04 },
+                        2: { scaleX: 0.98, brightness: 1.02, contrast: 1.12, saturate: 1.06 },
+                        3: { scaleX: 0.97, brightness: 1.03, contrast: 1.15, saturate: 1.08 },
+                        4: { scaleX: 0.96, brightness: 1.03, contrast: 1.18, saturate: 1.10 },
+                        5: { scaleX: 0.95, brightness: 1.04, contrast: 1.20, saturate: 1.12 }
+                    },
+                    nutrition: {
+                        1: { scaleX: 1.0, brightness: 1.01, contrast: 1.04, saturate: 1.06 },
+                        2: { scaleX: 1.0, brightness: 1.02, contrast: 1.06, saturate: 1.08 },
+                        3: { scaleX: 1.0, brightness: 1.02, contrast: 1.08, saturate: 1.10 },
+                        4: { scaleX: 1.0, brightness: 1.03, contrast: 1.10, saturate: 1.12 },
+                        5: { scaleX: 1.0, brightness: 1.03, contrast: 1.12, saturate: 1.14 }
+                    }
+                }
+            };
+
+            let currentScenario = 'active';
+            let currentTimeline = 2;
+
+            // Update display based on scenario and timeline
+            function updateProjection() {
+                const scenario = scenarios[currentScenario];
+                const multiplier = timelineMultipliers[currentTimeline - 1];
+                const timeLabel = timelineLabels[currentTimeline - 1];
+
+                // Update timeline labels
+                document.getElementById('timeline-display').textContent = timeLabel;
+                document.getElementById('timeline-label').textContent = timeLabel;
+                document.getElementById('scenario-time').textContent = 'After ' + timeLabel.toLowerCase();
+
+                // Calculate projected values with timeline multiplier
+                const baseFitness = 7.2;
+                const baseMuscle = 68;
+                const basePosture = 78;
+                const baseAge = 28;
+
+                const fitnessDelta = (scenario.fitness.value - baseFitness) * Math.min(multiplier, 1.5);
+                const muscleDelta = (scenario.muscle.value - baseMuscle) * Math.min(multiplier, 1.5);
+                const postureDelta = (scenario.posture.value - basePosture) * Math.min(multiplier, 1.5);
+                const ageDelta = (scenario.age.value - baseAge) * Math.min(multiplier, 1.5);
+
+                const projectedFitness = (baseFitness + fitnessDelta).toFixed(1);
+                const projectedMuscle = Math.round(baseMuscle + muscleDelta);
+                const projectedPosture = Math.round(basePosture + postureDelta);
+                const projectedAge = Math.round(baseAge + ageDelta);
+
+                // Update avatar stats
+                document.getElementById('future-fitness').textContent = projectedFitness;
+                document.getElementById('future-muscle').textContent = projectedMuscle + '%';
+                document.getElementById('future-age').textContent = projectedAge;
+                document.getElementById('projected-visual-age').textContent = projectedAge;
+
+                // Update years younger/older text
+                const yearsDiff = Math.abs(baseAge - projectedAge);
+                const yearsText = yearsDiff + ' year' + (yearsDiff !== 1 ? 's' : '') + (projectedAge < baseAge ? ' younger' : ' older');
+                document.getElementById('years-younger').textContent = yearsText;
+
+                // Update impact summary
+                const fitnessChange = fitnessDelta >= 0 ? '+' + fitnessDelta.toFixed(1) : fitnessDelta.toFixed(1);
+                const muscleChange = muscleDelta >= 0 ? '+' + Math.round(muscleDelta) + '%' : Math.round(muscleDelta) + '%';
+                const postureChange = postureDelta >= 0 ? '+' + Math.round(postureDelta) : Math.round(postureDelta);
+                const ageChange = ageDelta <= 0 ? Math.round(ageDelta) : '+' + Math.round(ageDelta);
+
+                document.getElementById('impact-fitness').textContent = fitnessChange;
+                document.getElementById('impact-muscle').textContent = muscleChange;
+                document.getElementById('impact-posture').textContent = postureChange;
+                document.getElementById('impact-age').textContent = ageChange;
+
+                // Update impact change badges
+                const impactElements = [
+                    { id: 'impact-fitness-pct', positive: fitnessDelta >= 0, text: scenario.positive ? '+' + Math.round(Math.abs(fitnessDelta / baseFitness) * 100) + '%' : Math.round(fitnessDelta / baseFitness * 100) + '%' },
+                    { id: 'impact-muscle-pct', positive: muscleDelta >= 0, text: scenario.positive ? 'Improved' : 'Declined' },
+                    { id: 'impact-posture-pct', positive: postureDelta >= 0, text: scenario.positive ? '+' + Math.round(Math.abs(postureDelta / basePosture) * 100) + '%' : Math.round(postureDelta / basePosture * 100) + '%' },
+                    { id: 'impact-age-pct', positive: ageDelta <= 0, text: ageDelta <= 0 ? 'Years Younger' : 'Years Older' }
+                ];
+
+                impactElements.forEach(el => {
+                    const element = document.getElementById(el.id);
+                    element.textContent = el.text;
+                    element.className = 'impact-change ' + (el.positive ? 'positive' : 'negative');
+                });
+
+                // Update future avatar stat colors
+                const futureStats = document.querySelectorAll('.avatar-stat-value.future');
+                futureStats.forEach(stat => {
+                    stat.style.color = scenario.positive ? 'var(--accent-purple)' : 'var(--accent-coral)';
+                });
+            }
+
+            // Sharpen image using convolution kernel (enhances muscle definition)
+            function sharpenImage(imageData, intensity = 1) {
+                const data = imageData.data;
+                const width = imageData.width;
+                const height = imageData.height;
+                const output = new Uint8ClampedArray(data);
+
+                // Sharpening kernel (unsharp mask style)
+                const kernel = [
+                    0, -intensity, 0,
+                    -intensity, 1 + 4 * intensity, -intensity,
+                    0, -intensity, 0
+                ];
+
+                for (let y = 1; y < height - 1; y++) {
+                    for (let x = 1; x < width - 1; x++) {
+                        for (let c = 0; c < 3; c++) { // RGB channels only
+                            let sum = 0;
+                            for (let ky = -1; ky <= 1; ky++) {
+                                for (let kx = -1; kx <= 1; kx++) {
+                                    const idx = ((y + ky) * width + (x + kx)) * 4 + c;
+                                    sum += data[idx] * kernel[(ky + 1) * 3 + (kx + 1)];
+                                }
+                            }
+                            const idx = (y * width + x) * 4 + c;
+                            output[idx] = Math.min(255, Math.max(0, sum));
+                        }
+                    }
+                }
+
+                return new ImageData(output, width, height);
+            }
+
+            // Canvas-based transformation (keeps image size, transforms body inside)
+            // ============================================================
+            // SIMPLE PROPORTIONAL BODY TRANSFORMATION
+            // Uses canvas scaling - reliable, no artifacts
+            // ============================================================
+
+            function transformBody(img, scaleX, filters) {
+                const width = img.width;
+                const height = img.height;
+
+                // Create canvas at original dimensions
+                const canvas = document.createElement('canvas');
+                canvas.width = width;
+                canvas.height = height;
+                const ctx = canvas.getContext('2d');
+
+                // Apply color filters
+                ctx.filter = `brightness(${filters.brightness}) contrast(${filters.contrast}) saturate(${filters.saturate})`;
+
+                // For slimming (scaleX < 1): make image narrower, stretch vertically to fill
+                // For bulking (scaleX > 1): make image wider, compress vertically to fit
+                // This creates a proportional body transformation
+
+                if (scaleX < 1) {
+                    // SLIMMING: Draw narrower + taller image, centered
+                    // First fill background by stretching edge columns to avoid black bars
+                    // Left edge fill
+                    ctx.drawImage(img, 0, 0, 2, height, 0, 0, width / 2, height);
+                    // Right edge fill
+                    ctx.drawImage(img, width - 2, 0, 2, height, width / 2, 0, width / 2, height);
+
+                    // Calculate narrower dimensions
+                    const newWidth = width * scaleX;
+                    const offsetX = (width - newWidth) / 2;
+
+                    // Slight vertical stretch to make person appear taller/leaner
+                    const scaleY = 1 + (1 - scaleX) * 0.25;
+                    const newHeight = height * scaleY;
+                    const offsetY = (height - newHeight) / 2;
+
+                    // Draw the narrower image on top
+                    ctx.drawImage(img, offsetX, offsetY, newWidth, newHeight);
+
+                } else if (scaleX > 1) {
+                    // BULKING: Draw wider image, crop edges naturally
+                    const newWidth = width * scaleX;
+                    const offsetX = (width - newWidth) / 2;
+                    ctx.drawImage(img, offsetX, 0, newWidth, height);
+
+                } else {
+                    // NO CHANGE: Just apply filters
+                    ctx.drawImage(img, 0, 0, width, height);
+                }
+
+                ctx.filter = 'none';
+                return canvas.toDataURL('image/jpeg', 0.92);
+            }
+
+            function generateProjection() {
+                const generateBtn = document.getElementById('generate-projection-btn');
+                const loadingOverlay = document.getElementById('ai-loading');
+                const projectedImg = document.getElementById('projected-state-image');
+                const projectedPlaceholder = document.getElementById('projected-placeholder');
+
+                if (!state.imageData) {
+                    showToast('Please upload an image first', 'warning');
+                    return;
+                }
+
+                if (isGenerating) return;
+
+                isGenerating = true;
+                generateBtn.disabled = true;
+                loadingOverlay.style.display = 'flex';
+                projectedPlaceholder.style.display = 'none';
+
+                const img = new Image();
+                img.onload = function() {
+                    try {
+                        // Use goal-specific transforms when available
+                        let t;
+                        const goal = state.fitnessGoal;
+                        if (goal && goalOverrides[goal] && goalOverrides[goal][currentScenario]) {
+                            t = goalOverrides[goal][currentScenario][currentTimeline];
+                        } else {
+                            t = scenarioTransforms[currentScenario][currentTimeline];
+                        }
+
+                        const transformedImageUrl = transformBody(img, t.scaleX, {
+                            brightness: t.brightness,
+                            contrast: t.contrast,
+                            saturate: t.saturate
+                        });
+
+                        projectedImg.src = transformedImageUrl;
+                        projectedImg.style.display = 'block';
+                        projectedImg.style.transform = 'none';
+                        projectedImg.style.filter = 'none';
+                        projectedImg.style.boxShadow = 'none';
+
+
+                    } catch (e) {
+                        dbg.error('Projection failed:', e);
+                        const canvas = document.createElement('canvas');
+                        const ctx = canvas.getContext('2d');
+                        canvas.width = img.width;
+                        canvas.height = img.height;
+                        const t = scenarioTransforms[currentScenario][currentTimeline];
+                        ctx.filter = `brightness(${t.brightness}) contrast(${t.contrast}) saturate(${t.saturate})`;
+                        ctx.drawImage(img, 0, 0);
+                        projectedImg.src = canvas.toDataURL('image/jpeg', 0.9);
+                        projectedImg.style.display = 'block';
+                        projectedImg.style.transform = 'none';
+                    }
+
+                    projectedPlaceholder.style.display = 'none';
+                    loadingOverlay.style.display = 'none';
+                    isGenerating = false;
+                    generateBtn.disabled = false;
+                };
+
+                img.onerror = function() {
+                    showToast('Error loading image', 'error');
+                    loadingOverlay.style.display = 'none';
+                    isGenerating = false;
+                    generateBtn.disabled = false;
+                };
+
+                img.src = state.imageData;
+            }
+
+            // Generate button
+            const generateBtn = document.getElementById('generate-projection-btn');
+            if (generateBtn) {
+                generateBtn.addEventListener('click', generateProjection);
+            }
+
+            // Scenario card selection
+            document.querySelectorAll('.scenario-card').forEach(card => {
+                card.addEventListener('click', () => {
+                    document.querySelectorAll('.scenario-card').forEach(c => c.classList.remove('active'));
+                    card.classList.add('active');
+                    currentScenario = card.dataset.scenario;
+                    updateProjection();
+                });
+            });
+
+            // Timeline slider
+            const slider = document.getElementById('timeline-slider');
+            slider.addEventListener('input', (e) => {
+                currentTimeline = parseInt(e.target.value);
+
+                // Update markers
+                document.querySelectorAll('.timeline-marker').forEach(marker => {
+                    marker.classList.remove('active');
+                    if (parseInt(marker.dataset.value) === currentTimeline) {
+                        marker.classList.add('active');
+                    }
+                });
+
+                updateProjection();
+            });
+
+            // Navigation buttons
+            document.getElementById('back-to-results-sim').addEventListener('click', () => {
+                goToScreen(3);
+            });
+
+            document.getElementById('back-to-breakdown').addEventListener('click', () => {
+                goToScreen(4);
+            });
+
+            document.getElementById('start-new-sim').addEventListener('click', () => {
+                clearPreview();
+                goToScreen(1);
+            });
+
+            // Initial update
+            updateProjection();
+        }
+
+        // Workout
+        function setupWorkout() {
+            // Load data from backend
+            loadExerciseHowTo();
+            loadExerciseDatabases();
+            loadSplitTemplates();
+
+            // Filter buttons
+            const filterBtns = document.querySelectorAll('.filter-btn');
+            const exerciseCards = document.querySelectorAll('.exercise-card');
+
+            filterBtns.forEach(btn => {
+                btn.addEventListener('click', () => {
+                    // Update active state
+                    filterBtns.forEach(b => b.classList.remove('active'));
+                    btn.classList.add('active');
+
+                    const filter = btn.dataset.filter;
+
+                    // Filter cards
+                    exerciseCards.forEach(card => {
+                        if (filter === 'all') {
+                            card.style.display = 'block';
+                        } else if (filter === 'weak') {
+                            card.style.display = card.dataset.weak === 'true' ? 'block' : 'none';
+                        } else {
+                            card.style.display = card.dataset.type === filter ? 'block' : 'none';
+                        }
+                    });
+
+                    // Update equipment filter for weekly routine
+                    if (filter === 'home' || filter === 'gym') {
+                        weeklyRoutineData.currentConfig.equipment = filter;
+                    } else {
+                        weeklyRoutineData.currentConfig.equipment = 'all';
+                    }
+
+                    // Regenerate weekly plan if one exists
+                    if (weeklyRoutineData.weekPlan) {
+                        generateWeeklyPlan();
+                        updateWeeklyPlanUI();
+                    }
+                });
+            });
+
+            // Experience level buttons
+            const experienceBtns = document.querySelectorAll('.experience-btn');
+            experienceBtns.forEach(btn => {
+                btn.addEventListener('click', () => {
+                    // Update active state
+                    experienceBtns.forEach(b => b.classList.remove('active'));
+                    btn.classList.add('active');
+
+                    // Store in state
+                    state.experienceLevel = btn.dataset.level;
+
+                    // Update exercise cards based on experience level
+                    updateExerciseDifficulty(btn.dataset.level);
+                });
+            });
+
+            // Navigation buttons
+            document.getElementById('back-to-results-workout').addEventListener('click', () => {
+                goToScreen(3);
+            });
+
+            document.getElementById('back-to-simulator-workout').addEventListener('click', () => {
+                goToScreen(5);
+            });
+
+            // Navigation to nutrition from workout
+            const goToNutritionBtn = document.getElementById('go-to-nutrition-workout');
+            if (goToNutritionBtn) {
+                goToNutritionBtn.addEventListener('click', () => {
+                    goToScreen(7);
+                });
+            }
+
+            // More Details toggle
+            document.querySelectorAll('.btn-more-details').forEach(btn => {
+                btn.addEventListener('click', () => {
+                    const panel = btn.nextElementSibling;
+                    const open = panel.classList.toggle('open');
+                    btn.classList.toggle('open', open);
+                    btn.querySelector('span').textContent = open ? 'Less Details' : 'How to do it';
+                });
+            });
+
+            // Exercise card Log button
+            document.querySelectorAll('.exercise-card').forEach(card => {
+                card.querySelector('.btn-log-exercise')?.addEventListener('click', function() {
+                    const name = card.querySelector('h3')?.textContent.trim() || 'Exercise';
+                    const detailBoxes = card.querySelectorAll('.detail-box');
+                    let sets = 0, reps = 0;
+                    detailBoxes.forEach(box => {
+                        const label = box.querySelector('.detail-box-label')?.textContent.trim().toLowerCase();
+                        const val   = box.querySelector('.detail-box-value')?.textContent.trim();
+                        if (label === 'sets') sets = parseInt(val) || 0;
+                        if (label === 'reps') reps = parseInt(val) || 0;
+                    });
+                    const muscles = [...card.querySelectorAll('.ex-muscle-label')].map(el => el.textContent.trim()).join(', ');
+                    const entries = getExerciseLog();
+                    entries.unshift({ id: Date.now().toString(), name, muscles, sets, reps: reps || null, weight: null, logged_at: new Date().toISOString() });
+                    saveExerciseLog(entries);
+                    loadDailyExerciseLog();
+                    this.classList.add('saved');
+                    showToast(`${name} logged!`, 'success');
+                });
+            });
+
+            // Setup workout player
+            setupWorkoutPlayer();
+
+            // Setup weekly routine planner
+            setupWeeklyRoutine();
+
+            // Load saved experience level
+            loadExperienceLevel();
+        }
+
+        // Update exercise difficulty based on experience level
+        function updateExerciseDifficulty(level) {
+            const exerciseCards = document.querySelectorAll('.exercise-card');
+
+            const difficultySettings = {
+                beginner: {
+                    sets: '2',
+                    reps: '8-10',
+                    rest: '90s',
+                    tagClass: 'beginner',
+                    tagText: 'Beginner'
+                },
+                intermediate: {
+                    sets: '3',
+                    reps: '12-15',
+                    rest: '60s',
+                    tagClass: 'intermediate',
+                    tagText: 'Intermediate'
+                },
+                advanced: {
+                    sets: '4-5',
+                    reps: '15-20',
+                    rest: '45s',
+                    tagClass: 'advanced',
+                    tagText: 'Advanced'
+                }
+            };
+
+            const settings = difficultySettings[level];
+
+            exerciseCards.forEach(card => {
+                // Find detail boxes and update based on label
+                const detailBoxes = card.querySelectorAll('.detail-box');
+                detailBoxes.forEach(box => {
+                    const label = box.querySelector('.detail-box-label');
+                    const value = box.querySelector('.detail-box-value');
+                    if (label && value) {
+                        const labelText = label.textContent.toLowerCase();
+                        if (labelText === 'sets') {
+                            value.textContent = settings.sets;
+                        } else if (labelText === 'reps') {
+                            value.textContent = settings.reps;
+                        } else if (labelText === 'rest') {
+                            value.textContent = settings.rest;
+                        }
+                    }
+                });
+
+                // Update difficulty tag in exercise-meta
+                const difficultyTags = card.querySelectorAll('.exercise-tag.beginner, .exercise-tag.intermediate, .exercise-tag.advanced');
+                difficultyTags.forEach(tag => {
+                    tag.className = `exercise-tag ${settings.tagClass}`;
+                    tag.textContent = settings.tagText;
+                });
+            });
+
+            // Store in localStorage for persistence
+            localStorage.setItem(userKey('fixit-experience-level'), level);
+        }
+
+        // Load saved experience level on page load
+        function loadExperienceLevel() {
+            const savedLevel = localStorage.getItem(userKey('fixit-experience-level'));
+            if (savedLevel) {
+                state.experienceLevel = savedLevel;
+                const experienceBtns = document.querySelectorAll('.experience-btn');
+                experienceBtns.forEach(btn => {
+                    btn.classList.toggle('active', btn.dataset.level === savedLevel);
+                });
+                updateExerciseDifficulty(savedLevel);
+            }
+        }
+
+        // ========== WORKOUT PLAYER ==========
+        let workoutPlayerState = {
+            isPlaying: false,
+            currentExerciseIndex: 0,
+            currentSet: 1,
+            currentReps: 0,
+            phase: 'exercise', // 'exercise', 'rest', 'get-ready'
+            timerValue: 0,
+            timerInterval: null,
+            startTime: null,
+            exercises: [],
+            label: null  // human-readable workout name (filter name or day label)
+        };
+
+        const motivationalMessages = [
+            "Push through! You're doing great!",
+            "Feel the burn! It means it's working!",
+            "You're stronger than you think!",
+            "One rep at a time. You've got this!",
+            "Champions are made in moments like this!",
+            "Your future self will thank you!",
+            "Pain is temporary, pride is forever!",
+            "Every rep counts. Make it count!",
+            "You didn't come this far to only come this far!",
+            "Beast mode: ACTIVATED!"
+        ];
+
+        function getWorkoutExercises() {
+            // Get visible exercise cards based on current filter
+            const cards = document.querySelectorAll('.exercise-card');
+            const exercises = [];
+
+            cards.forEach(card => {
+                if (card.style.display !== 'none') {
+                    const name = card.querySelector('h3')?.textContent || 'Exercise';
+                    const targets = Array.from(card.querySelectorAll('.muscle-tag')).map(t => t.textContent);
+                    const detailBoxes = card.querySelectorAll('.detail-box');
+                    let sets = 3, reps = 12, rest = 60;
+
+                    detailBoxes.forEach(box => {
+                        const label = box.querySelector('.detail-box-label')?.textContent.toLowerCase();
+                        const value = box.querySelector('.detail-box-value')?.textContent;
+                        if (label === 'sets') sets = parseInt(value) || 3;
+                        if (label === 'reps') reps = parseInt(value) || 12;
+                        if (label === 'rest') rest = parseInt(value) || 60;
+                    });
+
+                    const isWeak = card.dataset.weak === 'true';
+                    const type = card.dataset.type || 'home';
+
+                    exercises.push({ name, targets, sets, reps, rest, isWeak, type });
+                }
+            });
+
+            return exercises;
+        }
+
+        function openWorkoutPlayer() {
+            const modal = document.getElementById('workout-player-modal');
+            workoutPlayerState.exercises = getWorkoutExercises();
+
+            if (workoutPlayerState.exercises.length === 0) {
+                showToast('No exercises available. Please select a filter with exercises.', 'warning');
+                return;
+            }
+
+            // Derive a label from the active filter button
+            const activeFilterBtn = document.querySelector('.filter-btn.active');
+            const filterText = activeFilterBtn?.textContent?.trim() || 'All';
+            workoutPlayerState.label = filterText === 'All' ? 'Full Workout' : `${filterText} Workout`;
+
+            // Reset state
+            workoutPlayerState.currentExerciseIndex = 0;
+            workoutPlayerState.currentSet = 1;
+            workoutPlayerState.currentReps = 0;
+            workoutPlayerState.phase = 'get-ready';
+            workoutPlayerState.isPlaying = false;
+            workoutPlayerState.startTime = Date.now();
+
+            // Hide complete overlay
+            document.getElementById('workout-complete-overlay').classList.remove('active');
+
+            // Update UI
+            updateWorkoutPlayerUI();
+            setPhase('get-ready', 5);
+
+            modal.classList.add('active');
+            document.body.style.overflow = 'hidden';
+        }
+
+        function closeWorkoutPlayer() {
+            const modal = document.getElementById('workout-player-modal');
+            modal.classList.remove('active');
+            document.body.style.overflow = '';
+
+            // Stop timer
+            if (workoutPlayerState.timerInterval) {
+                clearInterval(workoutPlayerState.timerInterval);
+                workoutPlayerState.timerInterval = null;
+            }
+            workoutPlayerState.isPlaying = false;
+
+            // Reset lift log panel for next session
+            const liftForm = document.getElementById('log-lifts-form');
+            const liftToggle = document.getElementById('log-lifts-toggle');
+            if (liftForm) liftForm.style.display = 'none';
+            if (liftToggle) { liftToggle.classList.remove('open'); liftToggle.setAttribute('aria-expanded', 'false'); }
+        }
+
+        function updateWorkoutPlayerUI() {
+            const exercise = workoutPlayerState.exercises[workoutPlayerState.currentExerciseIndex];
+            if (!exercise) return;
+
+            // Update exercise name and targets
+            document.getElementById('player-exercise-name').textContent = exercise.name;
+
+            const targetsContainer = document.getElementById('player-exercise-targets');
+            targetsContainer.innerHTML = exercise.targets.map(t =>
+                `<span class="target-tag">${escapeHtml(t)}</span>`
+            ).join('');
+
+            // Update progress
+            const total = workoutPlayerState.exercises.length;
+            const current = workoutPlayerState.currentExerciseIndex + 1;
+            document.getElementById('player-progress-text').textContent = `${current} / ${total}`;
+            document.getElementById('player-progress-fill').style.width = `${(current / total) * 100}%`;
+
+            // Update sets indicators
+            const setsContainer = document.getElementById('sets-indicators');
+            setsContainer.innerHTML = '';
+            for (let i = 1; i <= exercise.sets; i++) {
+                const dot = document.createElement('span');
+                dot.className = 'set-dot';
+                if (i < workoutPlayerState.currentSet) dot.classList.add('completed');
+                if (i === workoutPlayerState.currentSet) dot.classList.add('active');
+                setsContainer.appendChild(dot);
+            }
+            document.getElementById('sets-count').textContent = `${workoutPlayerState.currentSet} / ${exercise.sets}`;
+
+            // Update reps
+            document.getElementById('reps-target').textContent = exercise.reps;
+            document.getElementById('reps-current').textContent = workoutPlayerState.currentReps;
+
+            // Update up next
+            updateUpNext();
+
+            // Update motivation
+            const randomMsg = motivationalMessages[Math.floor(Math.random() * motivationalMessages.length)];
+            document.getElementById('player-motivation').querySelector('p').textContent = `"${randomMsg}"`;
+
+            // Update routine stats
+            document.getElementById('routine-exercise-count').textContent = workoutPlayerState.exercises.length;
+            const totalTime = workoutPlayerState.exercises.reduce((sum, ex) => {
+                return sum + (ex.sets * (45 + ex.rest)); // Approx time per exercise
+            }, 0);
+            document.getElementById('routine-duration').textContent = `~${Math.round(totalTime / 60)}`;
+        }
+
+        function updateUpNext() {
+            const upNextContainer = document.getElementById('up-next-exercise');
+            const nextIndex = workoutPlayerState.currentExerciseIndex + 1;
+
+            if (nextIndex < workoutPlayerState.exercises.length) {
+                const next = workoutPlayerState.exercises[nextIndex];
+                upNextContainer.innerHTML = `
+                    <div class="up-next-info">
+                        <span class="up-next-name">${escapeHtml(next.name)}</span>
+                        <span class="up-next-details">${parseInt(next.sets) || 0} sets • ${escapeHtml(String(next.reps))} reps</span>
+                    </div>
+                    ${next.isWeak ? '<span class="up-next-tag">Focus Area</span>' : ''}
+                `;
+                upNextContainer.parentElement.style.display = 'block';
+            } else {
+                upNextContainer.parentElement.style.display = 'none';
+            }
+        }
+
+        function setPhase(phase, duration) {
+            workoutPlayerState.phase = phase;
+            workoutPlayerState.timerValue = duration;
+
+            const phaseEl = document.getElementById('player-phase');
+            const timerProgress = document.getElementById('timer-progress');
+            const timerLabel = document.getElementById('timer-label');
+            const skipRestBtn = document.getElementById('skip-rest-btn');
+            const repsContainer = document.getElementById('player-reps');
+
+            // Update phase badge
+            phaseEl.innerHTML = `<span class="phase-badge ${phase}">${phase.replace('-', ' ').toUpperCase()}</span>`;
+
+            // Update timer style
+            timerProgress.classList.remove('rest');
+            if (phase === 'rest') {
+                timerProgress.classList.add('rest');
+                timerLabel.textContent = 'rest';
+                skipRestBtn.classList.add('visible');
+                repsContainer.classList.remove('active');
+            } else if (phase === 'get-ready') {
+                timerLabel.textContent = 'get ready';
+                skipRestBtn.classList.remove('visible');
+                repsContainer.classList.remove('active');
+            } else {
+                timerLabel.textContent = 'remaining';
+                skipRestBtn.classList.remove('visible');
+                repsContainer.classList.add('active');
+            }
+
+            updateTimerDisplay();
+        }
+
+        function updateTimerDisplay() {
+            const timerValue = document.getElementById('timer-value');
+            const timerProgress = document.getElementById('timer-progress');
+
+            const minutes = Math.floor(workoutPlayerState.timerValue / 60);
+            const seconds = workoutPlayerState.timerValue % 60;
+            timerValue.textContent = `${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}`;
+
+            // Update circular progress
+            const exercise = workoutPlayerState.exercises[workoutPlayerState.currentExerciseIndex];
+            let totalDuration;
+
+            if (workoutPlayerState.phase === 'rest') {
+                totalDuration = exercise?.rest || 60;
+            } else if (workoutPlayerState.phase === 'get-ready') {
+                totalDuration = 5;
+            } else {
+                totalDuration = 45; // Default exercise duration
+            }
+
+            const circumference = 2 * Math.PI * 90;
+            const progress = workoutPlayerState.timerValue / totalDuration;
+            const offset = circumference * (1 - progress);
+            timerProgress.style.strokeDashoffset = offset;
+        }
+
+        function togglePlayPause() {
+            if (workoutPlayerState.isPlaying) {
+                pauseWorkout();
+            } else {
+                playWorkout();
+            }
+        }
+
+        function playWorkout() {
+            workoutPlayerState.isPlaying = true;
+            document.getElementById('play-icon').style.display = 'none';
+            document.getElementById('pause-icon').style.display = 'block';
+
+            workoutPlayerState.timerInterval = setInterval(() => {
+                if (workoutPlayerState.timerValue > 0) {
+                    workoutPlayerState.timerValue--;
+                    updateTimerDisplay();
+
+                    // Audio countdown beeps in last 3 seconds
+                    if (workoutPlayerState.timerValue <= 3 && workoutPlayerState.timerValue > 0) {
+                        playCountdownBeep();
+                    }
+                } else {
+                    handleTimerComplete();
+                }
+            }, 1000);
+        }
+
+        function pauseWorkout() {
+            workoutPlayerState.isPlaying = false;
+            document.getElementById('play-icon').style.display = 'block';
+            document.getElementById('pause-icon').style.display = 'none';
+
+            if (workoutPlayerState.timerInterval) {
+                clearInterval(workoutPlayerState.timerInterval);
+                workoutPlayerState.timerInterval = null;
+            }
+        }
+
+        function handleTimerComplete() {
+            pauseWorkout();
+
+            const exercise = workoutPlayerState.exercises[workoutPlayerState.currentExerciseIndex];
+
+            if (workoutPlayerState.phase === 'get-ready') {
+                // Start exercise phase
+                playStartBeep(); // Audio cue for exercise start
+                setPhase('exercise', 45);
+                workoutPlayerState.currentReps = 0;
+                updateWorkoutPlayerUI();
+                playWorkout();
+            } else if (workoutPlayerState.phase === 'exercise') {
+                // Move to rest or next set
+                if (workoutPlayerState.currentSet < exercise.sets) {
+                    // Rest between sets
+                    playRestBeep(); // Audio cue for rest
+                    setPhase('rest', exercise.rest);
+                    playWorkout();
+                } else {
+                    // Move to next exercise
+                    playCompleteBeep(); // Audio cue for exercise complete
+                    nextExercise();
+                }
+            } else if (workoutPlayerState.phase === 'rest') {
+                // Start next set
+                playStartBeep(); // Audio cue for next set
+                workoutPlayerState.currentSet++;
+                workoutPlayerState.currentReps = 0;
+                setPhase('exercise', 45);
+                updateWorkoutPlayerUI();
+                playWorkout();
+            }
+        }
+
+        function completeSet() {
+            pauseWorkout();
+
+            const exercise = workoutPlayerState.exercises[workoutPlayerState.currentExerciseIndex];
+            workoutPlayerState.currentReps = exercise.reps;
+            updateWorkoutPlayerUI();
+
+            if (workoutPlayerState.currentSet < exercise.sets) {
+                // Rest between sets
+                setPhase('rest', exercise.rest);
+                playWorkout();
+            } else {
+                // Move to next exercise
+                nextExercise();
+            }
+        }
+
+        function skipRest() {
+            if (workoutPlayerState.phase === 'rest') {
+                pauseWorkout();
+                workoutPlayerState.currentSet++;
+                workoutPlayerState.currentReps = 0;
+                setPhase('exercise', 45);
+                updateWorkoutPlayerUI();
+                playWorkout();
+            }
+        }
+
+        function addRep() {
+            const exercise = workoutPlayerState.exercises[workoutPlayerState.currentExerciseIndex];
+            if (workoutPlayerState.currentReps < exercise.reps) {
+                workoutPlayerState.currentReps++;
+                document.getElementById('reps-current').textContent = workoutPlayerState.currentReps;
+
+                // Auto-complete set if all reps done
+                if (workoutPlayerState.currentReps >= exercise.reps) {
+                    setTimeout(completeSet, 500);
+                }
+            }
+        }
+
+        function nextExercise() {
+            if (workoutPlayerState.currentExerciseIndex < workoutPlayerState.exercises.length - 1) {
+                workoutPlayerState.currentExerciseIndex++;
+                workoutPlayerState.currentSet = 1;
+                workoutPlayerState.currentReps = 0;
+                setPhase('get-ready', 5);
+                updateWorkoutPlayerUI();
+                playWorkout();
+            } else {
+                // Workout complete!
+                showWorkoutComplete();
+            }
+        }
+
+        function prevExercise() {
+            if (workoutPlayerState.currentExerciseIndex > 0) {
+                pauseWorkout();
+                workoutPlayerState.currentExerciseIndex--;
+                workoutPlayerState.currentSet = 1;
+                workoutPlayerState.currentReps = 0;
+                setPhase('get-ready', 5);
+                updateWorkoutPlayerUI();
+            }
+        }
+
+        function showWorkoutComplete() {
+            pauseWorkout();
+
+            // Play celebration audio (ascending tones)
+            playCompleteBeep();
+            setTimeout(() => playBeep(659, 150, 0.3), 200); // E5
+            setTimeout(() => playBeep(784, 200, 0.35), 400); // G5
+
+            const overlay = document.getElementById('workout-complete-overlay');
+            const elapsedTime = Math.floor((Date.now() - workoutPlayerState.startTime) / 1000);
+            const minutes = Math.floor(elapsedTime / 60);
+            const seconds = elapsedTime % 60;
+
+            // Estimate calories burned — MET × weight × hours
+            const EXERCISE_METS = { home: 3.8, gym: 5.5, hiit: 8.0 };
+            const exList = workoutPlayerState.exercises;
+            const avgMET = exList.length
+                ? exList.reduce((s, e) => s + (EXERCISE_METS[e.type] || 4.2), 0) / exList.length
+                : 4.2;
+            const bodyKg = state.weight || 72;
+            const caloriesBurned = Math.max(1, Math.round(avgMET * bodyKg * (elapsedTime / 3600)));
+
+            // Update stats
+            document.getElementById('complete-exercises').textContent = exList.length;
+            document.getElementById('complete-sets').textContent = exList.reduce((sum, ex) => sum + ex.sets, 0);
+            document.getElementById('complete-time').textContent = `${minutes}:${seconds.toString().padStart(2, '0')}`;
+            const calEl = document.getElementById('complete-calories');
+            if (calEl) calEl.textContent = caloriesBurned;
+
+            // Update streak — date-based: once per day, resets if a day is missed
+            const today = new Date().toISOString().split('T')[0];
+            const lastWorkoutDay = localStorage.getItem(userKey('fixit-last-workout-day')) || '';
+            let streak = parseInt(localStorage.getItem(userKey('fixit-workout-streak')) || '0');
+            if (lastWorkoutDay !== today) {
+                const yesterday = new Date(); yesterday.setDate(yesterday.getDate() - 1);
+                const wasYesterday = lastWorkoutDay === yesterday.toISOString().split('T')[0];
+                streak = wasYesterday ? streak + 1 : 1;
+                localStorage.setItem(userKey('fixit-workout-streak'), streak);
+                localStorage.setItem(userKey('fixit-last-workout-day'), today);
+            }
+
+            // Track best streak
+            const bestStreak = parseInt(localStorage.getItem(userKey('fixit-best-streak')) || '0');
+            if (streak > bestStreak) localStorage.setItem(userKey('fixit-best-streak'), streak);
+
+            // Track total workouts
+            const tw = parseInt(localStorage.getItem(userKey('fixit-total-workouts')) || '0') + 1;
+            localStorage.setItem(userKey('fixit-total-workouts'), tw);
+
+            // Track workout date for heatmap
+            let wDates;
+            try { wDates = JSON.parse(localStorage.getItem(userKey('fixit-workout-dates')) || '[]'); } catch { wDates = []; }
+            if (!wDates.includes(today)) wDates.push(today);
+            localStorage.setItem(userKey('fixit-workout-dates'), JSON.stringify(wDates));
+
+            // Save session to workout log
+            saveWorkoutSession({
+                label: workoutPlayerState.label || 'Workout',
+                exercises: workoutPlayerState.exercises.map(e => ({
+                    name: e.name,
+                    sets: e.sets,
+                    reps: e.reps,
+                    targets: e.targets || []
+                })),
+                durationSec: elapsedTime,
+                caloriesBurned,
+                xp: 50
+            });
+
+            // Award XP and check achievements
+            awardXP(50, 'workout');
+            checkAchievements();
+
+            overlay.classList.add('active');
+        }
+
+        function setupWorkoutPlayer() {
+            // Close button
+            document.getElementById('player-close-btn')?.addEventListener('click', closeWorkoutPlayer);
+
+            // Play/Pause
+            document.getElementById('player-play-btn')?.addEventListener('click', togglePlayPause);
+
+            // Navigation
+            document.getElementById('player-prev-btn')?.addEventListener('click', prevExercise);
+            document.getElementById('player-next-btn')?.addEventListener('click', nextExercise);
+
+            // Quick actions
+            document.getElementById('skip-rest-btn')?.addEventListener('click', skipRest);
+            document.getElementById('add-rep-btn')?.addEventListener('click', addRep);
+            document.getElementById('complete-set-btn')?.addEventListener('click', completeSet);
+
+            // Complete screen actions
+            document.getElementById('finish-workout-btn')?.addEventListener('click', closeWorkoutPlayer);
+            document.getElementById('share-workout-btn')?.addEventListener('click', () => {
+                showToast('Workout summary copied to clipboard!', 'success');
+            });
+
+            // Close on background click
+            const modal = document.getElementById('workout-player-modal');
+            modal?.addEventListener('click', (e) => {
+                if (e.target === modal) {
+                    // Don't close on background click during workout
+                }
+            });
+        }
+
+        // ========== WEEKLY ROUTINE PLANNER ==========
+        const weeklyRoutineData = {
+            currentConfig: {
+                goal: 'hypertrophy',
+                split: 'push-pull-legs',
+                availableDays: ['mon', 'tue', 'wed', 'thu', 'fri'],
+                sessionDuration: 60,
+                equipment: 'all',
+                cyclePhase: 'none' // none (standard), menstrual, follicular, ovulatory, luteal
+            },
+            weekPlan: null,
+            selectedDay: 'monday'
+        };
+
+        // Cycle phase adjustments for female users
+        const cyclePhaseAdjustments = {
+            menstrual: {
+                intensityMultiplier: 0.6,
+                preferredExercises: ['yoga', 'walking', 'swimming', 'stretching', 'light resistance'],
+                avoidExercises: ['heavy compound', 'hiit', 'intense ab work', 'plyometrics'],
+                repsAdjust: 'higher', // more reps, less weight
+                note: 'Rest & recovery phase - focus on gentle movement'
+            },
+            follicular: {
+                intensityMultiplier: 1.1,
+                preferredExercises: ['heavy compound', 'hiit', 'plyometrics', 'strength training'],
+                avoidExercises: [],
+                repsAdjust: 'lower', // heavier weights, lower reps
+                note: 'Peak performance phase - great for challenging workouts!'
+            },
+            ovulatory: {
+                intensityMultiplier: 1.0,
+                preferredExercises: ['strength training', 'cardio', 'compound movements'],
+                avoidExercises: [],
+                repsAdjust: 'normal',
+                note: 'High energy - prioritize warm-up for joint protection'
+            },
+            luteal: {
+                intensityMultiplier: 0.8,
+                preferredExercises: ['moderate cardio', 'machine work', 'bodyweight', 'yoga'],
+                avoidExercises: ['maximal lifts', 'extended hiit'],
+                repsAdjust: 'moderate',
+                note: 'Moderate intensity - listen to your body'
+            }
+        };
+
+        // Cycle-friendly exercise alternatives
+        const cycleExerciseAlternatives = {
+            menstrual: {
+                'Squats': { name: 'Bodyweight Squats', sets: 3, reps: '12-15', muscles: ['Quads', 'Glutes'] },
+                'Bench Press': { name: 'Light Dumbbell Press', sets: 3, reps: '15', muscles: ['Chest', 'Triceps'] },
+                'Deadlifts': { name: 'Glute Bridges', sets: 3, reps: '15', muscles: ['Glutes', 'Hamstrings'] },
+                'Barbell Rows': { name: 'Resistance Band Rows', sets: 3, reps: '15', muscles: ['Back'] },
+                'Pull-Ups': { name: 'Lat Pulldown (Light)', sets: 3, reps: '15', muscles: ['Lats'] },
+                'Overhead Press': { name: 'Light Shoulder Press', sets: 3, reps: '15', muscles: ['Shoulders'] },
+                'Plank': { name: 'Gentle Core Work', sets: 3, reps: '30s', muscles: ['Core'] },
+                'Hanging Leg Raises': { name: 'Dead Bug', sets: 3, reps: '10 each', muscles: ['Core'] },
+                'Romanian Deadlifts': { name: 'Light RDL or Stretching', sets: 3, reps: '12', muscles: ['Hamstrings'] }
+            },
+            luteal: {
+                'Squats': { name: 'Goblet Squats', sets: 3, reps: '12', muscles: ['Quads', 'Glutes'] },
+                'Bench Press': { name: 'Dumbbell Bench Press', sets: 3, reps: '12', muscles: ['Chest', 'Triceps'] },
+                'Deadlifts': { name: 'Romanian Deadlifts', sets: 3, reps: '10-12', muscles: ['Hamstrings', 'Glutes'] },
+                'Pull-Ups': { name: 'Assisted Pull-Ups', sets: 3, reps: '10', muscles: ['Lats', 'Biceps'] }
+            }
+        };
+
+        // Exercise database by muscle group
+        // How-to guide — loaded from backend on workout screen init
+        let exerciseHowTo = {};
+
+        async function loadExerciseHowTo() {
+            if (Object.keys(exerciseHowTo).length > 0) return; // already loaded
+            try {
+                const res = await fetch('/api/workouts/how-to');
+                if (res.ok) exerciseHowTo = await res.json();
+            } catch (e) {
+                console.warn('Could not load exercise how-to data:', e);
+            }
+        }
+
+        async function loadExerciseDatabases() {
+            if (exerciseDatabase._loaded && homeExerciseDatabase._loaded) return;
+            try {
+                const res = await fetch('/api/workouts/exercises');
+                if (!res.ok) return;
+                const rows = await res.json();
+                const gym = {}, home = {};
+                rows.forEach(row => {
+                    const ex = {
+                        name: row.name,
+                        sets: row.default_sets,
+                        reps: row.default_reps,
+                        muscles: Array.isArray(row.target_muscles) ? row.target_muscles : JSON.parse(row.target_muscles || '[]')
+                    };
+                    const group = row.muscle_group;
+                    if (row.equipment_type === 'home') {
+                        if (!home[group]) home[group] = [];
+                        home[group].push(ex);
+                    } else {
+                        if (!gym[group]) gym[group] = [];
+                        gym[group].push(ex);
+                    }
+                });
+                if (Object.keys(gym).length > 0) { Object.assign(exerciseDatabase, gym); exerciseDatabase._loaded = true; }
+                if (Object.keys(home).length > 0) { Object.assign(homeExerciseDatabase, home); homeExerciseDatabase._loaded = true; }
+            } catch (e) {
+                console.warn('Could not load exercise databases from API:', e);
+            }
+        }
+
+        async function loadSplitTemplates() {
+            if (splitTemplates._loaded) return;
+            try {
+                const res = await fetch('/api/workouts/splits');
+                if (!res.ok) return;
+                const rows = await res.json();
+                if (rows.length > 0) {
+                    rows.forEach(row => {
+                        const dayConfigs = typeof row.day_configs === 'string' ? JSON.parse(row.day_configs) : row.day_configs;
+                        const daysPattern = typeof row.days_pattern === 'string' ? JSON.parse(row.days_pattern) : row.days_pattern;
+                        splitTemplates[row.id] = { pattern: daysPattern, days: dayConfigs };
+                    });
+                    splitTemplates._loaded = true;
+                }
+            } catch (e) {
+                console.warn('Could not load split templates from API:', e);
+            }
+        }
+
+        let exerciseDatabase = {
+            chest: [
+                { name: 'Bench Press', sets: 4, reps: '8-10', muscles: ['Chest', 'Triceps'] },
+                { name: 'Incline Dumbbell Press', sets: 3, reps: '10-12', muscles: ['Upper Chest', 'Shoulders'] },
+                { name: 'Cable Flyes', sets: 3, reps: '12-15', muscles: ['Chest'] },
+                { name: 'Push-Ups', sets: 3, reps: '15-20', muscles: ['Chest', 'Core'] },
+                { name: 'Dips', sets: 3, reps: '10-12', muscles: ['Chest', 'Triceps'] }
+            ],
+            back: [
+                { name: 'Pull-Ups', sets: 4, reps: '8-10', muscles: ['Lats', 'Biceps'] },
+                { name: 'Barbell Rows', sets: 4, reps: '8-10', muscles: ['Back', 'Biceps'] },
+                { name: 'Lat Pulldown', sets: 3, reps: '10-12', muscles: ['Lats'] },
+                { name: 'Seated Cable Rows', sets: 3, reps: '12-15', muscles: ['Mid Back'] },
+                { name: 'Face Pulls', sets: 3, reps: '15-20', muscles: ['Rear Delts', 'Traps'] }
+            ],
+            shoulders: [
+                { name: 'Overhead Press', sets: 4, reps: '8-10', muscles: ['Shoulders', 'Triceps'] },
+                { name: 'Lateral Raises', sets: 3, reps: '12-15', muscles: ['Side Delts'] },
+                { name: 'Front Raises', sets: 3, reps: '12-15', muscles: ['Front Delts'] },
+                { name: 'Reverse Flyes', sets: 3, reps: '15', muscles: ['Rear Delts'] },
+                { name: 'Arnold Press', sets: 3, reps: '10-12', muscles: ['Shoulders'] }
+            ],
+            legs: [
+                { name: 'Squats', sets: 4, reps: '8-10', muscles: ['Quads', 'Glutes'] },
+                { name: 'Romanian Deadlifts', sets: 4, reps: '10-12', muscles: ['Hamstrings', 'Glutes'] },
+                { name: 'Leg Press', sets: 3, reps: '12-15', muscles: ['Quads'] },
+                { name: 'Leg Curls', sets: 3, reps: '12-15', muscles: ['Hamstrings'] },
+                { name: 'Calf Raises', sets: 4, reps: '15-20', muscles: ['Calves'] },
+                { name: 'Lunges', sets: 3, reps: '10 each', muscles: ['Quads', 'Glutes'] }
+            ],
+            arms: [
+                { name: 'Barbell Curls', sets: 3, reps: '10-12', muscles: ['Biceps'] },
+                { name: 'Tricep Pushdowns', sets: 3, reps: '12-15', muscles: ['Triceps'] },
+                { name: 'Hammer Curls', sets: 3, reps: '12', muscles: ['Biceps', 'Forearms'] },
+                { name: 'Skull Crushers', sets: 3, reps: '10-12', muscles: ['Triceps'] },
+                { name: 'Concentration Curls', sets: 2, reps: '12-15', muscles: ['Biceps'] }
+            ],
+            core: [
+                { name: 'Plank', sets: 3, reps: '60s', muscles: ['Core'] },
+                { name: 'Hanging Leg Raises', sets: 3, reps: '12-15', muscles: ['Abs'] },
+                { name: 'Cable Crunches', sets: 3, reps: '15-20', muscles: ['Abs'] },
+                { name: 'Russian Twists', sets: 3, reps: '20', muscles: ['Obliques'] },
+                { name: 'Dead Bug', sets: 3, reps: '10 each', muscles: ['Core'] }
+            ]
+        };
+
+        // Home exercise database (bodyweight only, no equipment)
+        let homeExerciseDatabase = {
+            chest: [
+                { name: 'Push-Ups', sets: 4, reps: '15-20', muscles: ['Chest', 'Triceps'] },
+                { name: 'Diamond Push-Ups', sets: 3, reps: '10-15', muscles: ['Chest', 'Triceps'] },
+                { name: 'Wide Push-Ups', sets: 3, reps: '12-15', muscles: ['Chest'] },
+                { name: 'Decline Push-Ups', sets: 3, reps: '10-15', muscles: ['Upper Chest', 'Shoulders'] },
+                { name: 'Pike Push-Ups', sets: 3, reps: '8-12', muscles: ['Chest', 'Shoulders'] }
+            ],
+            back: [
+                { name: 'Supermans', sets: 3, reps: '15-20', muscles: ['Lower Back', 'Glutes'] },
+                { name: 'Reverse Snow Angels', sets: 3, reps: '12-15', muscles: ['Back', 'Rear Delts'] },
+                { name: 'Prone Y Raises', sets: 3, reps: '12-15', muscles: ['Upper Back', 'Traps'] },
+                { name: 'Bird Dogs', sets: 3, reps: '10 each', muscles: ['Back', 'Core'] },
+                { name: 'Towel Rows', sets: 3, reps: '10-12', muscles: ['Lats', 'Biceps'] }
+            ],
+            shoulders: [
+                { name: 'Pike Push-Ups', sets: 3, reps: '8-12', muscles: ['Shoulders', 'Triceps'] },
+                { name: 'Arm Circles', sets: 3, reps: '20 each', muscles: ['Shoulders'] },
+                { name: 'Wall Handstand Hold', sets: 3, reps: '20-30s', muscles: ['Shoulders', 'Core'] },
+                { name: 'Prone I-Y-T Raises', sets: 3, reps: '10 each', muscles: ['Rear Delts', 'Traps'] },
+                { name: 'Lateral Plank Walk', sets: 3, reps: '8 each', muscles: ['Shoulders', 'Core'] }
+            ],
+            legs: [
+                { name: 'Bodyweight Squats', sets: 4, reps: '15-20', muscles: ['Quads', 'Glutes'] },
+                { name: 'Lunges', sets: 3, reps: '12 each', muscles: ['Quads', 'Glutes'] },
+                { name: 'Glute Bridges', sets: 3, reps: '15-20', muscles: ['Glutes', 'Hamstrings'] },
+                { name: 'Bulgarian Split Squats', sets: 3, reps: '10 each', muscles: ['Quads', 'Glutes'] },
+                { name: 'Wall Sits', sets: 3, reps: '45-60s', muscles: ['Quads'] },
+                { name: 'Single-Leg Calf Raises', sets: 3, reps: '15 each', muscles: ['Calves'] }
+            ],
+            arms: [
+                { name: 'Diamond Push-Ups', sets: 3, reps: '10-15', muscles: ['Triceps', 'Chest'] },
+                { name: 'Tricep Dips (Chair)', sets: 3, reps: '12-15', muscles: ['Triceps'] },
+                { name: 'Chin-Up Hold (Door Frame)', sets: 3, reps: '15-20s', muscles: ['Biceps'] },
+                { name: 'Isometric Bicep Curl (Towel)', sets: 3, reps: '20-30s', muscles: ['Biceps'] },
+                { name: 'Plank Shoulder Taps', sets: 3, reps: '10 each', muscles: ['Arms', 'Core'] }
+            ],
+            core: [
+                { name: 'Plank', sets: 3, reps: '60s', muscles: ['Core'] },
+                { name: 'Crunches', sets: 3, reps: '20', muscles: ['Abs'] },
+                { name: 'Bicycle Crunches', sets: 3, reps: '15 each', muscles: ['Obliques', 'Abs'] },
+                { name: 'Mountain Climbers', sets: 3, reps: '20 each', muscles: ['Core', 'Cardio'] },
+                { name: 'Dead Bug', sets: 3, reps: '10 each', muscles: ['Core'] },
+                { name: 'Leg Raises', sets: 3, reps: '12-15', muscles: ['Lower Abs'] }
+            ]
+        };
+
+        // Split templates
+        let splitTemplates = {
+            'push-pull-legs': {
+                pattern: ['Push', 'Pull', 'Legs', 'Push', 'Pull', 'Rest', 'Rest'],
+                days: {
+                    'Push': { focus: 'Chest, Shoulders, Triceps', muscles: ['chest', 'shoulders', 'arms'] },
+                    'Pull': { focus: 'Back, Biceps, Rear Delts', muscles: ['back', 'arms'] },
+                    'Legs': { focus: 'Quads, Hamstrings, Glutes, Calves', muscles: ['legs', 'core'] }
+                }
+            },
+            'upper-lower': {
+                pattern: ['Upper', 'Lower', 'Rest', 'Upper', 'Lower', 'Rest', 'Rest'],
+                days: {
+                    'Upper': { focus: 'Chest, Back, Shoulders, Arms', muscles: ['chest', 'back', 'shoulders', 'arms'] },
+                    'Lower': { focus: 'Quads, Hamstrings, Glutes, Core', muscles: ['legs', 'core'] }
+                }
+            },
+            'full-body': {
+                pattern: ['Full Body', 'Rest', 'Full Body', 'Rest', 'Full Body', 'Rest', 'Rest'],
+                days: {
+                    'Full Body': { focus: 'All Major Muscle Groups', muscles: ['chest', 'back', 'legs', 'shoulders', 'core'] }
+                }
+            },
+            'bro-split': {
+                pattern: ['Chest', 'Back', 'Shoulders', 'Legs', 'Arms', 'Rest', 'Rest'],
+                days: {
+                    'Chest': { focus: 'Chest & Triceps', muscles: ['chest', 'arms'] },
+                    'Back': { focus: 'Back & Biceps', muscles: ['back', 'arms'] },
+                    'Shoulders': { focus: 'Shoulders & Traps', muscles: ['shoulders'] },
+                    'Legs': { focus: 'Quads, Hamstrings, Glutes', muscles: ['legs'] },
+                    'Arms': { focus: 'Biceps, Triceps, Forearms', muscles: ['arms'] }
+                }
+            }
+        };
+
+        function openWeeklyRoutineModal() {
+            const modal = document.getElementById('weekly-routine-modal');
+            modal.classList.add('active');
+            document.body.style.overflow = 'hidden';
+
+            // Show/hide cycle section based on gender
+            // Show for all genders except male (optional feature for female, non-binary, prefer-not-to-say)
+            const cycleSection = document.getElementById('cycle-section');
+            if (cycleSection) {
+                const showCycle = state.gender && state.gender !== 'male';
+                cycleSection.style.display = showCycle ? 'block' : 'none';
+            }
+
+            // Update cycle note on open
+            updateCycleNote();
+        }
+
+        function updateCycleNote() {
+            const noteEl = document.getElementById('cycle-adjustment-note');
+            if (!noteEl) return;
+
+            const phase = weeklyRoutineData.currentConfig.cyclePhase || 'none';
+
+            // Hide note if "none" is selected (standard workout, no adjustments)
+            if (phase === 'none') {
+                noteEl.style.display = 'none';
+                return;
+            }
+
+            const adj = cyclePhaseAdjustments[phase];
+            if (adj) {
+                noteEl.style.display = 'block';
+                noteEl.querySelector('.note-text').textContent = adj.note;
+            }
+        }
+
+        function closeWeeklyRoutineModal() {
+            const modal = document.getElementById('weekly-routine-modal');
+            modal.classList.remove('active');
+            document.body.style.overflow = '';
+        }
+
+        function generateWeeklyPlan() {
+            const config = weeklyRoutineData.currentConfig;
+            const split = splitTemplates[config.split];
+            const dayNames = ['monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday', 'sunday'];
+            const dayAbbrevs = ['mon', 'tue', 'wed', 'thu', 'fri', 'sat', 'sun'];
+
+            // Adjust pattern based on available days
+            const adjustedPattern = [...split.pattern];
+            dayAbbrevs.forEach((abbrev, index) => {
+                if (!config.availableDays.includes(abbrev) && adjustedPattern[index] !== 'Rest') {
+                    adjustedPattern[index] = 'Rest';
+                }
+            });
+
+            // Generate workout for each day
+            const weekPlan = {};
+            dayNames.forEach((day, index) => {
+                const workoutType = adjustedPattern[index];
+                if (workoutType === 'Rest') {
+                    weekPlan[day] = { type: 'Rest', exercises: [] };
+                } else {
+                    const dayTemplate = split.days[workoutType];
+                    const exercises = generateDayExercises(dayTemplate.muscles, config);
+                    weekPlan[day] = {
+                        type: workoutType,
+                        focus: dayTemplate.focus,
+                        exercises: exercises,
+                        duration: config.sessionDuration
+                    };
+                }
+            });
+
+            weeklyRoutineData.weekPlan = weekPlan;
+            return weekPlan;
+        }
+
+        function generateDayExercises(muscleGroups, config) {
+            const exercises = [];
+            const exercisesPerGroup = Math.ceil(6 / muscleGroups.length);
+
+            // Pick database based on equipment filter
+            const db = config.equipment === 'home' ? homeExerciseDatabase : exerciseDatabase;
+
+            // Check if cycle adjustments apply (non-male users who selected a cycle phase)
+            const cyclePhase = config.cyclePhase || 'none';
+            const useCycleAdjustments = state.gender !== 'male' && cyclePhase !== 'none';
+            const cycleAdj = useCycleAdjustments ? cyclePhaseAdjustments[cyclePhase] : null;
+            const cycleAlts = useCycleAdjustments ? cycleExerciseAlternatives[cyclePhase] : null;
+
+            muscleGroups.forEach(group => {
+                const groupExercises = db[group] || [];
+                const shuffled = [...groupExercises].sort(() => Math.random() - 0.5);
+                const selected = shuffled.slice(0, exercisesPerGroup);
+
+                // Adjust based on goal
+                selected.forEach(ex => {
+                    let adjustedEx = { ...ex };
+
+                    // Apply cycle-based exercise substitutions if enabled
+                    if (cycleAlts && cycleAlts[ex.name]) {
+                        adjustedEx = { ...cycleAlts[ex.name] };
+                    } else {
+                        // Apply goal-based adjustments
+                        if (config.goal === 'strength') {
+                            adjustedEx.sets = Math.min(ex.sets + 1, 5);
+                            adjustedEx.reps = '4-6';
+                        } else if (config.goal === 'endurance') {
+                            adjustedEx.sets = Math.max(ex.sets - 1, 2);
+                            adjustedEx.reps = '15-20';
+                        }
+
+                        // Apply cycle phase intensity adjustments if enabled
+                        if (cycleAdj) {
+                            if (cycleAdj.repsAdjust === 'higher') {
+                                // Menstrual: lighter weight, more reps
+                                adjustedEx.sets = Math.max(adjustedEx.sets - 1, 2);
+                                adjustedEx.reps = increaseReps(adjustedEx.reps);
+                            } else if (cycleAdj.repsAdjust === 'lower' && config.goal !== 'endurance') {
+                                // Follicular: can go heavier
+                                adjustedEx.sets = Math.min(adjustedEx.sets + 1, 5);
+                                adjustedEx.reps = decreaseReps(adjustedEx.reps);
+                            }
+                        }
+                    }
+
+                    // Add cycle phase indicator only if cycle adjustments are active
+                    if (useCycleAdjustments) {
+                        adjustedEx.cycleAdjusted = true;
+                    }
+
+                    exercises.push(adjustedEx);
+                });
+            });
+
+            return exercises.slice(0, 6); // Limit to 6 exercises
+        }
+
+        // Helper functions for rep adjustments
+        function increaseReps(reps) {
+            if (typeof reps === 'string' && reps.includes('-')) {
+                const [low, high] = reps.split('-').map(n => parseInt(n));
+                return `${low + 3}-${high + 5}`;
+            } else if (typeof reps === 'string' && reps.includes('s')) {
+                return reps; // Keep time-based as is
+            }
+            const num = parseInt(reps) || 10;
+            return `${num + 5}`;
+        }
+
+        function decreaseReps(reps) {
+            if (typeof reps === 'string' && reps.includes('-')) {
+                const [low, high] = reps.split('-').map(n => parseInt(n));
+                return `${Math.max(low - 2, 3)}-${Math.max(high - 3, 6)}`;
+            } else if (typeof reps === 'string' && reps.includes('s')) {
+                return reps; // Keep time-based as is
+            }
+            const num = parseInt(reps) || 10;
+            return `${Math.max(num - 3, 5)}`;
+        }
+
+        function updateWeeklyPlanUI() {
+            const plan = weeklyRoutineData.weekPlan;
+            if (!plan) return;
+
+            const dayNames = ['monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday', 'sunday'];
+            const typeIds = ['mon', 'tue', 'wed', 'thu', 'fri', 'sat', 'sun'];
+
+            // Update day buttons
+            dayNames.forEach((day, index) => {
+                const typeEl = document.getElementById(`${typeIds[index]}-type`);
+                if (typeEl) {
+                    typeEl.textContent = plan[day].type;
+                }
+
+                const btn = document.querySelector(`.week-day-btn[data-day="${day}"]`);
+                if (btn) {
+                    btn.classList.toggle('rest', plan[day].type === 'Rest');
+                }
+            });
+
+            // Calculate stats
+            const trainingDays = dayNames.filter(d => plan[d].type !== 'Rest').length;
+            const restDays = 7 - trainingDays;
+            const totalTime = trainingDays * weeklyRoutineData.currentConfig.sessionDuration;
+
+            document.getElementById('weekly-training-days').textContent = trainingDays;
+            document.getElementById('weekly-rest-days').textContent = restDays;
+            document.getElementById('weekly-total-time').textContent = `${Math.round(totalTime / 60)}h`;
+
+            // Update muscle coverage
+            updateMuscleCoverage(plan);
+
+            // Show selected day
+            showDayWorkout(weeklyRoutineData.selectedDay);
+        }
+
+        function updateMuscleCoverage(plan) {
+            const coverage = {
+                'Chest': 0, 'Back': 0, 'Shoulders': 0, 'Legs': 0, 'Arms': 0, 'Core': 0
+            };
+
+            Object.values(plan).forEach(day => {
+                if (day.exercises) {
+                    day.exercises.forEach(ex => {
+                        ex.muscles.forEach(m => {
+                            const key = Object.keys(coverage).find(k =>
+                                m.toLowerCase().includes(k.toLowerCase()) ||
+                                k.toLowerCase().includes(m.toLowerCase().split(' ')[0])
+                            );
+                            if (key) coverage[key]++;
+                        });
+                    });
+                }
+            });
+
+            // Normalize to percentages
+            const maxHits = Math.max(...Object.values(coverage), 1);
+
+            const barsContainer = document.getElementById('muscle-bars');
+            barsContainer.innerHTML = Object.entries(coverage).map(([muscle, hits]) => `
+                <div class="muscle-bar-item">
+                    <span class="muscle-name">${escapeHtml(muscle)}</span>
+                    <div class="muscle-bar">
+                        <div class="muscle-fill" style="width: ${Math.min(100, Math.max(0, (hits / maxHits) * 100))}%"></div>
+                    </div>
+                    <span class="muscle-hits">${parseInt(hits) || 0}x</span>
+                </div>
+            `).join('');
+        }
+
+        function showDayWorkout(day) {
+            weeklyRoutineData.selectedDay = day;
+            const plan = weeklyRoutineData.weekPlan;
+            if (!plan || !plan[day]) return;
+
+            const dayData = plan[day];
+            const workoutCard = document.getElementById('daily-workout-card');
+            const restCard = document.getElementById('rest-day-card');
+
+            // Update day button states
+            document.querySelectorAll('.week-day-btn').forEach(btn => {
+                btn.classList.toggle('active', btn.dataset.day === day);
+            });
+
+            if (dayData.type === 'Rest') {
+                workoutCard.style.display = 'none';
+                restCard.style.display = 'block';
+            } else {
+                workoutCard.style.display = 'block';
+                restCard.style.display = 'none';
+
+                document.getElementById('daily-workout-name').textContent = `${dayData.type} Day`;
+                document.getElementById('daily-focus').textContent = dayData.focus;
+                document.getElementById('daily-duration').innerHTML = `
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <circle cx="12" cy="12" r="10"/>
+                        <polyline points="12 6 12 12 16 14"/>
+                    </svg>
+                    ${dayData.duration} min
+                `;
+                document.getElementById('daily-exercise-count').textContent = `${dayData.exercises.length} exercises`;
+
+                // Render exercises
+                const listContainer = document.getElementById('daily-exercises-list');
+                const isFemale = state.gender === 'female';
+                const cyclePhase = weeklyRoutineData.currentConfig.cyclePhase;
+
+                // Moon phase icons for cycle phases
+                const cycleIcons = { menstrual: '🌑', follicular: '🌒', ovulatory: '🌕', luteal: '🌘' };
+                const currentCycleIcon = cycleIcons[cyclePhase] || '●';
+
+                listContainer.innerHTML = dayData.exercises.map((ex, index) => {
+                    const howTo = exerciseHowTo[ex.name];
+                    const stepsHtml = howTo ? `
+                        <button class="btn-more-details weekly-how-to-btn" type="button">
+                            <svg viewBox="0 0 24 24" fill="none" stroke-width="2" stroke="currentColor"><polyline points="6 9 12 15 18 9"/></svg>
+                            <span>How to do it</span>
+                        </button>
+                        <div class="ex-how-to">
+                            <div class="ex-how-to-inner">
+                                ${howTo.steps.map((s, i) => `<div class="ex-step"><span class="ex-step-num">${i + 1}</span><p>${escapeHtml(s)}</p></div>`).join('')}
+                                <div class="ex-pro-tip"><strong>Pro tip:</strong> ${escapeHtml(howTo.tip)}</div>
+                            </div>
+                        </div>` : '';
+                    return `
+                    <div class="daily-exercise-item ${ex.cycleAdjusted ? 'cycle-adjusted' : ''}">
+                        <span class="exercise-number">${index + 1}</span>
+                        <div class="exercise-item-info">
+                            <div class="exercise-item-name">${escapeHtml(ex.name)}${ex.cycleAdjusted ? `<span class="cycle-badge" title="Adjusted for cycle phase">${currentCycleIcon}</span>` : ''}</div>
+                            <div class="exercise-item-details">${parseInt(ex.sets) || 0} sets × ${escapeHtml(String(ex.reps))} reps</div>
+                            ${stepsHtml}
+                        </div>
+                        <div class="exercise-item-muscles">
+                            ${ex.muscles.slice(0, 2).map(m => `<span class="mini-muscle-tag">${escapeHtml(m)}</span>`).join('')}
+                        </div>
+                    </div>`;
+                }).join('');
+
+                // Add cycle phase banner for non-male users with cycle phase selected
+                const cycleBannerEl = document.getElementById('cycle-phase-banner');
+                const showCycleBanner = state.gender !== 'male' && cyclePhase && cyclePhase !== 'none';
+                if (showCycleBanner) {
+                    const phaseLabels = { menstrual: 'Menstrual Phase', follicular: 'Follicular Phase', ovulatory: 'Ovulatory Phase', luteal: 'Luteal Phase' };
+                    if (cycleBannerEl) {
+                        cycleBannerEl.style.display = 'flex';
+                        cycleBannerEl.innerHTML = `
+                            <span class="cycle-banner-icon">${cycleIcons[cyclePhase]}</span>
+                            <span class="cycle-banner-text">Plan optimized for <strong>${phaseLabels[cyclePhase]}</strong></span>
+                        `;
+                    }
+                } else if (cycleBannerEl) {
+                    cycleBannerEl.style.display = 'none';
+                }
+            }
+        }
+
+        function setupWeeklyRoutine() {
+            // Delegated "How to do it" toggle for dynamically generated exercise items
+            document.getElementById('daily-exercises-list')?.addEventListener('click', (e) => {
+                const btn = e.target.closest('.weekly-how-to-btn');
+                if (!btn) return;
+                const panel = btn.nextElementSibling;
+                const open = panel.classList.toggle('open');
+                btn.classList.toggle('open', open);
+                btn.querySelector('span').textContent = open ? 'Less Details' : 'How to do it';
+            });
+
+            // Open button
+            document.getElementById('open-weekly-routine-btn')?.addEventListener('click', openWeeklyRoutineModal);
+
+            // Close button
+            document.getElementById('weekly-routine-close')?.addEventListener('click', closeWeeklyRoutineModal);
+
+            // Close on background click
+            const modal = document.getElementById('weekly-routine-modal');
+            modal?.addEventListener('click', (e) => {
+                if (e.target === modal) closeWeeklyRoutineModal();
+            });
+
+            // Goal options
+            document.querySelectorAll('.goal-options-weekly .config-btn').forEach(btn => {
+                btn.addEventListener('click', () => {
+                    document.querySelectorAll('.goal-options-weekly .config-btn').forEach(b => b.classList.remove('active'));
+                    btn.classList.add('active');
+                    weeklyRoutineData.currentConfig.goal = btn.dataset.goal;
+                });
+            });
+
+            // Split options
+            document.querySelectorAll('.split-options .config-btn').forEach(btn => {
+                btn.addEventListener('click', () => {
+                    document.querySelectorAll('.split-options .config-btn').forEach(b => b.classList.remove('active'));
+                    btn.classList.add('active');
+                    weeklyRoutineData.currentConfig.split = btn.dataset.split;
+                });
+            });
+
+            // Day toggles
+            document.querySelectorAll('.day-toggle').forEach(btn => {
+                btn.addEventListener('click', () => {
+                    btn.classList.toggle('active');
+                    const day = btn.dataset.day;
+                    const days = weeklyRoutineData.currentConfig.availableDays;
+                    if (btn.classList.contains('active')) {
+                        if (!days.includes(day)) days.push(day);
+                    } else {
+                        const idx = days.indexOf(day);
+                        if (idx > -1) days.splice(idx, 1);
+                    }
+                });
+            });
+
+            // Duration slider
+            const durationSlider = document.getElementById('session-duration');
+            const durationValue = document.getElementById('duration-value');
+            durationSlider?.addEventListener('input', (e) => {
+                const val = e.target.value;
+                durationValue.textContent = `${val} min`;
+                weeklyRoutineData.currentConfig.sessionDuration = parseInt(val);
+            });
+
+            // Equipment location options
+            document.querySelectorAll('.equipment-location-options .config-btn').forEach(btn => {
+                btn.addEventListener('click', () => {
+                    document.querySelectorAll('.equipment-location-options .config-btn').forEach(b => b.classList.remove('active'));
+                    btn.classList.add('active');
+                    weeklyRoutineData.currentConfig.equipment = btn.dataset.equipment;
+                });
+            });
+
+            // Cycle phase options (female users only)
+            document.querySelectorAll('.cycle-options .cycle-btn').forEach(btn => {
+                btn.addEventListener('click', () => {
+                    document.querySelectorAll('.cycle-options .cycle-btn').forEach(b => b.classList.remove('active'));
+                    btn.classList.add('active');
+                    weeklyRoutineData.currentConfig.cyclePhase = btn.dataset.cycle;
+                    updateCycleNote();
+                });
+            });
+
+            // Generate button
+            document.getElementById('generate-weekly-btn')?.addEventListener('click', () => {
+                const btn = document.getElementById('generate-weekly-btn');
+                btn.disabled = true;
+                btn.textContent = 'Generating...';
+                setTimeout(() => {
+                    generateWeeklyPlan();
+                    document.getElementById('weekly-config').style.display = 'none';
+                    document.getElementById('weekly-plan-view').style.display = 'block';
+                    updateWeeklyPlanUI();
+                    btn.disabled = false;
+                    btn.textContent = 'Generate Plan';
+                    showToast('Workout plan generated!', 'success');
+                }, 300);
+            });
+
+            // Day selector in plan view
+            document.querySelectorAll('.week-day-btn').forEach(btn => {
+                btn.addEventListener('click', () => {
+                    showDayWorkout(btn.dataset.day);
+                });
+            });
+
+            // Edit plan
+            document.getElementById('edit-weekly-plan')?.addEventListener('click', () => {
+                document.getElementById('weekly-plan-view').style.display = 'none';
+                document.getElementById('weekly-config').style.display = 'block';
+            });
+
+            // Regenerate
+            document.getElementById('regenerate-weekly-plan')?.addEventListener('click', () => {
+                generateWeeklyPlan();
+                updateWeeklyPlanUI();
+            });
+
+            // Save plan
+            document.getElementById('save-weekly-plan')?.addEventListener('click', async () => {
+                const plan = weeklyRoutineData.weekPlan;
+                if (!plan) {
+                    showToast('No plan to save.', 'error');
+                    return;
+                }
+
+                // Always save locally
+                localStorage.setItem(userKey('fixit-weekly-plan'), JSON.stringify(plan));
+
+                // Also save to backend if logged in
+                if (state.accessToken) {
+                    try {
+                        const config = weeklyRoutineData.currentConfig;
+                        const res = await apiFetch('/workouts/plans', {
+                            method: 'POST',
+                            body: JSON.stringify({
+                                plan_name: `${config.split || 'custom'} - ${new Date().toLocaleDateString()}`,
+                                split_type: config.split || 'custom',
+                                days_per_week: config.availableDays?.length || 5,
+                                equipment: config.equipment || 'gym',
+                                intensity: config.goal || 'hypertrophy',
+                                cycle_phase: config.cyclePhase || null,
+                                plan_data: plan,
+                            }),
+                        });
+
+                        if (res.ok) {
+                            showToast('Weekly plan saved!', 'success');
+                        } else {
+                            showToast('Plan saved locally. Backend save failed.', 'warning');
+                        }
+                    } catch {
+                        showToast('Plan saved locally.', 'success');
+                    }
+                } else {
+                    showToast('Weekly plan saved!', 'success');
+                }
+
+                closeWeeklyRoutineModal();
+            });
+
+            // Start day workout
+            document.getElementById('start-day-btn')?.addEventListener('click', () => {
+                const day = weeklyRoutineData.selectedDay;
+                const dayPlan = weeklyRoutineData.weekPlan?.[day];
+                if (dayPlan && dayPlan.exercises.length > 0) {
+                    // Convert to workout player format and start
+                    workoutPlayerState.exercises = dayPlan.exercises.map(ex => ({
+                        name: ex.name,
+                        targets: ex.muscles,
+                        sets: ex.sets,
+                        reps: parseInt(ex.reps) || 12,
+                        rest: 60,
+                        isWeak: false,
+                        type: 'gym'
+                    }));
+                    const dayLabel = day.charAt(0).toUpperCase() + day.slice(1);
+                    workoutPlayerState.label = `${dayLabel} · ${dayPlan.focus || 'Workout'}`;
+                    closeWeeklyRoutineModal();
+                    setTimeout(() => {
+                        workoutPlayerState.currentExerciseIndex = 0;
+                        workoutPlayerState.currentSet = 1;
+                        workoutPlayerState.currentReps = 0;
+                        workoutPlayerState.phase = 'get-ready';
+                        workoutPlayerState.isPlaying = false;
+                        workoutPlayerState.startTime = Date.now();
+                        document.getElementById('workout-complete-overlay').classList.remove('active');
+                        updateWorkoutPlayerUI();
+                        setPhase('get-ready', 5);
+                        document.getElementById('workout-player-modal').classList.add('active');
+                        document.body.style.overflow = 'hidden';
+                    }, 300);
+                }
+            });
+        }
+
+        // Nutrition
+        function setupNutrition() {
+            loadFoodDatabase();
+            loadMealDatabase();
+
+            // Navigation buttons
+            document.getElementById('back-to-results-nutrition').addEventListener('click', () => {
+                goToScreen(3);
+            });
+
+            document.getElementById('back-to-workout-nutrition').addEventListener('click', () => {
+                goToScreen(6);
+            });
+
+            document.getElementById('back-to-simulator-nutrition').addEventListener('click', () => {
+                goToScreen(5);
+            });
+
+            document.getElementById('generate-meal-plan-btn').addEventListener('click', () => {
+                openMealPlanModal();
+            });
+
+            // Setup meal plan generator
+            setupMealPlanGenerator();
+
+            // Setup food recognition
+            setupFoodRecognition();
+        }
+
+        // MobileNet model for food recognition
+        let mobilenetModel = null;
+
+        // Initialize MobileNet
+        async function initMobileNet() {
+            try {
+                mobilenetModel = await mobilenet.load({
+                    version: 2,
+                    alpha: 1.0
+                });
+                return true;
+            } catch (error) {
+                dbg.error('Failed to load MobileNet:', error);
+                return false;
+            }
+        }
+
+        // ========== MEAL PLAN GENERATOR ==========
+        function openMealPlanModal() {
+            const modal = document.getElementById('meal-plan-modal');
+            modal.classList.add('active');
+            document.body.style.overflow = 'hidden';
+        }
+
+        function closeMealPlanModal() {
+            const modal = document.getElementById('meal-plan-modal');
+            modal.classList.remove('active');
+            document.body.style.overflow = '';
+        }
+
+        function setupMealPlanGenerator() {
+            const modal = document.getElementById('meal-plan-modal');
+            const closeBtn = document.getElementById('meal-plan-close');
+            const configPanel = document.getElementById('meal-plan-config');
+            const planView = document.getElementById('meal-plan-view');
+            const generateBtn = document.getElementById('generate-plan-btn');
+            const regenerateBtn = document.getElementById('regenerate-plan-btn');
+            const editBtn = document.getElementById('edit-plan-btn');
+            const saveBtn = document.getElementById('save-plan-btn');
+
+            let currentConfig = {
+                goal: 'muscle-gain',
+                diet: 'standard',
+                mealsPerDay: 4
+            };
+
+            // Close modal
+            closeBtn?.addEventListener('click', closeMealPlanModal);
+            modal?.addEventListener('click', (e) => {
+                if (e.target === modal) closeMealPlanModal();
+            });
+
+            // Goal selection
+            document.querySelectorAll('.goal-options .config-btn').forEach(btn => {
+                btn.addEventListener('click', () => {
+                    document.querySelectorAll('.goal-options .config-btn').forEach(b => b.classList.remove('active'));
+                    btn.classList.add('active');
+                    currentConfig.goal = btn.dataset.goal;
+                });
+            });
+
+            // Diet selection
+            document.querySelectorAll('.diet-options .config-btn').forEach(btn => {
+                btn.addEventListener('click', () => {
+                    document.querySelectorAll('.diet-options .config-btn').forEach(b => b.classList.remove('active'));
+                    btn.classList.add('active');
+                    currentConfig.diet = btn.dataset.diet;
+                });
+            });
+
+            // Meals per day selection
+            document.querySelectorAll('.meals-btn').forEach(btn => {
+                btn.addEventListener('click', () => {
+                    document.querySelectorAll('.meals-btn').forEach(b => b.classList.remove('active'));
+                    btn.classList.add('active');
+                    currentConfig.mealsPerDay = parseInt(btn.dataset.meals);
+                });
+            });
+
+            // Day selector
+            document.querySelectorAll('.day-btn').forEach(btn => {
+                btn.addEventListener('click', () => {
+                    document.querySelectorAll('.day-btn').forEach(b => b.classList.remove('active'));
+                    btn.classList.add('active');
+                    const config = { ...currentConfig, gender: state.gender || 'male' };
+                    generateMealsForDay(btn.dataset.day, config);
+                });
+            });
+
+            // Generate plan
+            generateBtn?.addEventListener('click', () => {
+                // Use gender from state (set during AI analysis confirmation)
+                const config = { ...currentConfig, gender: state.gender || 'male' };
+                configPanel.style.display = 'none';
+                planView.style.display = 'block';
+                generateMealPlan(config);
+            });
+
+            // Regenerate plan
+            regenerateBtn?.addEventListener('click', () => {
+                const config = { ...currentConfig, gender: state.gender || 'male' };
+                generateMealPlan(config);
+            });
+
+            // Edit goals
+            editBtn?.addEventListener('click', () => {
+                planView.style.display = 'none';
+                configPanel.style.display = 'block';
+            });
+
+            // Save plan
+            saveBtn?.addEventListener('click', async () => {
+                if (!_lastGeneratedMealPlan) {
+                    showToast('Generate a meal plan first.', 'error');
+                    return;
+                }
+
+                if (state.accessToken) {
+                    try {
+                        const res = await apiFetch('/nutrition/meal-plans', {
+                            method: 'POST',
+                            body: JSON.stringify({
+                                plan_name: `Meal Plan - ${new Date().toLocaleDateString()}`,
+                                plan_data: _lastGeneratedMealPlan,
+                            }),
+                        });
+
+                        if (res.ok) {
+                            showToast('Meal plan saved!', 'success');
+                        } else {
+                            showToast('Failed to save meal plan.', 'error');
+                        }
+                    } catch {
+                        showToast('Failed to save meal plan.', 'error');
+                    }
+                } else {
+                    showToast('Meal plan saved!', 'success');
+                }
+
+                closeMealPlanModal();
+            });
+        }
+
+        // Store the last generated meal plan for saving
+        let _lastGeneratedMealPlan = null;
+
+        function generateMealPlan(config) {
+            // Track meal plan generation for gamification
+            localStorage.setItem(userKey('fixit-meal-plan-generated'), 'true');
+            const mpc = parseInt(localStorage.getItem(userKey('fixit-meal-plan-count')) || '0') + 1;
+            localStorage.setItem(userKey('fixit-meal-plan-count'), mpc);
+            awardXP(20, 'meal-plan');
+            checkAchievements();
+
+            // Calculate daily targets based on goal
+            const targets = calculateDailyTargets(config);
+
+            // Store plan data for saving
+            _lastGeneratedMealPlan = { config, targets };
+
+            // Update summary
+            document.getElementById('plan-total-calories').textContent = targets.calories.toLocaleString();
+            document.getElementById('plan-total-protein').textContent = targets.protein + 'g';
+            document.getElementById('plan-total-carbs').textContent = targets.carbs + 'g';
+            document.getElementById('plan-total-fats').textContent = targets.fats + 'g';
+
+            // Generate meals for current day
+            generateMealsForDay('monday', config);
+        }
+
+        function calculateDailyTargets(config) {
+            // Base calories differ by gender
+            // Men typically need 2200-2800 cal, Women typically need 1800-2200 cal
+            const isMale = config.gender === 'male';
+            const isFemale = config.gender === 'female';
+            const baseCalories = isMale ? 2400 : isFemale ? 1900 : 2150;
+
+            let calories = baseCalories;
+            let proteinRatio = 0.3;
+            let carbsRatio = 0.4;
+            let fatsRatio = 0.3;
+
+            switch(config.goal) {
+                case 'fat-loss':
+                    // 20% deficit
+                    calories = isMale ? 1900 : isFemale ? 1500 : 1700;
+                    proteinRatio = 0.35; // Higher protein to preserve muscle
+                    carbsRatio = 0.35;
+                    fatsRatio = 0.3;
+                    break;
+                case 'muscle-gain':
+                    // 15% surplus
+                    calories = isMale ? 2800 : isFemale ? 2200 : 2500;
+                    proteinRatio = 0.35;
+                    carbsRatio = 0.45;
+                    fatsRatio = 0.2;
+                    break;
+                case 'maintenance':
+                    calories = baseCalories;
+                    break;
+            }
+
+            // Adjust macros based on diet preference
+            if (config.diet === 'high-protein') {
+                proteinRatio = 0.4;
+                carbsRatio = 0.35;
+                fatsRatio = 0.25;
+            } else if (config.diet === 'low-carb') {
+                proteinRatio = 0.35;
+                carbsRatio = 0.2;
+                fatsRatio = 0.45;
+            } else if (config.diet === 'vegetarian') {
+                // Slightly higher carbs for vegetarian
+                proteinRatio = 0.25;
+                carbsRatio = 0.5;
+                fatsRatio = 0.25;
+            }
+
+            return {
+                calories,
+                protein: Math.round((calories * proteinRatio) / 4),
+                carbs: Math.round((calories * carbsRatio) / 4),
+                fats: Math.round((calories * fatsRatio) / 9)
+            };
+        }
+
+        function generateMealsForDay(day, config) {
+            const timeline = document.getElementById('meals-timeline');
+            const targets = calculateDailyTargets(config);
+
+            // Meal database based on diet preference
+            const mealDatabase = getMealDatabase(config.diet);
+
+            // Distribute calories across meals
+            const mealDistribution = getMealDistribution(config.mealsPerDay);
+
+            let html = '';
+            const mealTypes = ['breakfast', 'lunch', 'dinner', 'snack', 'snack2', 'snack3'];
+            const mealNames = ['Breakfast', 'Lunch', 'Dinner', 'Morning Snack', 'Afternoon Snack', 'Evening Snack'];
+            const mealTimes = ['7:00 AM', '12:30 PM', '7:00 PM', '10:00 AM', '3:30 PM', '9:00 PM'];
+            const mealIcons = ['🌅', '☀️', '🌙', '🍎', '🥤', '🌰'];
+
+            for (let i = 0; i < config.mealsPerDay; i++) {
+                const mealType = mealTypes[i];
+                const mealCalories = Math.round(targets.calories * mealDistribution[i]);
+                const meal = selectMealForType(mealDatabase, mealType, mealCalories, config);
+
+                html += `
+                    <div class="meal-card">
+                        <div class="meal-card-header">
+                            <div class="meal-time-info">
+                                <div class="meal-type-icon ${mealType.replace('2', '').replace('3', '')}">
+                                    ${mealIcons[i]}
+                                </div>
+                                <div>
+                                    <div class="meal-type-name">${mealNames[i]}</div>
+                                    <div class="meal-time-badge">${mealTimes[i]}</div>
+                                </div>
+                            </div>
+                            <div class="meal-calories-badge">${meal.totalCalories} kcal</div>
+                        </div>
+                        <div class="meal-card-body">
+                            <div class="meal-foods">
+                                ${meal.foods.map(food => `
+                                    <div class="food-item">
+                                        <span class="food-icon">${food.icon}</span>
+                                        <div class="food-details">
+                                            <div class="food-name">${escapeHtml(food.name)}</div>
+                                            <div class="food-portion">${escapeHtml(food.portion)}</div>
+                                        </div>
+                                        <div class="food-macros">
+                                            <span class="food-macro protein">${food.protein}g P</span>
+                                            <span class="food-macro carbs">${food.carbs}g C</span>
+                                            <span class="food-macro fats">${food.fats}g F</span>
+                                        </div>
+                                    </div>
+                                `).join('')}
+                            </div>
+                            <button class="meal-swap-btn" onclick="swapMeal('${mealType}')">
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                    <polyline points="23 4 23 10 17 10"/>
+                                    <path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/>
+                                </svg>
+                                Swap meal
+                            </button>
+                        </div>
+                    </div>
+                `;
+            }
+
+            timeline.innerHTML = html;
+        }
+
+        function getMealDistribution(mealsPerDay) {
+            switch(mealsPerDay) {
+                case 3: return [0.3, 0.4, 0.3];
+                case 4: return [0.25, 0.3, 0.3, 0.15];
+                case 5: return [0.2, 0.1, 0.3, 0.25, 0.15];
+                case 6: return [0.2, 0.1, 0.25, 0.1, 0.25, 0.1];
+                default: return [0.25, 0.3, 0.3, 0.15];
+            }
+        }
+
+        let _mealDatabase = null;
+
+        async function loadMealDatabase() {
+            if (_mealDatabase !== null) return;
+            try {
+                const res = await fetch('/api/nutrition/meals');
+                if (res.ok) _mealDatabase = await res.json();
+            } catch (e) {
+                console.warn('Could not load meal database from API:', e);
+            }
+        }
+
+        function getMealDatabase(diet) {
+            if (_mealDatabase) {
+                const base = JSON.parse(JSON.stringify(_mealDatabase['standard'] || {}));
+                if (diet === 'vegetarian' && _mealDatabase['vegetarian']) {
+                    if (_mealDatabase['vegetarian'].lunch)  base.lunch  = _mealDatabase['vegetarian'].lunch;
+                    if (_mealDatabase['vegetarian'].dinner) base.dinner = _mealDatabase['vegetarian'].dinner;
+                }
+                return base;
+            }
+
+            // Hardcoded fallback (used when API is unavailable)
+            const standardMeals = {
+                breakfast: [
+                    { name: 'Greek Yogurt Parfait', icon: '🥣', foods: [
+                        { name: 'Greek Yogurt', portion: '200g', icon: '🥛', protein: 20, carbs: 8, fats: 5, calories: 157 },
+                        { name: 'Mixed Berries', portion: '100g', icon: '🍓', protein: 1, carbs: 14, fats: 0, calories: 57 },
+                        { name: 'Granola', portion: '40g', icon: '🌾', protein: 4, carbs: 28, fats: 6, calories: 180 }
+                    ]},
+                    { name: 'Protein Oatmeal Bowl', icon: '🥣', foods: [
+                        { name: 'Oatmeal', portion: '80g dry', icon: '🥣', protein: 10, carbs: 54, fats: 6, calories: 304 },
+                        { name: 'Banana', portion: '1 medium', icon: '🍌', protein: 1, carbs: 27, fats: 0, calories: 105 },
+                        { name: 'Almond Butter', portion: '2 tbsp', icon: '🥜', protein: 7, carbs: 6, fats: 18, calories: 196 }
+                    ]},
+                    { name: 'Eggs & Avocado Toast', icon: '🍳', foods: [
+                        { name: 'Scrambled Eggs', portion: '3 large', icon: '🥚', protein: 18, carbs: 2, fats: 15, calories: 210 },
+                        { name: 'Whole Grain Toast', portion: '2 slices', icon: '🍞', protein: 8, carbs: 26, fats: 2, calories: 160 },
+                        { name: 'Avocado', portion: '½ medium', icon: '🥑', protein: 2, carbs: 6, fats: 15, calories: 160 }
+                    ]}
+                ],
+                lunch: [
+                    { name: 'Grilled Chicken Salad', icon: '🥗', foods: [
+                        { name: 'Grilled Chicken Breast', portion: '150g', icon: '🍗', protein: 46, carbs: 0, fats: 5, calories: 248 },
+                        { name: 'Mixed Greens', portion: '100g', icon: '🥬', protein: 2, carbs: 4, fats: 0, calories: 20 },
+                        { name: 'Olive Oil Dressing', portion: '2 tbsp', icon: '🫒', protein: 0, carbs: 0, fats: 28, calories: 240 },
+                        { name: 'Cherry Tomatoes', portion: '80g', icon: '🍅', protein: 1, carbs: 4, fats: 0, calories: 18 }
+                    ]},
+                    { name: 'Salmon Rice Bowl', icon: '🍱', foods: [
+                        { name: 'Grilled Salmon', portion: '140g', icon: '🐟', protein: 28, carbs: 0, fats: 18, calories: 290 },
+                        { name: 'Brown Rice', portion: '150g cooked', icon: '🍚', protein: 4, carbs: 36, fats: 2, calories: 168 },
+                        { name: 'Steamed Broccoli', portion: '100g', icon: '🥦', protein: 3, carbs: 7, fats: 0, calories: 34 }
+                    ]},
+                    { name: 'Turkey Wrap', icon: '🌯', foods: [
+                        { name: 'Turkey Breast', portion: '120g', icon: '🦃', protein: 36, carbs: 0, fats: 2, calories: 162 },
+                        { name: 'Whole Wheat Wrap', portion: '1 large', icon: '🫓', protein: 6, carbs: 36, fats: 4, calories: 200 },
+                        { name: 'Hummus', portion: '40g', icon: '🥣', protein: 3, carbs: 6, fats: 4, calories: 66 },
+                        { name: 'Mixed Vegetables', portion: '80g', icon: '🥒', protein: 2, carbs: 8, fats: 0, calories: 35 }
+                    ]}
+                ],
+                dinner: [
+                    { name: 'Steak & Sweet Potato', icon: '🥩', foods: [
+                        { name: 'Lean Beef Steak', portion: '180g', icon: '🥩', protein: 50, carbs: 0, fats: 14, calories: 330 },
+                        { name: 'Sweet Potato', portion: '200g', icon: '🍠', protein: 4, carbs: 40, fats: 0, calories: 172 },
+                        { name: 'Asparagus', portion: '100g', icon: '🌿', protein: 2, carbs: 4, fats: 0, calories: 20 }
+                    ]},
+                    { name: 'Chicken Stir-Fry', icon: '🍳', foods: [
+                        { name: 'Chicken Thigh', portion: '160g', icon: '🍗', protein: 38, carbs: 0, fats: 12, calories: 264 },
+                        { name: 'Jasmine Rice', portion: '150g cooked', icon: '🍚', protein: 4, carbs: 45, fats: 1, calories: 195 },
+                        { name: 'Stir-Fry Vegetables', portion: '150g', icon: '🥦', protein: 4, carbs: 12, fats: 2, calories: 60 },
+                        { name: 'Teriyaki Sauce', portion: '30ml', icon: '🥢', protein: 1, carbs: 8, fats: 0, calories: 35 }
+                    ]},
+                    { name: 'Baked Fish & Quinoa', icon: '🐟', foods: [
+                        { name: 'Baked Cod', portion: '170g', icon: '🐟', protein: 35, carbs: 0, fats: 2, calories: 160 },
+                        { name: 'Quinoa', portion: '150g cooked', icon: '🌾', protein: 6, carbs: 30, fats: 3, calories: 180 },
+                        { name: 'Roasted Vegetables', portion: '150g', icon: '🥕', protein: 3, carbs: 18, fats: 5, calories: 120 }
+                    ]}
+                ],
+                snack: [
+                    { name: 'Protein Shake', icon: '🥤', foods: [
+                        { name: 'Whey Protein', portion: '1 scoop', icon: '🥛', protein: 25, carbs: 3, fats: 2, calories: 130 },
+                        { name: 'Banana', portion: '1 small', icon: '🍌', protein: 1, carbs: 20, fats: 0, calories: 80 }
+                    ]},
+                    { name: 'Nuts & Fruit', icon: '🥜', foods: [
+                        { name: 'Mixed Nuts', portion: '30g', icon: '🌰', protein: 6, carbs: 6, fats: 16, calories: 180 },
+                        { name: 'Apple', portion: '1 medium', icon: '🍎', protein: 0, carbs: 25, fats: 0, calories: 95 }
+                    ]},
+                    { name: 'Cottage Cheese Bowl', icon: '🧀', foods: [
+                        { name: 'Cottage Cheese', portion: '150g', icon: '🧀', protein: 17, carbs: 5, fats: 6, calories: 147 },
+                        { name: 'Pineapple', portion: '80g', icon: '🍍', protein: 0, carbs: 11, fats: 0, calories: 40 }
+                    ]}
+                ]
+            };
+
+            // Modify based on diet preference
+            if (diet === 'vegetarian') {
+                standardMeals.lunch = [
+                    { name: 'Buddha Bowl', icon: '🥗', foods: [
+                        { name: 'Chickpeas', portion: '150g', icon: '🫘', protein: 15, carbs: 40, fats: 4, calories: 246 },
+                        { name: 'Quinoa', portion: '150g cooked', icon: '🌾', protein: 6, carbs: 30, fats: 3, calories: 180 },
+                        { name: 'Roasted Vegetables', portion: '150g', icon: '🥕', protein: 3, carbs: 18, fats: 5, calories: 120 },
+                        { name: 'Tahini Dressing', portion: '30g', icon: '🥜', protein: 3, carbs: 3, fats: 9, calories: 100 }
+                    ]}
+                ];
+                standardMeals.dinner = [
+                    { name: 'Tofu Stir-Fry', icon: '🍳', foods: [
+                        { name: 'Firm Tofu', portion: '200g', icon: '🧈', protein: 20, carbs: 4, fats: 12, calories: 190 },
+                        { name: 'Brown Rice', portion: '150g cooked', icon: '🍚', protein: 4, carbs: 36, fats: 2, calories: 168 },
+                        { name: 'Mixed Vegetables', portion: '200g', icon: '🥦', protein: 6, carbs: 16, fats: 2, calories: 80 }
+                    ]}
+                ];
+            }
+
+            return standardMeals;
+        }
+
+        function selectMealForType(database, mealType, targetCalories, config) {
+            const type = mealType.replace('2', '').replace('3', '');
+            const options = database[type] || database.snack;
+
+            // Randomly select a meal option
+            const randomIndex = Math.floor(Math.random() * options.length);
+            const selectedMeal = options[randomIndex];
+
+            // Calculate totals
+            let totalCalories = 0, totalProtein = 0, totalCarbs = 0, totalFats = 0;
+            selectedMeal.foods.forEach(food => {
+                totalCalories += food.calories;
+                totalProtein += food.protein;
+                totalCarbs += food.carbs;
+                totalFats += food.fats;
+            });
+
+            return {
+                ...selectedMeal,
+                totalCalories,
+                totalProtein,
+                totalCarbs,
+                totalFats
+            };
+        }
+
+        function swapMeal(mealType) {
+            // Re-generate just that meal
+            const config = {
+                gender: state.gender || 'male',
+                goal: document.querySelector('.goal-options .config-btn.active')?.dataset.goal || 'muscle-gain',
+                diet: document.querySelector('.diet-options .config-btn.active')?.dataset.diet || 'standard',
+                mealsPerDay: parseInt(document.querySelector('.meals-btn.active')?.dataset.meals) || 4
+            };
+
+            const currentDay = document.querySelector('.day-btn.active')?.dataset.day || 'monday';
+            generateMealsForDay(currentDay, config);
+        }
+
+        // Food Recognition functionality
+        function setupFoodRecognition() {
+            const foodUploadZone = document.getElementById('food-upload-zone');
+            const foodFileInput = document.getElementById('food-file-input');
+            const foodCameraZone = document.getElementById('food-camera-zone');
+            const foodCameraVideo = document.getElementById('food-camera-video');
+            const foodCameraCanvas = document.getElementById('food-camera-canvas');
+            const foodUploadModeBtn = document.getElementById('food-upload-mode-btn');
+            const foodCameraModeBtn = document.getElementById('food-camera-mode-btn');
+            const foodCaptureBtn = document.getElementById('food-capture-btn');
+            const foodSwitchCameraBtn = document.getElementById('food-switch-camera-btn');
+            const foodCloseCameraBtn = document.getElementById('food-close-camera-btn');
+            const foodPreview = document.getElementById('food-preview');
+            const foodPreviewImage = document.getElementById('food-preview-image');
+            const foodRemovePreview = document.getElementById('food-remove-preview');
+            const analyzeFoodBtn = document.getElementById('analyze-food-btn');
+            const foodResults = document.getElementById('food-results');
+
+            // Confirmation UI elements
+            const foodConfirmation = document.getElementById('food-confirmation');
+            const suggestionIcon = document.getElementById('suggestion-icon');
+            const suggestionName = document.getElementById('suggestion-name');
+            const foodDetectConfidence = document.getElementById('food-detect-confidence');
+            const confirmFoodBtn = document.getElementById('confirm-food-btn');
+            const changeFoodBtn = document.getElementById('change-food-btn');
+            const foodSearchBox = document.getElementById('food-search-box');
+            const foodSearchInput = document.getElementById('food-search-input');
+            const foodSearchBtn = document.getElementById('food-search-btn');
+            const foodSearchResults = document.getElementById('food-search-results');
+
+            if (!foodUploadZone) return;
+
+            // Initialize MobileNet in background when entering nutrition screen
+            initMobileNet().catch(err => dbg.error('MobileNet background load failed:', err));
+
+            let foodCameraStream = null;
+            let foodFacingMode = 'environment';
+            let foodImageData = null;
+            let detectedFoodData = null; // Store detected food for confirmation
+            let detectedFoodName = ''; // Store the detected food name for API search
+
+            // Mode toggle
+            foodUploadModeBtn?.addEventListener('click', () => {
+                setFoodInputMode('upload');
+                // Also trigger file picker when clicking upload button
+                if (foodFileInput) foodFileInput.click();
+            });
+            foodCameraModeBtn?.addEventListener('click', () => setFoodInputMode('camera'));
+
+            // Upload zone click
+            foodUploadZone.addEventListener('click', () => foodFileInput?.click());
+
+            // File input change
+            foodFileInput?.addEventListener('change', (e) => {
+                if (e.target.files.length) handleFoodFile(e.target.files[0]);
+            });
+
+            // Drag and drop
+            foodUploadZone.addEventListener('dragover', (e) => {
+                e.preventDefault();
+                foodUploadZone.classList.add('dragover');
+            });
+
+            foodUploadZone.addEventListener('dragleave', () => {
+                foodUploadZone.classList.remove('dragover');
+            });
+
+            foodUploadZone.addEventListener('drop', (e) => {
+                e.preventDefault();
+                foodUploadZone.classList.remove('dragover');
+                if (e.dataTransfer.files.length) handleFoodFile(e.dataTransfer.files[0]);
+            });
+
+            // Camera controls
+            foodCaptureBtn?.addEventListener('click', captureFoodPhoto);
+            foodSwitchCameraBtn?.addEventListener('click', switchFoodCamera);
+            foodCloseCameraBtn?.addEventListener('click', () => setFoodInputMode('upload'));
+
+            // Remove preview
+            foodRemovePreview?.addEventListener('click', clearFoodPreview);
+
+            // Analyze food button
+            analyzeFoodBtn?.addEventListener('click', analyzeFood);
+
+            // Add to log button
+            document.getElementById('add-to-log-btn')?.addEventListener('click', async () => {
+                if (!detectedFoodData) {
+                    showToast('No food detected to log.', 'error');
+                    return;
+                }
+
+                const btn = document.getElementById('add-to-log-btn');
+                setBtnLoading(btn, true);
+
+                try {
+                    const today = new Date().toISOString().split('T')[0];
+                    const payload = {
+                        food_id: detectedFoodData.id || null,
+                        log_date: today,
+                        meal_type: 'snack',
+                        food_name: detectedFoodData.name || 'Unknown Food',
+                        calories: parseInt(detectedFoodData.calories) || 0,
+                        protein: parseFloat(detectedFoodData.protein) || 0,
+                        carbs: parseFloat(detectedFoodData.carbs) || 0,
+                        fats: parseFloat(detectedFoodData.fats) || 0,
+                        portion: detectedFoodData.portion || '1 serving',
+                        quantity: 1,
+                        is_scanned: true,
+                    };
+
+                    const res = await apiFetch('/nutrition/food-log', {
+                        method: 'POST',
+                        body: JSON.stringify(payload),
+                    });
+
+                    if (res.ok) {
+                        showToast('Food added to daily log!', 'success');
+                        clearFoodPreview();
+                        loadDailyFoodLog(); // refresh the log card
+                    } else {
+                        const err = await res.json().catch(() => ({}));
+                        showToast(err.error?.message || 'Failed to log food.', 'error');
+                    }
+                } catch (err) {
+                    showToast(err.message || 'Failed to log food.', 'error');
+                } finally {
+                    setBtnLoading(btn, false);
+                }
+            });
+
+            // Scan new food button
+            document.getElementById('scan-new-food-btn')?.addEventListener('click', () => {
+                clearFoodPreview();
+            });
+
+            // Confirm food button - search API for the detected food name
+            confirmFoodBtn?.addEventListener('click', async () => {
+                if (detectedFoodName) {
+                    foodConfirmation.style.display = 'none';
+                    await searchAndDisplayFood(detectedFoodName);
+                }
+            });
+
+            // Change food button - show search input
+            changeFoodBtn?.addEventListener('click', () => {
+                foodSearchBox.style.display = 'block';
+                foodSearchInput.value = '';
+                foodSearchResults.style.display = 'none';
+                foodSearchInput.focus();
+            });
+
+            // Food search button click
+            foodSearchBtn?.addEventListener('click', () => {
+                performFoodSearch();
+            });
+
+            // Auto-search as user types (with debounce)
+            let searchDebounceTimer = null;
+            let highlightedIndex = -1;
+            let currentResults = [];
+
+            foodSearchInput?.addEventListener('input', (e) => {
+                const query = e.target.value.trim();
+                highlightedIndex = -1;
+
+                // Clear previous timer
+                if (searchDebounceTimer) {
+                    clearTimeout(searchDebounceTimer);
+                }
+
+                // Hide results if query is too short
+                if (query.length < 2) {
+                    foodSearchResults.style.display = 'none';
+                    currentResults = [];
+                    return;
+                }
+
+                // Show loading indicator
+                foodSearchResults.style.display = 'block';
+                foodSearchResults.innerHTML = '<div class="food-search-loading">Searching...</div>';
+
+                // Debounce: wait 300ms after user stops typing
+                searchDebounceTimer = setTimeout(async () => {
+                    try {
+                        const results = await searchNutritionAPI(query);
+                        currentResults = results || [];
+                        displaySearchResults(results);
+                    } catch (error) {
+                        dbg.error('Search error:', error);
+                        currentResults = [];
+                        foodSearchResults.innerHTML = '<div class="food-search-loading">Search failed. Try again.</div>';
+                    }
+                }, 300);
+            });
+
+            // Keyboard navigation for autocomplete
+            foodSearchInput?.addEventListener('keydown', (e) => {
+                const items = foodSearchResults.querySelectorAll('.food-search-result-item');
+                if (items.length === 0) return;
+
+                if (e.key === 'ArrowDown') {
+                    e.preventDefault();
+                    highlightedIndex = Math.min(highlightedIndex + 1, items.length - 1);
+                    updateHighlight(items);
+                } else if (e.key === 'ArrowUp') {
+                    e.preventDefault();
+                    highlightedIndex = Math.max(highlightedIndex - 1, -1);
+                    updateHighlight(items);
+                } else if (e.key === 'Enter') {
+                    e.preventDefault();
+                    if (highlightedIndex >= 0 && currentResults[highlightedIndex]) {
+                        selectFood(currentResults[highlightedIndex]);
+                    } else if (foodSearchInput.value.trim()) {
+                        performFoodSearch();
+                    }
+                } else if (e.key === 'Escape') {
+                    foodSearchResults.style.display = 'none';
+                    highlightedIndex = -1;
+                }
+            });
+
+            function updateHighlight(items) {
+                items.forEach((item, index) => {
+                    item.classList.toggle('highlighted', index === highlightedIndex);
+                    if (index === highlightedIndex) {
+                        item.scrollIntoView({ block: 'nearest' });
+                    }
+                });
+            }
+
+            function selectFood(food) {
+                detectedFoodData = food;
+                foodConfirmation.style.display = 'none';
+                foodSearchBox.style.display = 'none';
+                foodSearchResults.style.display = 'none';
+                highlightedIndex = -1;
+                displayFoodResults({ foods: [food], confidence: 'high' });
+            }
+
+            // Perform food search using API
+            async function performFoodSearch() {
+                const query = foodSearchInput.value.trim();
+                if (!query) return;
+
+                foodSearchResults.style.display = 'block';
+                foodSearchResults.innerHTML = '<div class="food-search-loading">Searching...</div>';
+
+                try {
+                    const results = await searchNutritionAPI(query);
+                    displaySearchResults(results);
+                } catch (error) {
+                    dbg.error('Search error:', error);
+                    foodSearchResults.innerHTML = '<div class="food-search-loading">Search failed. Try again.</div>';
+                }
+            }
+
+            // Display search results
+            function displaySearchResults(results) {
+                if (!results || results.length === 0) {
+                    foodSearchResults.innerHTML = '<div class="food-search-loading">No results found. Try full food names like "boiled eggs" or "grilled chicken".</div>';
+                    return;
+                }
+
+                let html = '';
+                results.forEach((food, index) => {
+                    html += `
+                        <div class="food-search-result-item" data-index="${index}">
+                            <div class="food-search-result-name">${escapeHtml(food.name)}</div>
+                            <div class="food-search-result-info">${food.calories} cal | P: ${food.protein}g | C: ${food.carbs}g | F: ${food.fats}g</div>
+                        </div>
+                    `;
+                });
+                foodSearchResults.innerHTML = html;
+
+                // Add click handlers for results
+                foodSearchResults.querySelectorAll('.food-search-result-item').forEach((item) => {
+                    item.addEventListener('click', () => {
+                        const index = parseInt(item.dataset.index);
+                        const selectedFood = results[index];
+                        detectedFoodData = selectedFood;
+                        foodConfirmation.style.display = 'none';
+                        foodSearchBox.style.display = 'none';
+                        displayFoodResults({ foods: [selectedFood], confidence: 'high' });
+                    });
+                });
+            }
+
+            // Search nutrition API and display results (with local fallback)
+            async function searchAndDisplayFood(foodName) {
+                try {
+                    // Try API first
+                    const results = await searchNutritionAPI(foodName);
+                    if (results && results.length > 0) {
+                        detectedFoodData = results[0];
+                        displayFoodResults({ foods: [results[0]], confidence: 'high' });
+                    } else {
+                        // API returned no results - try local database
+                        const localResults = searchLocalFoods(foodName);
+                        if (localResults.length > 0) {
+                            detectedFoodData = localResults[0];
+                            displayFoodResults({ foods: [localResults[0]], confidence: 'medium', source: 'local' });
+                        } else {
+                            displayFoodResults({ foods: [], confidence: 'low' });
+                        }
+                    }
+                } catch (error) {
+                    dbg.error('API search failed, using local database:', error);
+                    // API error - use local fallback
+                    const localResults = searchLocalFoods(foodName);
+                    if (localResults.length > 0) {
+                        detectedFoodData = localResults[0];
+                        displayFoodResults({ foods: [localResults[0]], confidence: 'medium', source: 'offline' });
+                    } else {
+                        displayFoodResults({ foods: [], confidence: 'low' });
+                    }
+                }
+            }
+
+            // Nutrition search function - local database first, API enhancement when online
+            async function searchNutritionAPI(query) {
+                // Always check local database first (instant results)
+                const localResults = searchLocalFoods(query);
+
+                // If offline or local has good results, return local
+                if (!navigator.onLine) {
+                    return localResults;
+                }
+
+                // If local database has exact matches, prefer those (faster, no API needed)
+                if (localResults.length >= 3) {
+                    return localResults;
+                }
+
+                // Try to enhance with API for broader food coverage
+                const API_KEY = getApiKey();
+                const commonFoodWords = ['egg', 'eggs', 'chicken', 'rice', 'potato', 'bread', 'fish', 'beef', 'pork', 'salad'];
+
+                try {
+                    let response = await fetchWithRetry(`https://api.api-ninjas.com/v1/nutrition?query=${encodeURIComponent(query)}`, {
+                        method: 'GET',
+                        headers: { 'X-Api-Key': API_KEY }
+                    }, 2);
+
+                    let data = await response.json();
+
+                    // If no results and query is a cooking method, try with common foods
+                    if ((!data || data.length === 0) && query.length >= 3) {
+                        const cookingMethods = ['boiled', 'fried', 'grilled', 'baked', 'steamed', 'roasted', 'scrambled', 'poached', 'raw', 'cooked'];
+                        const queryLower = query.toLowerCase();
+
+                        if (cookingMethods.some(method => queryLower.includes(method))) {
+                            const searchPromises = commonFoodWords.slice(0, 5).map(food =>
+                                fetchWithRetry(`https://api.api-ninjas.com/v1/nutrition?query=${encodeURIComponent(query + ' ' + food)}`, {
+                                    method: 'GET',
+                                    headers: { 'X-Api-Key': API_KEY }
+                                }, 1).then(r => r.json()).catch(() => [])
+                            );
+
+                            const results = await Promise.all(searchPromises);
+                            data = results.flat().filter(item => item && item.name);
+                        }
+                    }
+
+                    if (Array.isArray(data) && data.length > 0) {
+                        const uniqueData = data.filter((item, index, self) =>
+                            index === self.findIndex(t => t.name?.toLowerCase() === item.name?.toLowerCase())
+                        );
+
+                        const apiResults = uniqueData.map(item => ({
+                            name: item.name.charAt(0).toUpperCase() + item.name.slice(1),
+                            calories: Math.round(item.calories) || 0,
+                            protein: Math.round(item.protein_g) || 0,
+                            carbs: Math.round(item.carbohydrates_total_g) || 0,
+                            fats: Math.round(item.fat_total_g) || 0,
+                            portion: `${Math.round(item.serving_size_g) || 100}g serving`,
+                            icon: getFoodIcon(item.name)
+                        }));
+
+                        // Merge: local results first, then API results (deduplicated)
+                        const merged = [...localResults];
+                        apiResults.forEach(api => {
+                            if (!merged.some(local => local.name.toLowerCase() === api.name.toLowerCase())) {
+                                merged.push(api);
+                            }
+                        });
+                        return merged.slice(0, 10);
+                    }
+
+                    // API returned nothing, use local results
+                    return localResults;
+                } catch (e) {
+                    // API failed, use local results (already retrieved above)
+                    dbg.warn('API unavailable, using local database');
+                    return localResults;
+                }
+            }
+
+            // Get appropriate food icon based on name
+            function getFoodIcon(foodName) {
+                const name = foodName.toLowerCase();
+                if (name.includes('egg')) return '🥚';
+                if (name.includes('chicken')) return '🍗';
+                if (name.includes('beef') || name.includes('steak')) return '🥩';
+                if (name.includes('fish') || name.includes('salmon')) return '🐟';
+                if (name.includes('rice')) return '🍚';
+                if (name.includes('bread')) return '🍞';
+                if (name.includes('salad')) return '🥗';
+                if (name.includes('fruit') || name.includes('apple')) return '🍎';
+                if (name.includes('banana')) return '🍌';
+                if (name.includes('orange')) return '🍊';
+                if (name.includes('vegetable') || name.includes('broccoli')) return '🥦';
+                if (name.includes('pizza')) return '🍕';
+                if (name.includes('burger')) return '🍔';
+                if (name.includes('pasta') || name.includes('spaghetti')) return '🍝';
+                if (name.includes('soup')) return '🍜';
+                if (name.includes('coffee')) return '☕';
+                if (name.includes('milk')) return '🥛';
+                return '🍽️';
+            }
+
+            function setFoodInputMode(mode) {
+                if (mode === 'camera') {
+                    foodUploadModeBtn?.classList.remove('active');
+                    foodCameraModeBtn?.classList.add('active');
+                    foodUploadZone.style.display = 'none';
+                    foodPreview.style.display = 'none';
+                    foodCameraZone.style.display = 'block';
+                    startFoodCamera();
+                } else {
+                    foodCameraModeBtn?.classList.remove('active');
+                    foodUploadModeBtn?.classList.add('active');
+                    foodCameraZone.style.display = 'none';
+                    stopFoodCamera();
+                    if (!foodImageData) {
+                        foodUploadZone.style.display = 'block';
+                    }
+                }
+            }
+
+            async function startFoodCamera() {
+                try {
+                    // Check if mediaDevices API is available
+                    if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+                        showToast('Camera is not supported on this browser. Please use Chrome, Safari, or Firefox.', 'error');
+                        setFoodInputMode('upload');
+                        return;
+                    }
+
+                    stopFoodCamera();
+                    const constraints = {
+                        video: {
+                            facingMode: foodFacingMode,
+                            width: { ideal: 1280 },
+                            height: { ideal: 960 }
+                        }
+                    };
+                    foodCameraStream = await navigator.mediaDevices.getUserMedia(constraints);
+                    foodCameraVideo.srcObject = foodCameraStream;
+                    await foodCameraVideo.play();
+                } catch (err) {
+                    dbg.error('Food camera error:', err);
+                    let errorMessage = 'Could not access camera.\n\n';
+
+                    if (err.name === 'NotAllowedError' || err.name === 'PermissionDeniedError') {
+                        errorMessage += 'Camera permission was denied.\n\n';
+                        errorMessage += 'To fix this:\n';
+                        errorMessage += '• iPhone/iPad: Go to Settings > Safari > Camera, set to "Allow"\n';
+                        errorMessage += '• Android: Tap the lock icon in the address bar and allow camera\n';
+                        errorMessage += '• Then refresh this page and try again';
+                    } else if (err.name === 'NotFoundError' || err.name === 'DevicesNotFoundError') {
+                        errorMessage += 'No camera found on this device.';
+                    } else if (err.name === 'NotReadableError' || err.name === 'TrackStartError') {
+                        errorMessage += 'Camera is being used by another app. Please close other apps using the camera and try again.';
+                    } else if (err.name === 'OverconstrainedError') {
+                        // Try again with simpler constraints
+                        try {
+                            foodCameraStream = await navigator.mediaDevices.getUserMedia({ video: true });
+                            foodCameraVideo.srcObject = foodCameraStream;
+                            await foodCameraVideo.play();
+                            return;
+                        } catch (fallbackErr) {
+                            errorMessage = 'Could not access camera with any settings. Please try again.';
+                        }
+                    } else {
+                        errorMessage += 'Error: ' + err.message;
+                    }
+
+                    showToast(errorMessage, 'error');
+                    setFoodInputMode('upload');
+                }
+            }
+
+            function stopFoodCamera() {
+                if (foodCameraStream) {
+                    foodCameraStream.getTracks().forEach(track => track.stop());
+                    foodCameraStream = null;
+                }
+                if (foodCameraVideo) {
+                    foodCameraVideo.srcObject = null;
+                }
+            }
+
+            async function switchFoodCamera() {
+                foodFacingMode = foodFacingMode === 'environment' ? 'user' : 'environment';
+                await startFoodCamera();
+            }
+
+            function captureFoodPhoto() {
+                if (!foodCameraVideo || !foodCameraCanvas) return;
+
+                foodCameraCanvas.width = foodCameraVideo.videoWidth;
+                foodCameraCanvas.height = foodCameraVideo.videoHeight;
+
+                const ctx = foodCameraCanvas.getContext('2d');
+                if (foodFacingMode === 'user') {
+                    ctx.translate(foodCameraCanvas.width, 0);
+                    ctx.scale(-1, 1);
+                }
+                ctx.drawImage(foodCameraVideo, 0, 0);
+
+                foodImageData = foodCameraCanvas.toDataURL('image/jpeg', 0.9);
+                showFoodPreview(foodImageData);
+                stopFoodCamera();
+                foodCameraZone.style.display = 'none';
+                foodCameraModeBtn?.classList.remove('active');
+                foodUploadModeBtn?.classList.add('active');
+            }
+
+            function handleFoodFile(file) {
+                if (!file.type.startsWith('image/')) {
+                    showToast('Please upload an image file', 'warning');
+                    return;
+                }
+
+                const reader = new FileReader();
+                reader.onload = (e) => {
+                    foodImageData = e.target.result;
+                    showFoodPreview(foodImageData);
+                };
+                reader.readAsDataURL(file);
+            }
+
+            function showFoodPreview(imageData) {
+                foodPreviewImage.src = imageData;
+                foodPreview.style.display = 'block';
+                foodUploadZone.style.display = 'none';
+                analyzeFoodBtn.style.display = 'flex';
+                foodResults.style.display = 'none';
+            }
+
+            function clearFoodPreview() {
+                foodImageData = null;
+                detectedFoodData = null;
+                detectedFoodName = '';
+                foodPreviewImage.src = '';
+                foodPreview.style.display = 'none';
+                foodUploadZone.style.display = 'block';
+                analyzeFoodBtn.style.display = 'none';
+                foodResults.style.display = 'none';
+                foodConfirmation.style.display = 'none';
+                foodSearchBox.style.display = 'none';
+                foodSearchResults.style.display = 'none';
+                if (foodFileInput) foodFileInput.value = '';
+                if (foodSearchInput) foodSearchInput.value = '';
+            }
+
+            function showFoodConfirmation(results) {
+                // Get the top detected food
+                const topFood = results.foods[0];
+                detectedFoodData = topFood;
+                detectedFoodName = topFood.name || 'Unknown Food'; // Store name for API search
+
+                // Update confirmation UI
+                suggestionIcon.textContent = topFood.icon || '🍽️';
+                suggestionName.textContent = detectedFoodName;
+
+                // Set confidence badge
+                foodDetectConfidence.textContent = results.confidence.charAt(0).toUpperCase() + results.confidence.slice(1) + ' Confidence';
+                foodDetectConfidence.className = 'food-confidence ' + results.confidence;
+
+                // Reset search box
+                foodSearchBox.style.display = 'none';
+                foodSearchResults.style.display = 'none';
+                if (foodSearchInput) foodSearchInput.value = '';
+
+                // Show confirmation, hide results
+                foodConfirmation.style.display = 'block';
+                foodResults.style.display = 'none';
+            }
+
+            async function analyzeFood() {
+                // Use real MobileNet AI for food recognition
+                analyzeFoodBtn.disabled = true;
+                analyzeFoodBtn.innerHTML = `
+                    <svg class="spinner" viewBox="0 0 24 24" fill="none" stroke-width="2">
+                        <circle cx="12" cy="12" r="10" stroke="currentColor" stroke-opacity="0.25"/>
+                        <path d="M12 2a10 10 0 0 1 10 10" stroke="currentColor" stroke-linecap="round"/>
+                    </svg>
+                    Analyzing with AI...
+                `;
+
+                try {
+                    // Ensure MobileNet is loaded
+                    if (!mobilenetModel) {
+                        await initMobileNet();
+                    }
+
+                    if (!mobilenetModel) {
+                        throw new Error('Could not load AI model');
+                    }
+
+                    // Create image element for classification
+                    const img = new Image();
+                    img.crossOrigin = 'anonymous';
+
+                    await new Promise((resolve, reject) => {
+                        img.onload = resolve;
+                        img.onerror = reject;
+                        img.src = foodImageData;
+                    });
+
+                    // Classify the image using MobileNet
+                    const predictions = await mobilenetModel.classify(img, 5);
+
+                    // Process predictions and match to food database
+                    const results = processFoodPredictions(predictions);
+
+                    // Show confirmation UI instead of results directly
+                    showFoodConfirmation(results);
+
+                } catch (error) {
+                    dbg.error('Food analysis error:', error);
+                    // Fallback - show generic food prompt for user to search
+                    showFoodConfirmation({
+                        foods: [{
+                            name: 'Unknown Food',
+                            icon: '🍽️',
+                            confidence: 0
+                        }],
+                        confidence: 'low'
+                    });
+                }
+
+                analyzeFoodBtn.disabled = false;
+                analyzeFoodBtn.innerHTML = `
+                    <svg viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                        <circle cx="11" cy="11" r="8"/>
+                        <line x1="21" y1="21" x2="16.65" y2="16.65"/>
+                    </svg>
+                    Analyze Food
+                `;
+                analyzeFoodBtn.style.display = 'none';
+            }
+
+            function processFoodPredictions(predictions) {
+
+                // Get the top prediction from MobileNet
+                const topPrediction = predictions[0];
+                const probability = topPrediction.probability;
+
+                // Extract the first word/name from the prediction (remove extra descriptors)
+                let foodName = topPrediction.className.split(',')[0].trim();
+                // Capitalize first letter
+                foodName = foodName.charAt(0).toUpperCase() + foodName.slice(1);
+
+                // Determine confidence based on probability
+                let confidence = 'high';
+                if (probability < 0.3) confidence = 'low';
+                else if (probability < 0.6) confidence = 'medium';
+
+                // Return the detected food name for user confirmation
+                // Actual nutrition data will be fetched from API after user confirms
+                return {
+                    foods: [{
+                        name: foodName,
+                        icon: getFoodIcon(foodName),
+                        confidence: probability
+                    }],
+                    confidence: confidence,
+                    rawPredictions: predictions
+                };
+            }
+
+            function displayFoodResults(results) {
+                // Track food scan for gamification
+                localStorage.setItem(userKey('fixit-food-scanned'), 'true');
+                awardXP(15, 'food-scan');
+                checkAchievements();
+
+                const detectedFoodsEl = document.getElementById('detected-foods');
+                const confidenceEl = document.getElementById('food-confidence');
+                const totalCaloriesEl = document.getElementById('food-total-calories');
+                const totalProteinEl = document.getElementById('food-total-protein');
+                const totalCarbsEl = document.getElementById('food-total-carbs');
+                const totalFatsEl = document.getElementById('food-total-fats');
+
+                // Set confidence
+                confidenceEl.textContent = results.confidence.charAt(0).toUpperCase() + results.confidence.slice(1) + ' Confidence';
+                confidenceEl.className = 'food-confidence ' + results.confidence;
+
+                // Calculate totals
+                let totalCalories = 0, totalProtein = 0, totalCarbs = 0, totalFats = 0;
+
+                // Generate food items HTML
+                let foodsHTML = '';
+                results.foods.forEach(food => {
+                    totalCalories += food.calories;
+                    totalProtein += food.protein;
+                    totalCarbs += food.carbs;
+                    totalFats += food.fats;
+
+                    foodsHTML += `
+                        <div class="detected-food-item">
+                            <div class="food-item-icon">${food.icon}</div>
+                            <div class="food-item-info">
+                                <div class="food-item-name">${escapeHtml(food.name)}</div>
+                                <div class="food-item-portion">${escapeHtml(food.portion || '')}</div>
+                            </div>
+                            <div class="food-item-calories">
+                                <div class="food-item-cal-value">${food.calories}</div>
+                                <div class="food-item-cal-label">kcal</div>
+                            </div>
+                        </div>
+                    `;
+                });
+
+                detectedFoodsEl.innerHTML = foodsHTML;
+                totalCaloriesEl.textContent = totalCalories + ' kcal';
+                totalProteinEl.textContent = totalProtein + 'g';
+                totalCarbsEl.textContent = totalCarbs + 'g';
+                totalFatsEl.textContent = totalFats + 'g';
+
+                foodResults.style.display = 'block';
+            }
+        }
+
+        // ===== Digital Coach Persona System =====
+
+        // Coach runs fully client-side using intent matching + template responses
+
+        const COACH_SCREEN_NAMES = {
+            3: 'results',
+            4: 'breakdown',
+            5: 'simulator',
+            6: 'workout',
+            7: 'nutrition',
+            8: 'progress'
+        };
+
+        function getCoachContext() {
+            const r = state.analysisResult || {};
+            const bc = r.bodyComposition || {};
+            const mt = r.muscleTone || {};
+            const po = r.posture || {};
+            const ov = r.overview || {};
+            return {
+                screen: COACH_SCREEN_NAMES[state.currentScreen] || 'results',
+                bodyScore: bc.score || 50,
+                category: bc.category || 'Average',
+                bodyType: bc.bodyType || 'Unknown',
+                muscleScore: mt.score || 50,
+                postureScore: po.score || 70,
+                fitnessIndex: ov.fitnessIndex || '5.0',
+                grade: ov.overallGrade || '50%',
+                goal: state.fitnessGoal || 'maintain',
+                bmi: state.bmi || null,
+                confidence: r.confidence || 'low',
+                gender: state.gender || null
+            };
+        }
+
+        const GOAL_LABELS = {
+            'lose-weight': 'weight loss',
+            'build-muscle': 'muscle building',
+            'maintain': 'maintenance',
+            'recomp': 'body recomposition'
+        };
+
+        const COACH_MESSAGES = {
+            encouraging: {
+                greet: {
+                    results: (c) => [
+                        `Great job taking the first step! Your body composition score is ${c.bodyScore} and you've been categorized as "${c.category}". That's a solid starting point for your ${GOAL_LABELS[c.goal] || 'fitness'} journey!`,
+                        `Look at you showing up for yourself! Your analysis is in -- body score of ${c.bodyScore}, overall score ${c.grade}. Every champion starts somewhere, and this is your starting line!`
+                    ],
+                    breakdown: (c) => [
+                        `Let's dive into what makes you, you! Your muscle tone is at ${c.muscleScore}% and your posture scores ${c.postureScore}. Understanding your body is the first step to transforming it!`,
+                        `Time to explore your detailed breakdown! Knowledge is power, and seeing exactly where you stand helps you plan where you're going.`
+                    ],
+                    simulator: (c) => [
+                        `This is the fun part -- visualizing your transformation! Play around with the timeline and see how consistent effort pays off. Your future self is going to thank you!`,
+                        `Welcome to the simulator! Imagine what a few months of dedication could do. Set your goals and watch the magic unfold.`
+                    ],
+                    workout: (c) => [
+                        `Ready to move? These workout recommendations are tailored to your ${GOAL_LABELS[c.goal] || 'fitness'} goal. Consistency beats intensity every time -- just show up!`,
+                        `Your personalized workout plan is here! Remember: the best workout is the one you actually do. Start where you are and build from there.`
+                    ],
+                    nutrition: (c) => [
+                        `Nutrition is where the real transformation happens! Your BMR/TDEE calculator shows exactly how much energy your body needs, the Calorie Balance card tracks whether your workouts are paying off, and the Hydration History heatmap keeps your water intake honest. These tools are all designed to fuel your ${GOAL_LABELS[c.goal] || 'fitness'} journey -- you don't have to be perfect, just consistent!`,
+                        `Let's talk food -- and science! Your personalized nutrition plan now includes a Mifflin-St Jeor BMR calculator, a Calorie Balance card showing energy in vs. out, and a 30-day Hydration History heatmap. Small, sustainable changes add up to big results over time!`
+                    ],
+                    progress: (c) => [
+                        `Look at your progress dashboard! Daily Habits tracks 5 key habits every day, your Weekly Report Card grades your week, Sleep & Recovery monitors your rest, Smart Insights reveals your patterns, and Progress Charts show your trends over time. Plus all your streaks, badges, and challenges. Every feature here is proof you're showing up for yourself -- keep building that momentum!`,
+                        `This is where the magic becomes visible! Daily Habits, Weekly Report Card, Sleep Tracker, Smart Insights, Progress Charts -- together with streaks, badges, XP, and scan history, your complete fitness story is right here. Celebrate every win, big or small!`
+                    ],
+                    _default: (c) => [
+                        `You're doing amazing! Keep exploring your results and building your plan. Every step forward counts.`
+                    ]
+                },
+                tip: {
+                    results: (c) => [
+                        `Your body score of ${c.bodyScore} means there's room for growth. Focus on one habit at a time -- maybe start with drinking more water or walking 10 minutes daily.`,
+                        `A score of ${c.bodyScore} is your baseline, not your limit. Try setting one small, achievable goal this week and celebrate when you hit it!`
+                    ],
+                    workout: (c) => [
+                        `For ${GOAL_LABELS[c.goal] || 'fitness'}, try keeping rest periods to 60-90 seconds between sets. It keeps your heart rate up and maximizes your time!`,
+                        `Warm up for at least 5 minutes before every session. A proper warm-up prevents injuries and actually helps you lift more.`
+                    ],
+                    nutrition: (c) => [
+                        `Try prepping meals on Sunday -- even just 3-4 containers of protein and veggies makes weekday eating so much easier.`,
+                        `Hydration tip: aim for half your body weight in ounces of water daily. It helps with energy, recovery, and even appetite control.`
+                    ],
+                    progress: (c) => [
+                        `Keep that streak alive! Tap the Daily Habits check-in each day and let the ring fill up to 5/5 -- it's a small action with a big consistency payoff. Even on tough days, showing up counts more than being perfect.`,
+                        `Check your Weekly Report Card to see your A-F grade -- it shows exactly which habit to focus on this week. Small daily improvements create big transformations over time!`
+                    ],
+                    _default: (c) => [
+                        `Here's a quick win: improve your sleep quality. Aim for 7-9 hours in a cool, dark room. Recovery is when the magic happens!`,
+                        `Track your progress with photos, not just the scale. Body composition changes don't always show up in weight.`
+                    ]
+                },
+                motivate: {
+                    _default: (c) => [
+                        `You've already done something most people never do -- you showed up and assessed where you are. That takes courage. Now let's build on it!`,
+                        `Remember: you're not competing with anyone but yesterday's version of yourself. And the fact that you're here means you're already winning.`,
+                        `Every expert was once a beginner. Every record was once thought impossible. Your ${GOAL_LABELS[c.goal] || 'fitness'} goal is completely within reach!`,
+                        `The hardest part is starting, and you've already done that. Now it's just about putting one foot in front of the other, day after day.`
+                    ]
+                },
+                explain: {
+                    results: (c) => [
+                        `Your body composition score (${c.bodyScore}/100) is calculated from your skeletal proportions, estimated muscle distribution, and posture alignment. The overall score of ${c.grade} reflects your fitness picture.`,
+                        `The confidence level "${c.confidence}" indicates how much data the AI had to work with. More accurate results come from clear, well-lit, front-facing photos with BMI data entered.`
+                    ],
+                    breakdown: (c) => [
+                        `The breakdown shows three key areas: muscle tone (${c.muscleScore}%), posture (${c.postureScore}), and body zones. Each is analyzed from your skeletal landmarks and body proportions.`,
+                        `Your posture score of ${c.postureScore} is measured by comparing shoulder alignment, hip tilt, and head position against ideal anatomical markers.`
+                    ],
+                    simulator: (c) => [
+                        `The simulator projects changes based on typical outcomes for your body type and chosen goal. It uses research-backed rates of progress -- about 0.5-1 lb/week for fat loss and 0.25-0.5 lb/week for muscle gain.`,
+                        `These projections are estimates based on consistent training and nutrition adherence. Individual results vary based on genetics, adherence, sleep, stress, and other factors.`
+                    ],
+                    progress: (c) => [
+                        `Your progress dashboard has six major tools: Daily Habits (5 auto-detected habits + score ring + per-habit streaks), Weekly Report Card (A-F overall grade), Sleep & Recovery Tracker (7-day trend + recovery score), Smart Insights (AI-driven pattern observations), Progress Charts (calorie/weight/sleep/workout trends), and the classic Streaks, Badges, XP, Challenges, and Scan History. It's your complete fitness story in one place!`,
+                        `The Daily Habits ring shows today's 5-habit score, the Weekly Report Card grades your week, Sleep Tracker monitors recovery, Smart Insights surfaces behavioral patterns, and Progress Charts show your data over time. Plus streaks, badges, and weekly challenges to keep you motivated with fresh goals!`
+                    ],
+                    _default: (c) => [
+                        `This analysis uses MediaPipe Pose to detect 33 skeletal landmarks on your body. It then calculates ratios and proportions to estimate body composition. It's approximate -- not a medical assessment.`,
+                        `The AI measures things like shoulder-to-hip ratio, elbow spread, and body proportions relative to height. These correlate with body composition but aren't as precise as DEXA scans or hydrostatic weighing.`
+                    ]
+                }
+            },
+
+            structured: {
+                greet: {
+                    results: (c) => [
+                        `Analysis complete. Here's your summary:\n- Body Score: ${c.bodyScore}/100 (${c.category})\n- Overall Score: ${c.grade}\n- Goal: ${GOAL_LABELS[c.goal] || 'Not set'}\n- Confidence: ${c.confidence}\n\nReview your metrics, then proceed to Breakdown for details.`,
+                        `Results overview:\n- Composition: ${c.bodyScore}/100\n- Classification: ${c.category}\n- Body Type: ${c.bodyType}\n\nI recommend reviewing the detailed breakdown next for actionable insights.`
+                    ],
+                    breakdown: (c) => [
+                        `Detailed metrics:\n- Muscle Tone: ${c.muscleScore}%\n- Posture: ${c.postureScore}/100\n- Body Score: ${c.bodyScore}/100\n\nPrioritize the lowest-scoring area for maximum improvement.`,
+                    ],
+                    simulator: (c) => [
+                        `Simulation parameters:\n- Current baseline: ${c.bodyScore}/100\n- Target goal: ${GOAL_LABELS[c.goal] || 'general fitness'}\n\nAdjust the timeline slider to see projected outcomes. Results assume consistent adherence to your plan.`
+                    ],
+                    workout: (c) => [
+                        `Workout plan structure for ${GOAL_LABELS[c.goal] || 'fitness'}:\n- Follow exercises in the recommended order\n- Track sets, reps, and weight each session\n- Progress by adding weight or reps weekly\n- Rest adequately between sessions`
+                    ],
+                    nutrition: (c) => [
+                        `Nutrition framework:\n- BMR/TDEE Calculator: Mifflin-St Jeor formula -- set activity level & goal, click Recalculate & Apply\n- Calorie Balance: tracks calories in vs. calories out (MET-based workout burn)\n- Macro Targets: protein, carb, fat goals calibrated to ${GOAL_LABELS[c.goal] || 'your goal'}\n- Hydration History: 30-day heatmap, goal = 8 glasses/day\n- Meal Plan: generate full weekly plan by dietary preference and meal frequency\n\nPriority: hit protein target first, then total calories.`
+                    ],
+                    progress: (c) => [
+                        `Progress dashboard modules:\n- Daily Habits: 5 habits tracked (workout, hydration, sleep, nutrition, check-in) with score ring and per-habit streaks\n- Weekly Report Card: A-F grade across workouts, calories, sleep, hydration -- resets Monday\n- Sleep & Recovery: nightly log → 7-day bar chart + recovery score 0-100\n- Smart Insights: AI-derived observations from 7-day behavior data\n- Progress Charts: calorie, weight, sleep, workout, hydration trend graphs\n- Streaks, Badges, XP, Challenges, Scan History: gamification layer\n\nFocus: maintain Daily Habits score at 5/5, review Report Card weekly.`,
+                        `Progress tracking status:\n- Goal: ${GOAL_LABELS[c.goal] || 'Not set'}\n- Recommended actions:\n  1. Check Daily Habits ring -- which of the 5 are incomplete?\n  2. Review Weekly Report Card and lowest-scoring category\n  3. Log last night's sleep if not already done\n  4. Check Smart Insights for behavioral patterns\n  5. Complete weekly challenges for XP\n\nConsistency across all 5 daily habits is the highest-leverage action.`
+                    ],
+                    _default: (c) => [
+                        `Current status: Screen ${state.currentScreen}/8 | Body Score: ${c.bodyScore} | Goal: ${GOAL_LABELS[c.goal] || 'Not set'}. Let me know how I can help you plan your next step.`
+                    ]
+                },
+                tip: {
+                    _default: (c) => [
+                        `Action item: Set 3 specific, measurable goals for this week. Example: "Drink 8 glasses of water daily" instead of "drink more water." Track completion each day.`,
+                        `Priority checklist for ${GOAL_LABELS[c.goal] || 'fitness'}:\n1. Establish consistent sleep schedule\n2. Hit daily protein target\n3. Complete planned workouts\n4. Track progress weekly`,
+                        `Data point: Research shows habit stacking (attaching new habits to existing ones) has a 65% higher success rate than standalone goals. Try "After my morning coffee, I will do 10 push-ups."`
+                    ]
+                },
+                motivate: {
+                    _default: (c) => [
+                        `Progress metric: You've completed your analysis and are actively planning. That puts you ahead of 80% of people who only think about fitness without acting. Maintain this momentum.`,
+                        `Framework for success:\n1. Start with your current score (${c.bodyScore})\n2. Set a realistic 8-week target\n3. Break it into weekly milestones\n4. Review and adjust every 2 weeks\n\nConsistency is the highest-leverage variable.`
+                    ]
+                },
+                explain: {
+                    results: (c) => [
+                        `Scoring methodology:\n- Body Composition (${c.bodyScore}/100): Derived from shoulder-to-hip ratio, elbow offset, and body proportions\n- Overall Score (${c.grade}): Directly reflects your body composition percentage\n- Confidence (${c.confidence}): Based on input quality and available data points`
+                    ],
+                    _default: (c) => [
+                        `Technical overview: The analysis uses MediaPipe Pose to detect 33 body landmarks. Key ratios (shoulder width, hip width, torso length) are computed and compared against population norms to estimate body composition.`,
+                        `Data pipeline:\n1. Image input → MediaPipe Pose detection\n2. 33 landmark coordinates extracted\n3. Body ratios calculated\n4. Composition score derived from ratio analysis\n5. Results categorized and graded`
+                    ],
+                    progress: (c) => [
+                        `Progress system architecture:\n- Daily Habits: 5 habits auto-detected from existing logs (workout, 8+ glasses hydration, 7+ hours sleep, nutrition log) + manual check-in. Score ring fills proportionally.\n- Weekly Report Card: weighted average of 4 categories → letter grade A-F. Resets Monday.\n- Sleep & Recovery: nightly log (hours + quality) → 7-day bar chart, average hours, recovery score 0-100.\n- Smart Insights: scans 7-day logs for patterns, surfaces 2-4 actionable observations.\n- Progress Charts: calorie, weight, sleep, workout, hydration data rendered as trend graphs.\n- Streaks: Consecutive workout days. Heatmap: 14-day activity grid. Badges: milestone unlocks. Challenges: weekly XP-rewarded goals. Levels: cumulative XP thresholds.`
+                    ]
+                }
+            },
+
+            educational: {
+                greet: {
+                    results: (c) => [
+                        `Interesting results! Your body score of ${c.bodyScore} is derived from skeletal proportions -- specifically how your shoulder, hip, and torso measurements relate to each other. The "${c.category}" classification maps to general fitness norms. Let me know if you'd like me to explain any specific metric!`,
+                        `Welcome to your results! Did you know that body composition analysis has evolved from simple BMI to sophisticated AI-driven assessments? Your score of ${c.bodyScore} considers multiple skeletal ratios that research links to fitness levels.`
+                    ],
+                    breakdown: (c) => [
+                        `The breakdown separates your analysis into muscle tone (${c.muscleScore}%), posture (${c.postureScore}), and body zones. Fun fact: posture alone can affect how "fit" you look by up to 20% -- it changes how your muscles present visually!`
+                    ],
+                    simulator: (c) => [
+                        `The science behind body transformation: your body adapts through a process called supercompensation. When you stress muscles through exercise, they rebuild slightly stronger. The simulator models this progressive adaptation over time.`
+                    ],
+                    workout: (c) => [
+                        `Exercise science 101: your ${GOAL_LABELS[c.goal] || 'fitness'} goal determines the ideal training variables. Rep ranges, rest periods, and exercise selection all change based on whether you're optimizing for strength, hypertrophy, or endurance.`
+                    ],
+                    nutrition: (c) => [
+                        `Nutrition science is fascinating! Your body needs three macronutrients: protein (4 cal/g, builds and repairs tissue), carbs (4 cal/g, primary energy source), and fats (9 cal/g, hormones and cell membranes). The BMR/TDEE Calculator uses the Mifflin-St Jeor equation (shown to be the most accurate resting metabolic rate predictor vs. Harris-Benedict -- St Jeor et al., 2001), and the Calorie Balance card uses MET values (Ainsworth et al.) to estimate workout energy expenditure. Ratios optimized for ${GOAL_LABELS[c.goal] || 'your goals'}.`
+                    ],
+                    progress: (c) => [
+                        `Welcome to your evidence-based progress tracker! The Daily Habits ring applies Gollwitzer's implementation intention theory -- tracking specific daily behaviors (not vague goals) increases adherence by 40-60%. The Weekly Report Card uses metacognitive self-review (Hershfield et al.) -- weekly performance assessment improves next-cycle consistency. Sleep & Recovery quantifies Dement's sleep debt model for recovery planning.`,
+                        `Your progress dashboard integrates multiple behavioral science frameworks: Self-Determination Theory (XP + competence), Loss Aversion (streak protection), Variable Reinforcement (badges), Implementation Intentions (Daily Habits tracking), Metacognitive Review (Weekly Report Card), Sleep Debt Quantification (Sleep Tracker), and Objective Self-Quantification (Progress Charts + Smart Insights). Evidence-based motivation architecture at scale.`
+                    ],
+                    _default: (c) => [
+                        `Each screen in this app represents a different aspect of exercise science -- from body composition analysis to periodized training and nutritional biochemistry. Ask me to explain anything!`
+                    ]
+                },
+                tip: {
+                    progress: (c) => [
+                        `Research finding: Implementation intentions -- planning "when, where, and how" you'll do a habit -- increase goal adherence by 40-60% (Gollwitzer, 1999). The Daily Habits tracker operationalizes this: each habit has a clear daily cue, and the ring score provides immediate feedback. Try pairing each habit with an existing routine for best results.`,
+                        `The Progress Charts and Weekly Report Card apply the self-quantification principle from behavioral science -- objective feedback loops. Weekly self-assessment (Hershfield et al.) of behavior improves next-week performance. And the Sleep Tracker applies Dement's sleep debt model: quantifying recovery deficit helps explain mid-week energy crashes better than vague "I'm tired" observations.`
+                    ],
+                    _default: (c) => [
+                        `Science tip: Muscle protein synthesis (MPS) peaks about 24-48 hours after training. This is why most programs recommend training each muscle group 2x per week -- you're always in a state of growth!`,
+                        `Did you know? Your body burns calories even at rest through your Basal Metabolic Rate (BMR). Muscle tissue burns about 6 cal/lb/day at rest, while fat burns only 2. More muscle = higher resting metabolism!`,
+                        `Research insight: Studies show that progressive overload (gradually increasing weight/reps) is the #1 driver of muscle growth. Aim to increase something each week, even by small amounts.`
+                    ]
+                },
+                motivate: {
+                    _default: (c) => [
+                        `Here's something cool: neuroplasticity means your brain literally rewires itself as you build habits. After about 66 days of consistent behavior, it becomes automatic. You're building neural pathways right now!`,
+                        `Research from the European Journal of Social Psychology shows it takes 18-254 days to form a new habit, with 66 being the average. Every day you practice, the neural pathway gets stronger. Science is on your side!`
+                    ]
+                },
+                explain: {
+                    results: (c) => [
+                        `How the score works: The AI detects 33 skeletal landmarks using computer vision (MediaPipe Pose). It then calculates ratios like shoulder-to-hip (V-taper indicator), waist-to-height, and elbow spread. These correlate with body composition based on kinanthropometry research.`,
+                        `About confidence levels: "${c.confidence}" confidence means the AI ${c.confidence === 'high' ? 'had BMI data + clear landmarks to work with' : 'is working primarily from visual estimation -- adding height/weight data would improve accuracy significantly'}.`
+                    ],
+                    breakdown: (c) => [
+                        `Muscle tone (${c.muscleScore}%) is estimated from how far your elbows sit from your torso (larger muscles push them outward) and overall limb proportions. It's an approximation -- clinical methods like bioelectrical impedance or DEXA scans provide more precise measurements.`,
+                        `Posture scoring (${c.postureScore}/100) measures three things: shoulder levelness (are they even?), head position (forward head posture is common with desk work), and hip alignment. Poor posture can actually compress your spine by up to 2 inches!`
+                    ],
+                    progress: (c) => [
+                        `The progress system applies multiple evidence-based frameworks:\n- Daily Habits: Habit loop model (Duhigg, 2012) -- each of the 5 habits has a cue (auto-detection), routine (the behavior), and reward (ring increments, streak grows)\n- Weekly Report Card: Metacognitive performance review -- shown to improve next-cycle adherence (Hershfield et al.)\n- Sleep Tracker: Dement's sleep debt model quantified as a Recovery Score 0-100\n- Smart Insights: Behavioral pattern recognition surfaces what self-monitoring alone often misses\n- XP system: Exponential curve mirrors fitness adaptation (rapid early gains taper at advanced levels)\n- Badges: Variable Ratio Reinforcement (Skinner) -- unpredictable reward timing maximizes sustained engagement`,
+                        `Gamification science behind the progress system: Loss Aversion (Kahneman & Tversky) powers streaks -- losing a streak feels disproportionately bad, so you're motivated to protect it. Implementation Intentions (Gollwitzer) power the Daily Habits ring -- specific behavior tracking outperforms vague goal-setting. Self-Determination Theory (Deci & Ryan) explains why XP (competence) + challenges (autonomy) + coach feedback (relatedness) all support intrinsic motivation sustainably.`
+                    ],
+                    _default: (c) => [
+                        `This app uses a field called kinanthropometry -- the study of human body measurements in relation to physical activity. While clinical tools (DEXA, BodPod) are more precise, skeletal ratio analysis provides useful estimates for fitness awareness.`
+                    ]
+                }
+            },
+
+            humorous: {
+                greet: {
+                    results: (c) => [
+                        `The AI has spoken! Body score: ${c.bodyScore}. Overall: ${c.grade}. Category: "${c.category}." Don't worry, I score on a curve... and the curve is shaped like a dumbbell. 🏋️`,
+                        `Results are in! You scored ${c.bodyScore}/100. Before you panic -- remember, this is AI estimation, not a final exam. Though if it were, at least there's no student debt involved! 😄`
+                    ],
+                    breakdown: (c) => [
+                        `Time for the play-by-play! Muscle tone: ${c.muscleScore}%, Posture: ${c.postureScore}. Think of this as your character stats screen -- time to level up those attributes!`,
+                    ],
+                    simulator: (c) => [
+                        `Welcome to the time machine! Slide that timeline and watch future-you emerge. Spoiler alert: future-you is looking pretty good. No DeLorean required.`,
+                    ],
+                    workout: (c) => [
+                        `Workout time! Your muscles are about to file a complaint with HR. Don't worry -- they'll thank you later... in about 48 hours when the soreness kicks in.`,
+                    ],
+                    nutrition: (c) => [
+                        `Let's talk food -- and science! Your BMR/TDEE Calculator tells you exactly how many calories your body burns just to exist (spoiler: more than you'd think). Calorie Balance shows if your workout actually "earned" that slice of pizza. And the Hydration History heatmap silently judges your water intake across 30 days without saying a word -- the passive-aggressive friend you never asked for. Welcome to Nutrition! 🍕➡️🥗`,
+                    ],
+                    progress: (c) => [
+                        `Welcome to the trophy room -- which we expanded! Daily Habits ring (fill all 5, it turns green, very satisfying), Weekly Report Card (A-F, no parent signature needed), Sleep Tracker (because "I'll sleep when I'm dead" is medically inadvisable), Smart Insights (the AI noticing patterns you hoped nobody noticed), Progress Charts (graphs that tell the truth). Plus all your classic streaks, badges, XP, and scan history. The final boss is still your own laziness. But now you have way more weapons.`,
+                        `Look at all this progress tracking! We gamified fitness, then added MORE features. Daily Habits, Weekly Report Card, Sleep Tracker, Smart Insights, Progress Charts -- it's either the most self-data you've ever seen, or confirmation that this app really likes dashboards. Either way, you're in the right place. Now go fill that habits ring!`
+                    ],
+                    _default: (c) => [
+                        `Still here? Good! Most people have already closed this tab and gone back to scrolling. You're basically an elite athlete by comparison.`
+                    ]
+                },
+                tip: {
+                    progress: (c) => [
+                        `Pro tip: Check the Daily Habits ring first thing. If the manual Check-In tile hasn't been tapped yet, tap it -- 5 seconds, free streak point. Your future self is extremely easy to impress, apparently.`,
+                        `Weekly Report Card tip: if you got a C or below, identify the lowest-scoring category and make ONE change this week. "I'll sleep one extra hour" or "I'll log my meals." That's how you go from C to B. Small wins. Also: an A+ and an A are the same grade. But A+ sounds better. Strive for A+.`
+                    ],
+                    _default: (c) => [
+                        `Pro tip: If you can still feel your legs after leg day, did you even do leg day? (But seriously, start light and build up. Stairs are a privilege, not a given.)`,
+                        `Hot take: The best exercise is the one you'll actually do. If that's dancing in your living room to 2000s pop hits, that counts. Science says so. Probably.`,
+                        `Nutrition hack: If you eat your salad really fast, you'll have time to eat cake too. That's how calories work, right? (It's not. Please eat your vegetables.)`,
+                        `Sleep tip: Your muscles grow while you sleep. So technically, napping is part of your workout plan. You're welcome for this information.`
+                    ]
+                },
+                motivate: {
+                    _default: (c) => [
+                        `You know what separates you from people who "want to get fit someday"? You're actually here, analyzing your body and making a plan. That's like the difference between watching cooking shows and actually making dinner.`,
+                        `Remember: Rome wasn't built in a day, but they were laying bricks every hour. Your body score is ${c.bodyScore} today. Let's lay some bricks and see where we are in a few months!`,
+                        `Fun fact: Arnold Schwarzenegger started somewhere too. Granted, that "somewhere" was already pretty jacked, but the point stands. Everyone starts somewhere!`,
+                        `You showed up today. That's already more than yesterday. At this rate, by next month you'll be showing up AND actually enjoying it. Wild, I know.`
+                    ]
+                },
+                explain: {
+                    results: (c) => [
+                        `So how does this work? The AI plays connect-the-dots with your skeleton -- 33 dots to be exact. Then it measures proportions like a really nerdy tailor. "Hmm, yes, your shoulder-to-hip ratio is quite distinguished." 🧐`,
+                        `Your score of ${c.bodyScore} comes from skeletal math. The AI basically measured your bones and went "I can work with this." The ${c.confidence} confidence means it's ${c.confidence === 'high' ? 'pretty sure about its homework' : 'kind of squinting -- try adding your height and weight for better results'}.`
+                    ],
+                    progress: (c) => [
+                        `The progress system started as "a Fitbit crossed with a video game" and has since become "a Fitbit crossed with a video game crossed with a behavioral science lab." Daily Habits ring (5 auto-detected habits), Weekly Report Card (A-F letter grade), Sleep Tracker (7-day recovery charts), Smart Insights (AI pattern recognition), Progress Charts (actual graphs). Plus classic streaks, badges, XP, challenges. Microtransactions: still zero. Features: absolutely not zero.`,
+                        `How does all this work? We took gamification ("ooh, shiny badge!"), added habit tracking ("did you actually do the thing?"), threw in sleep science ("please go to bed"), sprinkled AI insights ("the app noticed you skip workouts on Fridays"), and wrapped it in data visualization ("here's proof, graphically"). Your brain gets dopamine from the ring filling up, mild guilt from the Report Card, and data from the charts. Psychology 201, with more features and still more sweat.`
+                    ],
+                    _default: (c) => [
+                        `The tech behind this: Computer vision looks at your photo and plays "Where's Waldo" with your joints. Once it finds all 33, it does math. Lots of math. The kind of math that makes your phone slightly warm. You're welcome, phone battery.`,
+                        `Think of the AI as a very enthusiastic but slightly limited personal trainer. It can see your skeleton structure, but it can't see what you had for dinner. For truly precise results, you'd need fancy equipment that costs more than your car.`
+                    ]
+                }
+            }
+        };
+
+        function showCoachFab(show) {
+            const fab = document.getElementById('coach-fab');
+            if (!fab) return;
+            if (show) {
+                fab.classList.add('visible');
+                if (!fab.dataset.pulsed) {
+                    fab.classList.add('pulse');
+                    fab.dataset.pulsed = '1';
+                }
+            } else {
+                fab.classList.remove('visible');
+                closeCoachPanel();
+            }
+        }
+
+        let _coachHistoryLoaded = false;
+
+        async function loadCoachHistory() {
+            if (_coachHistoryLoaded || !state.accessToken) return;
+            _coachHistoryLoaded = true;
+            try {
+                const res = await apiFetch('/coach/conversations?limit=30');
+                if (!res.ok) return;
+                const data = await res.json();
+                const rows = data.data || data.rows || data || [];
+                if (!Array.isArray(rows) || rows.length === 0) return;
+
+                const messagesEl = document.getElementById('coach-messages');
+                if (!messagesEl) return;
+
+                // Clear greeting if any, replace with real history
+                messagesEl.innerHTML = '';
+
+                // Rows are DESC, reverse for chronological
+                const sorted = [...rows].reverse();
+                sorted.forEach(msg => {
+                    const bubble = document.createElement('div');
+                    bubble.className = msg.role === 'user' ? 'coach-msg coach-msg-user' : 'coach-msg';
+                    if (msg.role === 'user') {
+                        bubble.textContent = msg.message;
+                    } else {
+                        bubble.innerHTML = escapeHtml(msg.message).replace(/\n/g, '<br>');
+                    }
+                    messagesEl.appendChild(bubble);
+                });
+                messagesEl.scrollTop = messagesEl.scrollHeight;
+            } catch (err) {
+                dbg.warn('Failed to load coach history:', err);
+            }
+        }
+
+        function openCoachPanel() {
+            const panel = document.getElementById('coach-panel');
+            if (!panel) return;
+            panel.classList.add('open');
+            state.coachOpen = true;
+            // Only greet if no messages yet (first open or after persona switch)
+            const messagesEl = document.getElementById('coach-messages');
+            if (!messagesEl || messagesEl.children.length === 0) {
+                // Try loading server history first
+                loadCoachHistory().then(() => {
+                    const el = document.getElementById('coach-messages');
+                    if (!el || el.children.length === 0) {
+                        sendCoachMessage('greet', true);
+                    }
+                });
+            }
+        }
+
+        function closeCoachPanel() {
+            const panel = document.getElementById('coach-panel');
+            if (!panel) return;
+            panel.classList.remove('open');
+            state.coachOpen = false;
+        }
+
+        function sendCoachMessage(action, isGreeting) {
+            const ctx = getCoachContext();
+            const persona = state.coachPersona;
+            const bank = COACH_MESSAGES[persona];
+            if (!bank) return;
+
+            const actionBank = bank[action];
+            if (!actionBank) return;
+
+            const screenKey = ctx.screen;
+            const msgFn = (actionBank[screenKey]) || actionBank._default;
+            if (!msgFn) return;
+
+            const variants = msgFn(ctx);
+            const text = variants[Math.floor(Math.random() * variants.length)];
+
+            const messagesEl = document.getElementById('coach-messages');
+            if (!messagesEl) return;
+
+            // Show typing indicator
+            const typing = document.createElement('div');
+            typing.className = 'coach-typing';
+            typing.innerHTML = '<span class="coach-typing-dot"></span><span class="coach-typing-dot"></span><span class="coach-typing-dot"></span>';
+            messagesEl.appendChild(typing);
+            messagesEl.scrollTop = messagesEl.scrollHeight;
+
+            setTimeout(() => {
+                typing.remove();
+                const bubble = document.createElement('div');
+                bubble.className = 'coach-msg' + (isGreeting ? ' greeting' : '');
+                bubble.innerHTML = escapeHtml(text).replace(/\n/g, '<br>');
+                messagesEl.appendChild(bubble);
+                messagesEl.scrollTop = messagesEl.scrollHeight;
+            }, 600 + Math.random() * 400);
+        }
+
+        function setCoachPersona(persona) {
+            state.coachPersona = persona;
+            state.coachRecentResponses = {};
+            localStorage.setItem(userKey('fixit-coach-persona'), persona);
+
+            // Track unique personas for gamification
+            let usedPersonas;
+            try { usedPersonas = JSON.parse(localStorage.getItem(userKey('fixit-used-personas')) || '[]'); } catch { usedPersonas = []; }
+            if (!usedPersonas.includes(persona)) {
+                usedPersonas.push(persona);
+                localStorage.setItem(userKey('fixit-used-personas'), JSON.stringify(usedPersonas));
+                awardXP(10, 'new-persona');
+                checkAchievements();
+            }
+
+            // Update active button
+            document.querySelectorAll('.coach-persona-btn').forEach(btn => {
+                btn.classList.toggle('active', btn.dataset.persona === persona);
+            });
+
+            // Clear messages and send new greeting
+            const messagesEl = document.getElementById('coach-messages');
+            if (messagesEl) messagesEl.innerHTML = '';
+            if (state.coachOpen) {
+                sendCoachMessage('greet', true);
+            }
+        }
+
+        // ── Intent Detection System (TensorFlow.js Neural Network) ──
+        const COACH_TRAINING_DATA_VERSION = 10;
+
+        const COACH_TRAINING_DATA = [
+            { intent: 'greeting', phrases: [
+                'hello', 'hi', 'hey', 'sup', 'yo', 'greetings', 'howdy',
+                'good morning', 'good evening', 'good afternoon', 'whats up',
+                'hey there', 'hi there', 'hiya', 'heyo'
+            ]},
+            { intent: 'thanks', phrases: [
+                'thanks', 'thank you', 'thx', 'appreciate it', 'cheers',
+                'thanks a lot', 'thank you so much', 'ty', 'tysm',
+                'much appreciated', 'thanks coach', 'thanks for the help',
+                'that helps a lot', 'great thanks'
+            ]},
+            { intent: 'help', phrases: [
+                'help', 'what can you do', 'how to use this', 'options',
+                'commands', 'what do you know', 'help me', 'i need help',
+                'show me what you can do', 'what are my options',
+                'how does this coach work', 'what should i ask',
+                'guide me', 'what topics can you help with'
+            ]},
+            { intent: 'body_score', phrases: [
+                'body score', 'score', 'composition score', 'overall score',
+                'score results', 'body score number', 'scored',
+                'body rating', 'score body composition',
+                'body analysis score', 'total score', 'score check',
+                'results score', 'score percentage'
+            ]},
+            { intent: 'body_category', phrases: [
+                'category', 'body category', 'classification', 'fall category',
+                'body type', 'body type category', 'category results',
+                'class body', 'am fat', 'am skinny', 'am fit',
+                'classify body', 'type body',
+                'body classification', 'ectomorph endomorph mesomorph'
+            ]},
+            { intent: 'muscle_tone', phrases: [
+                'muscle tone', 'muscle score', 'muscular', 'lean mass',
+                'muscles', 'toned', 'muscle definition',
+                'muscle amount', 'muscle analysis',
+                'good muscle', 'muscles results',
+                'muscular body', 'muscle mass', 'tone score'
+            ]},
+            { intent: 'posture', phrases: [
+                'posture', 'posture score', 'alignment', 'posture check',
+                'posture results', 'spine alignment', 'back alignment',
+                'standing straight', 'good posture',
+                'posture analysis', 'check posture', 'stand straight',
+                'posture ok', 'posture rating'
+            ]},
+            { intent: 'bmi', phrases: [
+                'bmi', 'body mass index', 'bmi check', 'bmi score',
+                'bmi results', 'body mass', 'bmi number',
+                'bmi calculation', 'calculate bmi',
+                'height weight ratio', 'bmi category', 'weight height',
+                'mass index', 'bmi value'
+            ]},
+            { intent: 'confidence', phrases: [
+                'confidence', 'accuracy', 'accurate', 'reliable',
+                'trust', 'confidence level', 'confident',
+                'accurate results', 'trust results', 'reliable results',
+                'margin error', 'precise', 'accuracy level',
+                'confidence score', 'trustworthy'
+            ]},
+            { intent: 'goal', phrases: [
+                'goal', 'fitness goal', 'objective', 'target',
+                'goal setting', 'recommend goal', 'set goal',
+                'current goal', 'change goal', 'goal recommendation',
+                'goal check', 'goal plan', 'fitness objective',
+                'training goal', 'goal advice'
+            ]},
+            { intent: 'lose_weight', phrases: [
+                'lose weight', 'fat loss', 'cut down', 'slim down',
+                'weight loss', 'burn fat', 'lean', 'shed weight',
+                'losing weight', 'lose fat', 'drop weight',
+                'leaner', 'lose belly fat', 'trim down',
+                'slimmer', 'shred fat'
+            ]},
+            { intent: 'build_muscle', phrases: [
+                'build muscle', 'gain muscle', 'bulk', 'bigger muscles',
+                'hypertrophy', 'gain mass', 'muscle gain',
+                'building muscle', 'gaining muscle', 'jacked',
+                'swole', 'muscle building', 'grow muscle',
+                'increase muscle mass', 'strength training size'
+            ]},
+            { intent: 'improve_posture', phrases: [
+                'fix posture', 'improve posture', 'better posture',
+                'straighten posture', 'posture tips', 'posture exercises',
+                'fixing posture', 'correct posture',
+                'posture correction', 'stop slouching', 'stand straighter',
+                'exercises posture', 'help posture', 'fix back posture'
+            ]},
+            { intent: 'workout_general', phrases: [
+                'workout', 'exercise', 'training', 'exercises',
+                'gym', 'gym exercises', 'workout tips',
+                'exercise recommendations', 'training advice',
+                'best exercises', 'workout advice', 'exercises suggestions',
+                'workout suggestions', 'exercise ideas'
+            ]},
+            { intent: 'workout_frequency', phrases: [
+                'often work', 'frequency', 'times per week',
+                'days per week', 'rest days', 'often train',
+                'rest days needed', 'workout schedule', 'training frequency',
+                'frequently exercise', 'days off',
+                'weekly schedule', 'sessions per week', 'training days'
+            ]},
+            { intent: 'workout_reps', phrases: [
+                'reps', 'sets', 'rep range', 'volume',
+                'sets and reps', 'rep range ideal', 'heavy weight',
+                'reps muscle growth', 'sets per exercise',
+                'training volume', 'reps strength', 'ideal rep range',
+                'sets per workout', 'reps and sets'
+            ]},
+            { intent: 'cardio', phrases: [
+                'cardio', 'running', 'hiit', 'aerobic exercise', 'endurance',
+                'treadmill', 'cycling', 'cardio needed',
+                'cardio amount', 'cardio recommendations',
+                'best cardio fat loss', 'jogging', 'interval training',
+                'cardio workout', 'aerobics'
+            ]},
+            { intent: 'nutrition_general', phrases: [
+                'nutrition', 'diet', 'eating', 'food', 'meal plan',
+                'eat healthy', 'nutrition tips', 'diet advice',
+                'eating habits', 'meal suggestions', 'food recommendations',
+                'healthy eating', 'eat after gym',
+                'diet plan', 'nutrition advice'
+            ]},
+            { intent: 'protein', phrases: [
+                'protein', 'protein amount', 'protein intake',
+                'protein target', 'protein goal', 'protein per day',
+                'daily protein', 'protein requirements', 'enough protein',
+                'protein sources', 'high protein foods',
+                'grams protein', 'protein needs',
+                'whey protein', 'protein shake'
+            ]},
+            { intent: 'calories', phrases: [
+                'calories', 'calorie', 'caloric intake', 'tdee',
+                'calorie count', 'calorie deficit', 'calorie surplus',
+                'daily calories', 'calorie target', 'calories per day',
+                'maintenance calories', 'caloric needs',
+                'calorie amount', 'energy intake', 'kcal'
+            ]},
+            { intent: 'macros', phrases: [
+                'macros', 'macronutrients', 'carbs', 'fats', 'macro split',
+                'macro ratio', 'carbs amount', 'fat intake',
+                'carbohydrate intake', 'macro breakdown',
+                'macros eat', 'macro targets',
+                'fat carbs protein ratio', 'macronutrient split'
+            ]},
+            { intent: 'how_it_works', phrases: [
+                'technology behind', 'explain technology', 'mediapipe',
+                'algorithm', 'ai work', 'tech behind',
+                'explain analysis', 'scanning technology',
+                'ai technology', 'explain algorithm',
+                'powers analysis', 'analysis done', 'works behind scenes',
+                'technology stack', 'ai powered'
+            ]},
+            { intent: 'what_is_this', phrases: [
+                'fix it app', 'explain app', 'app purpose', 'app overview',
+                'describe app', 'about fix it', 'explain fix it',
+                'purpose app', 'fix it overview', 'fix it tool',
+                'about app', 'app description', 'app info',
+                'app features', 'fix it features'
+            ]},
+            { intent: 'identity', phrases: [
+                'coach name', 'introduce yourself', 'coach identity',
+                'name coach', 'yourself introduction', 'r u ai',
+                'real person', 'ai coach', 'human or ai',
+                'talking to ai', 'bot or human', 'call you',
+                'coach info', 'ai or human', 'your identity'
+            ]},
+            { intent: 'workout_plan', phrases: [
+                'plan workout', 'create routine', 'design program',
+                'workout plan', 'training plan',
+                'exercise plan', 'build workout', 'routine plan',
+                'weekly workout plan', 'plan workouts',
+                'create training program', 'setup workout plan',
+                'workout plan needed', 'custom workout'
+            ]},
+            { intent: 'cycle_workout', phrases: [
+                'period', 'menstrual', 'menstruation', 'cycle', 'monthly cycle',
+                'on my period', 'time of month', 'that time', 'cramps',
+                'pms', 'hormones', 'menstrual cycle', 'period workout',
+                'workout on period', 'exercise during period', 'train on period',
+                'period cramps', 'cycle training', 'hormone cycle',
+                'low energy period', 'period fatigue', 'menstrual pain',
+                'period adjustments', 'female cycle', 'womens cycle'
+            ]},
+            { intent: 'cycle_for_other', phrases: [
+                'for my partner', 'for partner', 'for my wife', 'for my girlfriend',
+                'for my friend', 'for a friend', 'for someone else', 'for another person',
+                'for her', 'for them', 'for my client', 'for a client',
+                'yes for someone', 'yes partner', 'yes friend', 'yes client',
+                'cycle partner', 'cycle wife', 'cycle girlfriend', 'cycle friend',
+                'partner cycle', 'wife cycle', 'girlfriend cycle', 'friend cycle',
+                'help partner', 'help wife', 'help girlfriend', 'help friend'
+            ]},
+            { intent: 'explain_upload', phrases: [
+                'upload screen', 'upload photo', 'upload image', 'how upload',
+                'upload section', 'photo upload', 'take photo', 'camera upload',
+                'upload page', 'first screen', 'start screen', 'upload step',
+                'add photo', 'submit photo', 'image upload',
+                'photo capture', 'image capture', 'camera feature',
+                'photo input', 'body photo', 'scan body'
+            ]},
+            { intent: 'explain_results', phrases: [
+                'results screen', 'results page', 'results tab', 'results section',
+                'explain results', 'show results', 'results mean', 'results overview',
+                'analysis results', 'body results', 'results display',
+                'score screen', 'main results', 'results data',
+                'results dashboard', 'fitness results', 'analysis overview',
+                'score overview', 'body analysis results'
+            ]},
+            { intent: 'explain_breakdown', phrases: [
+                'breakdown screen', 'breakdown page', 'breakdown tab', 'breakdown section',
+                'explain breakdown', 'detailed breakdown', 'body breakdown',
+                'breakdown view', 'zone breakdown', 'breakdown data',
+                'detailed analysis', 'breakdown display', 'breakdown scores',
+                'breakdown metrics', 'body zones', 'zone analysis',
+                'detailed metrics', 'metric breakdown'
+            ]},
+            { intent: 'explain_simulator', phrases: [
+                'simulator screen', 'simulator page', 'simulator tab', 'simulator section',
+                'explain simulator', 'body simulator', 'lifestyle simulator',
+                'simulation', 'simulate changes', 'before after',
+                'transformation preview', 'simulator feature', 'simulator tool',
+                'predict changes', 'future body', 'visual projection',
+                'projection', 'body projection', 'visualize transformation',
+                'transformation simulator', 'body transformation', 'timeline projection'
+            ]},
+            { intent: 'explain_workout_screen', phrases: [
+                'workout screen', 'workout page', 'workout tab', 'workout section',
+                'explain workout screen', 'exercise screen', 'training screen',
+                'workout display', 'workout feature', 'workout tab show',
+                'workout recommendations screen', 'exercise page',
+                'workout guidance', 'workout area', 'workout player',
+                'guided workout', 'exercise player', 'workout timer'
+            ]},
+            { intent: 'explain_nutrition_screen', phrases: [
+                'nutrition screen', 'nutrition page', 'nutrition tab', 'nutrition section',
+                'explain nutrition screen', 'meal screen', 'diet screen',
+                'nutrition display', 'nutrition feature', 'food screen',
+                'nutrition guidance screen', 'macro screen', 'calorie screen',
+                'meal plan screen', 'nutrition area', 'nutrition visualization',
+                'meal guidance', 'food guidance', 'diet display'
+            ]},
+            { intent: 'explain_progress_screen', phrases: [
+                'progress screen', 'progress page', 'progress tab', 'progress section',
+                'explain progress', 'gamification screen', 'achievements screen',
+                'badges screen', 'streak screen', 'xp screen', 'level screen',
+                'progress tracker', 'progress feature', 'progress display',
+                'progress dashboard', 'gamification', 'achievement badges',
+                'workout streak', 'level system', 'ranking system'
+            ]},
+            { intent: 'explain_scan_history', phrases: [
+                'scan history', 'history', 'past scans', 'previous scans',
+                'compare scans', 'comparison', 'compare progress', 'progress comparison',
+                'side by side', 'before after', 'before and after',
+                'scan timeline', 'analysis history', 'saved scans',
+                'compare analyses', 'old scans', 'past analyses'
+            ]},
+            { intent: 'app_features', phrases: [
+                'features', 'app features', 'all features', 'list features',
+                'screens', 'all screens', 'different screens', 'explain screens',
+                'tabs', 'all tabs', 'different tabs', 'explain tabs',
+                'sections', 'all sections', 'app sections',
+                'overview', 'full overview', 'everything app does',
+                'capabilities', 'app capabilities', 'walkthrough',
+                'app modules', 'all modules', 'feature list', 'tour'
+            ]},
+            { intent: 'explain_body_comp', phrases: [
+                'body composition', 'composition', 'body fat percentage',
+                'lean mass ratio', 'fat mass', 'body fat',
+                'composition analysis', 'composition mean', 'body proportion',
+                'proportions analysis', 'composition section',
+                'composition feature', 'composition metric', 'fat percentage',
+                'lean mass', 'body mass composition'
+            ]},
+            { intent: 'explain_muscle_dist', phrases: [
+                'muscle tone distribution', 'muscle distribution', 'tone distribution',
+                'muscle map', 'muscle regions', 'muscle areas',
+                'muscle per region', 'upper body muscle', 'lower body muscle',
+                'muscle balance', 'muscle symmetry', 'muscle groups',
+                'muscle analysis', 'muscle breakdown', 'tone breakdown',
+                'muscle development areas'
+            ]},
+            { intent: 'explain_posture_analysis', phrases: [
+                'posture analysis', 'posture assessment', 'posture detection',
+                'spine analysis', 'alignment analysis', 'posture measurement',
+                'posture feature', 'posture check feature',
+                'shoulder alignment', 'head position analysis', 'hip alignment',
+                'posture evaluation', 'posture tracking',
+                'alignment check', 'spine check'
+            ]},
+            { intent: 'explain_body_zones', phrases: [
+                'body zones', 'zone analysis', 'body zone map',
+                'zone breakdown', 'body regions', 'body areas',
+                'zone scores', 'zone assessment', 'body zone feature',
+                'region analysis', 'area analysis', 'zone map',
+                'upper body zone', 'lower body zone', 'core zone',
+                'zone distribution'
+            ]},
+            { intent: 'explain_fitness_index', phrases: [
+                'fitness index', 'fitness score', 'overall fitness',
+                'fitness rating', 'fitness level', 'fitness grade',
+                'fitness number', 'fitness metric', 'fitness indicator',
+                'index score', 'fitness assessment', 'overall index',
+                'fitness measurement', 'fitness evaluation'
+            ]},
+            { intent: 'explain_workout_player', phrases: [
+                'workout player', 'exercise player', 'guided session',
+                'follow along', 'workout timer', 'exercise timer',
+                'rep counter', 'exercise tracker', 'workout guide',
+                'workout follow', 'play workout', 'start workout',
+                'guided exercise', 'workout mode', 'training player'
+            ]},
+            { intent: 'explain_streaks_badges', phrases: [
+                'streak', 'streaks', 'my streak', 'workout streak', 'daily streak',
+                'streak count', 'current streak', 'badge', 'badges', 'my badges',
+                'achievement', 'achievements', 'my achievements', 'badge collection',
+                'achievement list', 'streak counter', 'reward system', 'points system',
+                'unlock badge', 'earn badge', 'streak broken', 'keep streak',
+                'milestone badge', 'achievement unlocked'
+            ]},
+            { intent: 'explain_confidence_indicator', phrases: [
+                'confidence indicator', 'confidence feature', 'input quality',
+                'analysis quality', 'scan quality', 'photo quality score',
+                'quality indicator', 'quality assessment', 'quality meter',
+                'quality check', 'input quality guidance', 'image quality',
+                'accuracy indicator', 'precision indicator', 'quality feature'
+            ]},
+            { intent: 'explain_visual_age', phrases: [
+                'visual age', 'age estimate', 'estimated age', 'apparent age',
+                'age prediction', 'age score', 'years younger', 'years older',
+                'age result', 'age calculation', 'age feature', 'look younger',
+                'look older', 'age assessment', 'biological age'
+            ]},
+            { intent: 'explain_symmetry', phrases: [
+                'symmetry', 'symmetry score', 'body symmetry', 'proportion balance',
+                'proportions', 'lean mass index', 'lean mass', 'shoulder waist ratio',
+                'body proportions', 'balanced body', 'body ratio', 'proportion score',
+                'body balance', 'left right balance', 'muscle symmetry score'
+            ]},
+            { intent: 'explain_ai_reasoning', phrases: [
+                'ai reasoning', 'why ai thinks', 'explainability', 'explain why',
+                'ai explanation', 'reasoning behind', 'why this score',
+                'how ai decided', 'analysis reasoning', 'why ai',
+                'explain toggle', 'reasoning toggle', 'ai logic',
+                'why thinks this', 'explanation feature'
+            ]},
+            { intent: 'explain_scenarios', phrases: [
+                'lifestyle scenarios', 'scenarios', 'active lifestyle',
+                'sedentary scenario', 'intensive training scenario',
+                'nutrition optimization scenario', 'scenario cards',
+                'projected impact', 'impact summary', 'lifestyle choices',
+                'lifestyle options', 'scenario comparison', 'scenario selection',
+                'lifestyle change', 'projected changes'
+            ]},
+            { intent: 'explain_weekly_routine', phrases: [
+                'weekly routine', 'weekly plan', 'training split', 'weekly training',
+                'training plan generator', 'push pull legs', 'upper lower split',
+                'full body split', 'bro split', 'training days', 'weekly schedule',
+                'muscle coverage', 'day selector', 'rest day plan',
+                'generate plan', 'custom routine'
+            ]},
+            { intent: 'explain_todays_routine', phrases: [
+                'todays routine', 'today routine', 'daily routine',
+                'recommended workout', 'todays workout', 'today workout',
+                'daily workout', 'routine today', 'suggested workout',
+                'current routine', 'workout recommendation today',
+                'daily session', 'today session', 'planned workout'
+            ]},
+            { intent: 'explain_food_recognition', phrases: [
+                'food recognition', 'snap meal', 'food scanner', 'food photo',
+                'food camera', 'scan food', 'food detection', 'food ai',
+                'meal scanner', 'food analyzer', 'snap your meal',
+                'food upload', 'food identification', 'calorie scanner',
+                'meal photo', 'food estimate'
+            ]},
+            { intent: 'explain_meal_plan', phrases: [
+                'meal plan', 'meal planner', 'meal plan generator',
+                'personalized meals', 'daily meals', 'meal suggestions',
+                'meal recommendations', 'meal prep', 'dietary preference',
+                'vegetarian plan', 'high protein plan', 'low carb plan',
+                'meals per day', 'generate meals', 'custom meal plan'
+            ]},
+            { intent: 'explain_daily_macros', phrases: [
+                'daily macro targets', 'macro targets', 'macro bars',
+                'macro chart', 'macro circle', 'daily calories target',
+                'calorie target', 'protein target', 'carb target',
+                'fat target', 'on track percentage', 'macro progress',
+                'macro display', 'daily targets', 'nutrition targets display'
+            ]},
+            { intent: 'explain_nutrition_insights', phrases: [
+                'nutrition insights', 'protein timing', 'meal frequency',
+                'hydration goal', 'hydration target', 'water intake',
+                'eating schedule', 'meal timing', 'nutrient timing',
+                'nutrition tips display', 'science tips nutrition',
+                'hydration recommendation', 'eating frequency',
+                'water goal', 'nutrition science tips'
+            ]},
+            { intent: 'explain_exercise_filters', phrases: [
+                'exercise filters', 'home exercises', 'gym exercises',
+                'weak areas filter', 'workout filter', 'home gym filter',
+                'experience level', 'beginner intermediate advanced',
+                'difficulty level', 'exercise difficulty', 'filter exercises',
+                'sort exercises', 'exercise categories', 'workout categories',
+                'home workout filter'
+            ]},
+            { intent: 'explain_themes', phrases: [
+                'themes', 'theme picker', 'dark mode', 'light mode',
+                'color theme', 'change theme', 'app theme', 'charcoal theme',
+                'ivory theme', 'midnight theme', 'ocean theme', 'lavender theme',
+                'appearance', 'color scheme', 'switch theme', 'visual theme'
+            ]},
+            { intent: 'explain_body_silhouette', phrases: [
+                'body silhouette', 'body diagram', 'body visualization',
+                'body outline', 'body map', 'silhouette diagram',
+                'body image display', 'body figure', 'avatar display',
+                'body visual', 'body shape diagram', 'zone labels',
+                'shoulder label', 'core label', 'body drawing'
+            ]},
+            { intent: 'explain_coach_personas', phrases: [
+                'coach personas', 'persona modes', 'encouraging mode',
+                'planner mode', 'explainer mode', 'funny mode',
+                'coach styles', 'coach personalities', 'switch persona',
+                'different coaches', 'coach types', 'persona selection',
+                'coaching style', 'change persona', 'persona buttons'
+            ]},
+            { intent: 'explain_bmr_tdee', phrases: [
+                'bmr', 'tdee', 'basal metabolic rate', 'total daily energy expenditure',
+                'metabolic rate', 'metabolic card', 'metabolism calculator',
+                'mifflin st jeor', 'bmr calculator', 'tdee calculator',
+                'what is bmr', 'what is tdee', 'how calories calculated',
+                'recalculate macros', 'calorie formula', 'calorie recalculate'
+            ]},
+            { intent: 'explain_daily_habits', phrases: [
+                'daily habits', 'habit tracker', 'habits card', 'habit score',
+                'habit ring', 'daily score', 'check in habit', 'checkin',
+                'habits tracker', 'daily habit ring', 'habit completion',
+                'habit streak', 'five habits', '5 habits', 'daily habits score'
+            ]},
+            { intent: 'explain_sleep_tracker', phrases: [
+                'sleep tracker', 'sleep log', 'log sleep', 'sleep hours',
+                'sleep quality', 'recovery score', 'sleep recovery', 'sleep bar chart',
+                'sleep history', 'sleep streak', 'sleep tracking', 'sleep bento',
+                'log sleep hours', 'sleep quality buttons', 'sleep bento cell'
+            ]},
+            { intent: 'explain_weekly_report', phrases: [
+                'weekly report', 'weekly grade', 'week report', 'report card',
+                'weekly card', 'weekly score', 'week grade', 'this weeks report',
+                'weekly summary', 'weekly review', 'weekly performance',
+                'week rating', 'weekly letter grade', 'weekly recap'
+            ]},
+            { intent: 'explain_smart_insights', phrases: [
+                'smart insights', 'insights card', 'personalized insights',
+                'ai insights', 'insight observations', 'smart observations',
+                'what are insights', 'fitness insights', 'data insights',
+                'insight analysis', 'insight generator', 'logged data insights'
+            ]},
+            { intent: 'explain_calorie_balance', phrases: [
+                'calorie balance', 'calories burned', 'burned calories',
+                'burned vs eaten', 'net calories', 'calorie deficit today',
+                'calories in calories out', 'exercise calories burned',
+                'daily calorie balance', 'calorie balance card', 'calories in out'
+            ]},
+            { intent: 'explain_hydration_history', phrases: [
+                'hydration history', 'water history', 'water heatmap', 'hydration heatmap',
+                'water streak', 'hydration streak', 'water average', 'water log history',
+                'hydration tracking history', 'past water intake', 'water best streak',
+                'water 7 day', 'hydration 7 day', 'water chart history'
+            ]},
+            { intent: 'explain_progress_charts', phrases: [
+                'progress charts', 'progress chart', 'weight chart', 'weight graph',
+                'sleep chart progress', 'activity chart', 'calories chart',
+                'chart tabs', 'progress graph', 'chart tab weight', 'chart tab sleep',
+                'chart tab activity', 'chart tab calories', 'progress visualization',
+                'bmi chart', 'muscle chart', 'score chart',
+                'progress over time', 'track my progress', 'view progress',
+                'how do i track progress', 'trend over time', 'weight over time',
+                'calories over time', 'see my progress', 'show my progress',
+                'progress tracking', 'data over time', 'stats over time',
+                'sleep over time', 'activity over time', 'graphs', 'my graphs',
+                'show graph', 'view graph', 'trend chart', 'progress trend'
+            ]},
+            { intent: 'explain_challenges', phrases: [
+                'challenge', 'challenges', 'weekly challenge', 'weekly challenges',
+                'daily challenges', 'challenge feature', 'what are challenges',
+                'how do challenges work', 'complete challenge', 'challenge goal',
+                'challenge progress', 'finish challenge', 'challenge xp', 'challenge tab',
+                'current challenge', 'new challenge', 'challenge reward', 'active challenge',
+                'challenge objective', 'rotating challenge', 'my challenges'
+            ]},
+            { intent: 'explain_levels_xp', phrases: [
+                'xp', 'level', 'levels', 'my level', 'my rank', 'rank', 'level up',
+                'xp points', 'experience points', 'how to level up', 'what is xp',
+                'earn xp', 'level system', 'rank up', 'level progress', 'next level',
+                'xp system', 'experience system', 'how xp works', 'level reward',
+                'leveling', 'rank system', 'xp score', 'rank title', 'my xp',
+                'experience', 'ranking', 'my score level', 'level badge'
+            ]},
+            { intent: 'explain_weight_log', phrases: [
+                'weight log', 'log weight', 'track weight', 'weight tracking',
+                'weight history', 'log my weight', 'add weight', 'weight entry',
+                'daily weight', 'weight diary', 'body weight log', 'weight today',
+                'how to log weight', 'weight records', 'log kg', 'track my weight'
+            ]},
+            { intent: 'explain_goal_weight', phrases: [
+                'goal weight', 'target weight', 'weight goal', 'set goal weight',
+                'how far to goal', 'progress to goal', 'goal tracking', 'kg remaining',
+                'weeks to goal', 'weight goal progress', 'reach my goal', 'edit goal',
+                'goal bar', 'goal card', 'weight target', 'set weight goal',
+                'pace to goal', 'estimated weeks', 'goal weight card'
+            ]},
+            { intent: 'explain_food_log', phrases: [
+                'food log', 'log food', 'log meal', 'food diary', 'meal log',
+                'add food', 'track food', 'food tracking', 'quick add food',
+                'log what i ate', 'daily food', 'food entry', 'nutrition log',
+                'log calories', 'food presets', 'food chip', 'quick add', 'meal entry',
+                'log my meals', 'food intake log', 'calorie log'
+            ]},
+            { intent: 'explain_workout_splits', phrases: [
+                'workout split', 'training split', 'push pull legs', 'ppl split',
+                'upper lower split', 'full body split', 'bro split', 'which split',
+                'split schedule', 'training schedule', 'workout schedule',
+                'split recommendation', 'what split should i do', 'how to split workouts',
+                'muscle group split', 'ppl', 'upper lower', 'full body routine',
+                'workout days', 'training days per week'
+            ]},
+            { intent: 'explain_body_recomp', phrases: [
+                'body recomposition', 'recomp', 'body recomp', 'lose fat gain muscle',
+                'recomposition', 'fat loss muscle gain', 'simultaneous fat loss',
+                'cut and bulk', 'recomp goal', 'what is recomposition',
+                'lose fat and build muscle', 'body transformation both', 'fat and muscle'
+            ]},
+            { intent: 'explain_maintenance', phrases: [
+                'maintenance', 'maintain weight', 'maintain fitness', 'maintain muscle',
+                'maintenance calories', 'how to maintain', 'maintaining weight',
+                'stay at current weight', 'keep my weight', 'weight maintenance',
+                'not lose not gain', 'maintain my results', 'hold my progress',
+                'keep what i built', 'stay the same'
+            ]},
+            { intent: 'explain_workout_history', phrases: [
+                'workout history', 'exercise history', 'past workouts', 'previous workouts',
+                'workout log', 'exercise log', 'logged workouts', 'training history',
+                'workout sessions', 'completed workouts', 'workout record', 'session history',
+                'my workouts', 'workouts done', 'training log'
+            ]},
+            { intent: 'explain_personal_records', phrases: [
+                'personal records', 'personal record', 'pr', 'prs', 'personal best',
+                'pb', 'one rep max', '1rm', 'max lift', 'best lift', 'strength record',
+                'record lift', 'lift pr', 'exercise pr', 'new pr', 'beat my pr',
+                'set a pr', 'my prs', 'my records'
+            ]},
+            { intent: 'explain_body_measurements', phrases: [
+                'body measurements', 'measurements', 'body measuring', 'chest measurement',
+                'waist measurement', 'hip measurement', 'arm measurement', 'measure body',
+                'log measurements', 'measurement tracker', 'body tape', 'tape measure',
+                'circumference', 'body circumference', 'track measurements', 'measurement history'
+            ]},
+            { intent: 'explain_account', phrases: [
+                'my account', 'account settings', 'edit profile', 'update profile', 'change name',
+                'update email', 'change my email', 'change password', 'delete account',
+                'account page', 'fitness profile editing', 'update my details', 'change my details',
+                'profile settings', 'personal settings', 'how to edit profile', 'how to update profile',
+                'user menu', 'account menu', 'profile editing', 'account modal'
+            ]},
+            { intent: 'explain_optional_measurements', phrases: [
+                'optional measurements', 'should i fill in measurements', 'body measurement inputs',
+                'why add measurements', 'measurements accurate', 'improve accuracy',
+                'how to measure', 'tape measure input', 'measurement fields',
+                'what are optional measurements', 'add chest measurement', 'input measurements',
+                'upload measurements', 'should i measure', 'do i need measurements',
+                'fill in measurements', 'measurement section'
+            ]},
+            { intent: 'explain_export', phrases: [
+                'export data', 'share card', 'share results', 'share workout', 'export results',
+                'download results', 'save results', 'share my results', 'export my data',
+                'share progress', 'how to export', 'how to share', 'export button',
+                'share button', 'download data', 'share analysis', 'export analysis', 'shareable card'
+            ]},
+            { intent: 'explain_comparison', phrases: [
+                'compare scans', 'scan comparison', 'compare results', 'progress comparison',
+                'compare progress', 'before and after scans', 'compare two scans',
+                'side by side comparison', 'comparison modal', 'how to compare',
+                'compare body scans', 'select two scans', 'scan history comparison',
+                'body scan comparison', 'before after comparison'
+            ]},
+            { intent: 'explain_live_posture', phrases: [
+                'live posture', 'posture check', 'posture monitor', 'real time posture',
+                'camera posture', 'live camera posture', 'posture feedback', 'live posture check',
+                'posture camera', 'posture detection', 'real-time posture', 'start posture check',
+                'posture monitoring', 'live analysis posture', 'camera based posture'
+            ]},
+            { intent: 'explain_data_management', phrases: [
+                'clear data', 'delete data', 'clear all data', 'data management', 'reset app',
+                'clear storage', 'start over', 'wipe data', 'local storage', 'app data',
+                'delete local data', 'clear my data', 'storage usage', 'how much storage',
+                'data usage', 'clear app data', 'reset everything', 'storage info'
+            ]},
+            { intent: 'explain_auth', phrases: [
+                'login', 'log in', 'sign in', 'register', 'sign up', 'create account',
+                'forgot password', 'reset password', 'password reset', 'how to login',
+                'how to register', 'how to sign up', 'account creation', 'new account',
+                'verify email', 'email verification', 'authentication', 'how to create account',
+                'need an account', 'make an account'
+            ]}
+        ];
+
+        const INTENT_LABELS = COACH_TRAINING_DATA.map(d => d.intent);
+
+        const COACH_STOPWORDS = new Set([
+            'a', 'an', 'the', 'is', 'are', 'am', 'was', 'were', 'be', 'been',
+            'being', 'do', 'does', 'did', 'have', 'has', 'had', 'will', 'would',
+            'could', 'should', 'can', 'may', 'might', 'shall', 'must',
+            'i', 'me', 'my', 'we', 'our', 'you', 'your', 'it', 'its',
+            'what', 'whats', 'how', 'hows', 'who', 'whos',
+            'to', 'of', 'in', 'on', 'at', 'by', 'for', 'with', 'from',
+            'and', 'or', 'but', 'so', 'if', 'then', 'than', 'that', 'this',
+            'not', 'no', 'just', 'also', 'very', 'really', 'too', 'so',
+            'up', 'out', 'about', 'into', 'over', 'after', 'before',
+            'some', 'any', 'all', 'each', 'every', 'both',
+            'there', 'here', 'where', 'when', 'while',
+            'more', 'most', 'other', 'another',
+            'got', 'get', 'gets', 'getting',
+            'like', 'know', 'think', 'want', 'need', 'go', 'going',
+            'thing', 'things', 'way', 'right', 'now', 'today',
+            'please', 'pls', 'ok', 'okay', 'well', 'yeah', 'yes',
+            'tell', 'give', 'show', 'let', 'make', 'take', 'see', 'look',
+            'still', 'even', 'much', 'many', 'keep', 'come', 'day', 'time',
+            'already', 'bit', 'lot', 'lots', 'kind', 'sort', 'able',
+            'say', 'said', 'ask', 'asked', 'try', 'put', 'use', 'used'
+        ]);
+
+        function tokenizeCoach(text) {
+            return text.toLowerCase().replace(/[^a-z0-9\s]/g, '').split(/\s+/)
+                .filter(w => w && !COACH_STOPWORDS.has(w));
+        }
+
+        function buildCoachVocabulary() {
+            const wordSet = new Set();
+            for (const entry of COACH_TRAINING_DATA) {
+                for (const phrase of entry.phrases) {
+                    tokenizeCoach(phrase).forEach(w => wordSet.add(w));
+                }
+            }
+            const vocab = {};
+            let idx = 0;
+            for (const word of Array.from(wordSet).sort()) {
+                vocab[word] = idx++;
+            }
+            return vocab;
+        }
+
+        function encodeCoachInput(text, vocab) {
+            const vec = new Float32Array(Object.keys(vocab).length);
+            for (const w of tokenizeCoach(text)) {
+                if (vocab[w] !== undefined) {
+                    vec[vocab[w]] = 1;
+                }
+            }
+            return vec;
+        }
+
+        function createCoachModel(vocabSize, numIntents) {
+            const model = tf.sequential();
+            model.add(tf.layers.dense({ inputShape: [vocabSize], units: 128, activation: 'relu' }));
+            model.add(tf.layers.dropout({ rate: 0.3 }));
+            model.add(tf.layers.dense({ units: 64, activation: 'relu' }));
+            model.add(tf.layers.dense({ units: numIntents, activation: 'softmax' }));
+            model.compile({ optimizer: 'adam', loss: 'categoricalCrossentropy', metrics: ['accuracy'] });
+            return model;
+        }
+
+        async function trainCoachModel() {
+            const vocab = buildCoachVocabulary();
+            const vocabSize = Object.keys(vocab).length;
+            const numIntents = INTENT_LABELS.length;
+
+            const xs = [];
+            const ys = [];
+            for (let i = 0; i < COACH_TRAINING_DATA.length; i++) {
+                for (const phrase of COACH_TRAINING_DATA[i].phrases) {
+                    xs.push(encodeCoachInput(phrase, vocab));
+                    const label = new Float32Array(numIntents);
+                    label[i] = 1;
+                    ys.push(label);
+                }
+            }
+
+            const xTensor = tf.tensor2d(xs);
+            const yTensor = tf.tensor2d(ys);
+
+            const model = createCoachModel(vocabSize, numIntents);
+            await model.fit(xTensor, yTensor, {
+                epochs: 20,
+                batchSize: 32,
+                verbose: 0,
+                callbacks: { onEpochEnd: async () => { await tf.nextFrame(); } }
+            });
+
+            xTensor.dispose();
+            yTensor.dispose();
+
+            // Cache model and vocabulary
+            try {
+                await model.save('indexeddb://coach-intent-model');
+                localStorage.setItem('coach-vocab', JSON.stringify(vocab));
+                localStorage.setItem('coach-model-version', String(COACH_TRAINING_DATA_VERSION));
+            } catch (e) {
+                // Caching failed — model still works for this session
+            }
+
+            coachVocab = vocab;
+            coachModel = model;
+        }
+
+        async function loadCachedCoachModel() {
+            const savedVersion = localStorage.getItem('coach-model-version');
+            if (String(savedVersion) !== String(COACH_TRAINING_DATA_VERSION)) return false;
+
+            const savedVocab = localStorage.getItem('coach-vocab');
+            if (!savedVocab) return false;
+
+            try {
+                const model = await tf.loadLayersModel('indexeddb://coach-intent-model');
+                const vocab = JSON.parse(savedVocab);
+                coachModel = model;
+                coachVocab = vocab;
+                return true;
+            } catch (e) {
+                return false;
+            }
+        }
+
+        async function initCoachModel() {
+            try {
+                const cached = await loadCachedCoachModel();
+                if (!cached) {
+                    await trainCoachModel();
+                }
+            } catch (e) {
+                // Model init failed — detectIntent will return null and fallback responses will be used
+            }
+        }
+
+        // Keyword fallback when neural network isn't confident
+        function detectIntentKeyword(text) {
+            const lower = text.toLowerCase().trim();
+            if (!lower) return null;
+
+            let bestIntent = null;
+            let bestScore = 0;
+
+            for (const entry of COACH_TRAINING_DATA) {
+                let score = 0;
+                for (const phrase of entry.phrases) {
+                    if (lower === phrase) {
+                        // Exact match — highest priority
+                        score += 10;
+                    } else if (lower.includes(phrase)) {
+                        // Substring match — score by phrase length (longer = more specific)
+                        score += phrase.split(' ').length * 2;
+                    } else if (phrase.includes(lower)) {
+                        // Input is a substring of a phrase
+                        score += 3;
+                    }
+                }
+                if (score > bestScore) {
+                    bestScore = score;
+                    bestIntent = entry.intent;
+                }
+            }
+
+            return bestScore >= 2 ? bestIntent : null;
+        }
+
+        function detectIntent(text) {
+            const lower = text.toLowerCase().trim();
+            if (!lower) return null;
+
+            // Keyword matching runs FIRST — deterministic, exact-phrase matching is always reliable
+            const keywordResult = detectIntentKeyword(lower);
+            if (keywordResult) return keywordResult;
+
+            // Neural network only for queries that don't keyword-match at all
+            if (coachModel && coachVocab) {
+                const inputVec = encodeCoachInput(lower, coachVocab);
+
+                if (inputVec.some(v => v > 0)) {
+                    const inputTensor = tf.tensor2d([inputVec]);
+                    const prediction = coachModel.predict(inputTensor);
+                    const probabilities = prediction.dataSync();
+
+                    inputTensor.dispose();
+                    prediction.dispose();
+
+                    let maxProb = 0;
+                    let maxIdx = -1;
+                    for (let i = 0; i < probabilities.length; i++) {
+                        if (probabilities[i] > maxProb) {
+                            maxProb = probabilities[i];
+                            maxIdx = i;
+                        }
+                    }
+
+                    // Higher threshold to reduce false-positive misclassifications
+                    if (maxProb >= 0.60) {
+                        return INTENT_LABELS[maxIdx];
+                    }
+                }
+            }
+
+            return null;
+        }
+
+        // ── Chat Response Templates (keyed by intent) ──
+        const COACH_CHAT_RESPONSES = {
+            encouraging: {
+                greeting: (ctx) => [
+                    `Hey there! I'm your coach, here to help you understand your results and crush your goals. Ask me anything about your body score, workouts, or nutrition!`,
+                    `Hi! Great to see you engaging. I can help with your analysis results, workout tips, nutrition guidance, and more. What's on your mind?`
+                ],
+                thanks: (ctx) => [
+                    `You're welcome! Keep pushing forward -- you're doing great things for yourself.`,
+                    `Anytime! That's what I'm here for. Keep up the amazing effort!`
+                ],
+                help: (ctx) => [
+                    `I can help with lots of things! Try asking about:\n- Your body score or category\n- Muscle tone or posture\n- Workout recommendations\n- Nutrition and macros\n- How the AI analysis works\n- Any screen or feature (e.g., "explain the simulator")\n- Tips for your specific goal\n\nJust type naturally -- I'll figure out what you need!`,
+                    `Here's what I know about:\n- Body analysis results (score, category, BMI)\n- Muscle & posture details\n- Workout plans and frequency\n- Nutrition, protein, and calories\n- How this app works\n- Every screen and feature in the app\n\nAsk away!`
+                ],
+                identity: (ctx) => [
+                    `I'm your Fix-it coach! I'm here to help you understand your body analysis results, plan workouts tailored to your goals, and guide your nutrition. Think of me as your personal fitness companion -- ask me anything and let's make progress together!`,
+                    `Hey! I'm the Fix-it fitness coach. I can break down your body composition results, recommend exercises and workout plans, and help with nutrition guidance. I'm powered by your analysis data, so everything I say is personalized to you. What can I help with?`
+                ],
+                body_score: (ctx) => [
+                    `Your body composition score is ${ctx.bodyScore}/100, which puts you in the "${ctx.category}" category. That's a real starting point to build from! Your overall grade is ${ctx.grade}.`,
+                    `You scored ${ctx.bodyScore} out of 100 on body composition -- classified as "${ctx.category}". Remember, this is your baseline, not your ceiling! Overall grade: ${ctx.grade}.`
+                ],
+                body_category: (ctx) => [
+                    `You're classified as "${ctx.category}" with a body type of "${ctx.bodyType}". This is based on your skeletal proportions and estimated composition. It's a great reference point for setting goals!`,
+                    `Your category is "${ctx.category}" and your body type reads as "${ctx.bodyType}". These classifications help tailor your workout and nutrition recommendations.`
+                ],
+                muscle_tone: (ctx) => [
+                    `Your muscle tone score is ${ctx.muscleScore}%. This is estimated from how your body proportions suggest muscle development. Consistent training will push this number up!`,
+                    `Muscle tone: ${ctx.muscleScore}%. This reflects estimated lean mass distribution. Progressive resistance training is the best way to improve it!`
+                ],
+                posture: (ctx) => [
+                    `Your posture score is ${ctx.postureScore}/100. This measures shoulder alignment, head position, and hip tilt. Good posture makes you look and feel better -- and it's very trainable!`,
+                    `Posture: ${ctx.postureScore}/100. This factors in shoulder levelness, spine alignment, and head positioning. Even small improvements here can make a big visual difference!`
+                ],
+                bmi: (ctx) => [
+                    ctx.bmi ? `Your BMI is ${ctx.bmi}. Remember, BMI is just one data point -- it doesn't distinguish muscle from fat. Your full body score of ${ctx.bodyScore} gives a more complete picture!` : `You haven't entered your height and weight yet, so I can't calculate BMI. Adding that data in the analysis screen would improve your results accuracy!`,
+                    ctx.bmi ? `BMI: ${ctx.bmi}. It's a useful quick reference, but your body composition score (${ctx.bodyScore}) considers proportions and structure, making it more informative.` : `No BMI data available yet! Enter your height and weight during analysis for more accurate results and a BMI reading.`
+                ],
+                confidence: (ctx) => [
+                    `The analysis confidence is "${ctx.confidence}". ${ctx.confidence === 'high' ? 'That means the AI had good data to work with -- nice!' : 'You can boost this by using a clear, well-lit, front-facing photo and entering your height and weight.'}`,
+                    `Confidence level: ${ctx.confidence}. ${ctx.confidence === 'high' ? 'Great photo quality and data input!' : 'For better accuracy, try a full-body front-facing photo with good lighting, and make sure to enter your BMI data.'}`
+                ],
+                goal: (ctx) => [
+                    `Your current goal is set to ${GOAL_LABELS[ctx.goal] || 'general fitness'}. All your workout and nutrition recommendations are tailored to this. You can change it anytime on the analysis screen!`,
+                    `You're working toward ${GOAL_LABELS[ctx.goal] || 'general fitness'}. This shapes everything from your exercise plan to your macro targets. Stay consistent and trust the process!`
+                ],
+                lose_weight: (ctx) => [
+                    `For fat loss, the key is a moderate calorie deficit (300-500 cal/day) combined with resistance training to preserve muscle. Protein is crucial -- aim for around 1g per pound of body weight. Cardio helps but diet is the main driver!`,
+                    `Weight loss comes down to: eat slightly less than you burn, keep protein high, lift weights to maintain muscle, and be patient. A 1-2 lb/week rate is sustainable and healthy. You've got this!`
+                ],
+                build_muscle: (ctx) => [
+                    `To build muscle, you need a slight calorie surplus (200-300 extra cal/day), plenty of protein (0.8-1g per lb), and progressive overload in your training. Focus on compound movements first: squats, deadlifts, bench press, rows.`,
+                    `Muscle building fundamentals: eat enough (small surplus), prioritize protein, train hard with progressive overload, and sleep 7-9 hours. Consistency over months is what creates real change!`
+                ],
+                improve_posture: (ctx) => [
+                    `Your posture score is ${ctx.postureScore}/100. To improve: strengthen your upper back (rows, face pulls), stretch your chest and hip flexors, and practice standing tall throughout the day. Wall angels are a great daily exercise!`,
+                    `Posture improvement (currently ${ctx.postureScore}/100): focus on strengthening weak areas (usually upper back and core) and stretching tight areas (chest, hip flexors). Even 5 minutes of mobility work daily adds up fast!`
+                ],
+                workout_general: (ctx) => [
+                    `With a body score of ${ctx.bodyScore} (${ctx.category}) and a ${ctx.bodyType} build, here's my exercise advice for your ${GOAL_LABELS[ctx.goal] || 'fitness'} goal: ${ctx.bodyScore <= 30 ? 'start with low-impact compound movements 3x/week -- building a foundation is key at your level.' : ctx.bodyScore <= 55 ? 'a solid 3-5 day/week program with compound lifts and progressive overload will take you far.' : 'you have a strong base -- focus on progressive overload and strategic programming to keep advancing.'} Check the Workout screen for your tailored plan!`,
+                    `Based on your profile (score: ${ctx.bodyScore}, ${ctx.category}, ${ctx.bodyType}), here's what matters most for ${GOAL_LABELS[ctx.goal] || 'fitness'}: ${ctx.bodyScore <= 30 ? 'consistency and proper form are your best friends right now. Start with 3 days/week and build from there.' : ctx.bodyScore <= 55 ? 'compound lifts, progressive overload, and 3-5 training days/week. You have a solid foundation to build on!' : 'fine-tuning your program with periodization and targeted work. Your Workout screen has the specifics!'} You've got this!`
+                ],
+                workout_plan: (ctx) => [
+                    `Let's build a plan for you! With a body score of ${ctx.bodyScore} (${ctx.category}) and a ${ctx.bodyType} body type, here's what I'd recommend for ${GOAL_LABELS[ctx.goal] || 'your goal'}:\n\n${ctx.bodyScore <= 30 ? '**Phase 1 (Weeks 1-4): Foundation**\n- 3 days/week full-body sessions\n- Focus: bodyweight + light resistance\n- Walking 20-30 min on off days\n- Key moves: goblet squats, assisted push-ups, band rows, planks' : ctx.bodyScore <= 55 ? '**Balanced Program (4 days/week):**\n- Day 1: Upper body push + core\n- Day 2: Lower body + cardio\n- Day 3: Rest\n- Day 4: Upper body pull + core\n- Day 5: Lower body + HIIT\n- Key moves: bench press, squats, rows, deadlifts' : '**Progressive Program (4-5 days/week):**\n- Push / Pull / Legs split\n- Progressive overload each week\n- 1-2 HIIT sessions\n- Key moves: compound lifts + targeted isolation work'}\n\nYour muscle tone is at ${ctx.muscleScore}%, so ${ctx.muscleScore < 40 ? 'building a strength base is priority one. Start light and nail your form!' : ctx.muscleScore < 65 ? 'you have a solid foundation to build on. Time to push the intensity!' : 'you\'re already well-developed -- let\'s fine-tune and optimize!'} You've got this!`,
+                    `Here's a personalized plan based on your ${ctx.category} profile (score: ${ctx.bodyScore}, body type: ${ctx.bodyType}):\n\n**Goal: ${GOAL_LABELS[ctx.goal] || 'General Fitness'}**\n${ctx.bodyScore <= 30 ? '- Start with 3 days/week, full-body approach\n- Prioritize movement quality over intensity\n- Include daily walks (20-30 min)\n- Bodyweight exercises + resistance bands\n- Progress to free weights as strength builds' : ctx.bodyScore <= 55 ? '- 4 days/week upper/lower split\n- Mix compound lifts with targeted accessories\n- 2-3 cardio sessions (mix steady-state and intervals)\n- Focus on progressive overload weekly' : '- 4-5 days/week push/pull/legs\n- Heavy compound movements as anchors\n- Strategic isolation work for weak points\n- Periodized progression (deload every 4-6 weeks)'}\n\nWith ${ctx.muscleScore}% muscle tone, ${ctx.muscleScore < 40 ? 'building your strength foundation will make everything else easier. Be patient and consistent!' : 'you have good muscle development to work with. Let\'s take it to the next level!'} Check the Workout screen for specific exercises!`
+                ],
+                cycle_workout: (ctx) => {
+                    if (ctx.gender === 'male') {
+                        return [`I noticed your profile is set to male! Menstrual cycle training adjustments are specifically for female physiology. Are you asking for someone else -- like a partner, friend, or client? If so, I'd be happy to share cycle-aware workout recommendations! Just let me know and I'll give you the full breakdown with specific exercises for each phase.`];
+                    }
+                    return [
+                        `I'm so glad you asked -- it's important to work WITH your body, not against it! Here's how to adjust your training during your cycle:\n\n**Days 1-5 (Menstruation):**\n- Lower intensity is totally okay -- listen to your body!\n- Recommended exercises:\n  - Gentle yoga (child's pose, cat-cow, supine twists)\n  - Light walking (20-30 min)\n  - Swimming or water aerobics\n  - Foam rolling and stretching\n  - Light dumbbell work (higher reps, lower weight)\n- Skip: heavy deadlifts, intense ab work, HIIT\n\n**Days 6-14 (Follicular/Ovulation):**\n- Energy peaks! Great time to push harder\n- Recommended exercises:\n  - Heavy compound lifts (squats, deadlifts, bench press)\n  - HIIT or circuit training\n  - Challenging new exercises\n  - Go for PRs!\n  - Plyometrics (box jumps, burpees)\n\n**Days 15-28 (Luteal):**\n- Energy may dip, especially late luteal\n- Recommended exercises:\n  - Moderate strength training (3x10-12 reps)\n  - Steady-state cardio (walking, cycling, elliptical)\n  - Pilates and barre\n  - Mind-body work (yoga flow)\n  - Lighter weights, focus on form\n\nMovement often helps with cramps and mood -- but rest days are valid too!`,
+                        `Your cycle absolutely affects your training -- and that's completely normal! Here's your phase-by-phase exercise guide:\n\n**During your period (Days 1-5):**\n- Gentle movement can actually help cramps!\n- Best exercises:\n  - Restorative yoga (legs up wall, reclined butterfly)\n  - Walking outdoors\n  - Light resistance bands\n  - Gentle stretching routine\n  - Swimming (yes, it's safe!)\n- Avoid: crunches, planks, heavy lifting\n\n**After your period (Days 6-14):**\n- This is your superpower phase!\n- Best exercises:\n  - Barbell squats and deadlifts\n  - Bench press and overhead press\n  - Pull-ups and rows\n  - Sprint intervals\n  - Heavy leg press\n  - This is PR time!\n\n**Pre-period (Days 15-28):**\n- Gradually dial back intensity\n- Best exercises:\n  - Bodyweight circuits\n  - Stationary bike or elliptical\n  - Yoga flows (vinyasa)\n  - Machine-based strength work\n  - Long walks\n\nWarm baths, magnesium, and gentle movement are your friends during tough days!`
+                    ];
+                },
+                cycle_for_other: (ctx) => [
+                    `Of course! Here's the cycle-aware workout guide you can share with your partner:\n\n**🌑 Menstrual Phase (Days 1-5):**\n- Focus: Rest & gentle movement\n- Recommended exercises:\n  - Gentle yoga (child's pose, cat-cow)\n  - Light walking (20-30 min)\n  - Swimming or water aerobics\n  - Foam rolling and stretching\n- Avoid: heavy lifts, intense ab work, HIIT\n\n**🌒 Follicular Phase (Days 6-14):**\n- Focus: Peak performance time!\n- Recommended exercises:\n  - Heavy compound lifts (squats, deadlifts)\n  - HIIT or circuit training\n  - Plyometrics (box jumps, burpees)\n  - Great time for PRs!\n\n**🌕 Ovulatory Phase (Days 14-16):**\n- Focus: High energy, prioritize warm-up\n- Recommended exercises:\n  - Strength training\n  - Group fitness classes\n  - Cardio sessions\n\n**🌘 Luteal Phase (Days 17-28):**\n- Focus: Moderate intensity, self-care\n- Recommended exercises:\n  - Moderate strength (3x10-12 reps)\n  - Steady-state cardio (walking, cycling)\n  - Pilates, barre, yoga flow\n\nTell your partner: movement often helps with cramps and mood, but rest days are totally valid too!`
+                ],
+                workout_frequency: (ctx) => [
+                    `For ${GOAL_LABELS[ctx.goal] || 'fitness'}, 3-5 training days per week works well for most people. Beginners can start with 3, intermediate lifters aim for 4, and advanced can handle 5-6. Rest days are when growth happens!`,
+                    `Training frequency depends on your level. A good starting point for ${GOAL_LABELS[ctx.goal] || 'your goal'}: 3-4 days of resistance training, with at least 1-2 rest days per week. Quality > quantity!`
+                ],
+                workout_reps: (ctx) => [
+                    `Rep ranges depend on your goal:\n- Strength: 3-5 reps, heavy weight\n- Muscle growth: 8-12 reps, moderate weight\n- Endurance: 15-20 reps, lighter weight\n\nFor ${GOAL_LABELS[ctx.goal] || 'general fitness'}, mixing ranges works great. Aim for 3-4 sets per exercise.`,
+                    `For ${GOAL_LABELS[ctx.goal] || 'your goal'}, the 8-12 rep range is a solid default for most exercises. Do 3-4 sets. The last 2-3 reps should feel challenging but doable with good form!`
+                ],
+                cardio: (ctx) => [
+                    `Cardio recommendation for ${GOAL_LABELS[ctx.goal] || 'fitness'}: 2-3 sessions per week, 20-30 minutes. Mix steady-state (walking, cycling) with one HIIT session. Don't overdo it -- cardio supports your goals but shouldn't replace resistance training.`,
+                    `For cardio, balance is key. 2-3 sessions weekly is plenty for most goals. Walking 8-10K steps daily is often more effective than marathon treadmill sessions. Save your energy for lifting!`
+                ],
+                nutrition_general: (ctx) => [
+                    `Nutrition is huge for ${GOAL_LABELS[ctx.goal] || 'your goal'}! Check the Nutrition screen for personalized targets. The basics: eat enough protein, get your fruits and veggies, stay hydrated, and don't overthink it. Consistency > perfection.`,
+                    `Your Nutrition screen has tailored recommendations for ${GOAL_LABELS[ctx.goal] || 'your goal'}. Focus on whole foods, adequate protein, and eating enough to fuel your training. Small, sustainable changes win long-term!`
+                ],
+                protein: (ctx) => [
+                    `Protein is the most important macro for body composition. Aim for 0.7-1g per pound of body weight daily. Spread it across 3-5 meals for optimal absorption. Good sources: chicken, fish, eggs, Greek yogurt, legumes, tofu.`,
+                    `For ${GOAL_LABELS[ctx.goal] || 'your goal'}, protein is key! Target at least 0.8g per pound of body weight. Prioritize it at every meal. It helps with muscle building, recovery, AND feeling full!`
+                ],
+                calories: (ctx) => [
+                    `Calories determine whether you gain, lose, or maintain weight.\n- Fat loss: eat 300-500 below maintenance\n- Muscle gain: eat 200-300 above maintenance\n- Maintenance: match your TDEE\n\nYour Nutrition screen has estimated targets based on your ${GOAL_LABELS[ctx.goal] || 'fitness'} goal.`,
+                    `For ${GOAL_LABELS[ctx.goal] || 'your goal'}, calorie awareness matters. You don't need to track forever -- even 2-4 weeks of tracking builds intuition. Check your Nutrition screen for personalized calorie guidance!`
+                ],
+                macros: (ctx) => [
+                    `Macros (protein, carbs, fats) all play a role:\n- Protein: muscle repair & satiety\n- Carbs: energy for training\n- Fats: hormones & cell health\n\nFor ${GOAL_LABELS[ctx.goal] || 'your goal'}, protein is the priority. After that, split remaining calories between carbs and fats based on preference.`,
+                    `Your macro split is on the Nutrition screen. General guideline: set protein first (0.8-1g/lb), then fat (0.3-0.4g/lb), then fill the rest with carbs. Adjust based on how you feel and perform!`
+                ],
+                how_it_works: (ctx) => [
+                    `This app uses MediaPipe Pose AI to detect 33 skeletal landmarks on your photo. It then calculates body ratios (shoulder-to-hip, waist-to-height, elbow spread) to estimate body composition. It's approximate but great for tracking progress!`,
+                    `The AI analyzes your photo by detecting 33 body landmarks. It measures proportions and compares them to fitness norms. It's not as precise as a DEXA scan, but it's free, instant, and great for awareness!`
+                ],
+                what_is_this: (ctx) => [
+                    `Fix-it is a body composition analysis app! Upload a photo, and AI estimates your body score, muscle tone, posture, and more. It also generates workout and nutrition recommendations based on your goals. All free, all in-browser!`,
+                    `This is an AI-powered fitness analysis tool. It uses computer vision to analyze your body from a photo, then gives you personalized insights for workouts, nutrition, and body composition. Everything runs right in your browser!`
+                ],
+                explain_upload: (ctx) => [
+                    `The Upload screen is where it all begins! You can either take a photo with your camera or upload an existing image. For the best results, use a clear, well-lit, full-body front-facing photo. You'll also enter your height, weight, and fitness goal here to personalize your analysis.`,
+                    `The first step is uploading your photo! You can snap one with your camera or pick from your gallery. Tips for a great scan: stand straight, face forward, good lighting, and make sure your whole body is visible. You'll also set your gender, height, weight, and fitness goal!`
+                ],
+                explain_results: (ctx) => [
+                    `The Results screen is your main dashboard! It shows your overall body composition score (${ctx.bodyScore}/100), your category ("${ctx.category}"), fitness index, and an overall grade (${ctx.grade}). It also shows the confidence level of the analysis and gives you navigation buttons to explore Breakdown, Simulator, Workout, and Nutrition in more detail.`,
+                    `Results is where you see the big picture! Your body score, category, grade, and body type are all displayed here. Think of it as your fitness report card -- and from here you can dive deeper into any area: detailed breakdown, simulator, workouts, or nutrition!`
+                ],
+                explain_breakdown: (ctx) => [
+                    `The Breakdown screen gives you a detailed look at three key areas: Body Composition, Muscle Tone (${ctx.muscleScore}%), and Posture (${ctx.postureScore}/100). Each section has individual metrics with visual gauges so you can see exactly where your strengths and areas for improvement are. It also includes body zone analysis!`,
+                    `Breakdown is the deep dive! It splits your analysis into three categories with detailed scores:\n- Body Composition: fat percentage, lean mass, proportions\n- Muscle Tone: muscle development across different areas\n- Posture: alignment, shoulder balance, head position\n\nEach metric has a visual gauge and explanation!`
+                ],
+                explain_simulator: (ctx) => [
+                    `The Simulator lets you visualize your potential transformation over time! It uses your current body data and fitness goal (${GOAL_LABELS[ctx.goal] || 'fitness'}) to project what changes you could see with consistent effort. Use the timeline slider to see projected outcomes at different time intervals.`,
+                    `The Lifestyle Simulator is the fun one! It takes your current analysis and simulates how your body could change based on your ${GOAL_LABELS[ctx.goal] || 'fitness'} goal. Slide the timeline to see projected progress -- it uses research-backed rates to estimate realistic transformations!`
+                ],
+                explain_workout_screen: (ctx) => [
+                    `The Workout screen provides personalized exercise recommendations based on your body analysis and ${GOAL_LABELS[ctx.goal] || 'fitness'} goal. It includes specific exercises with sets, reps, and rest periods. There's even a built-in workout player so you can follow along with guided sessions in real time!`,
+                    `Your Workout screen is like having a personal trainer! It tailors exercise recommendations to your body type (${ctx.bodyType}), score (${ctx.bodyScore}), and goal. You'll find structured workout routines with a built-in player that guides you through each exercise with timers and rep tracking!`
+                ],
+                explain_nutrition_screen: (ctx) => [
+                    `The Nutrition screen is your complete dietary command center! It includes:\n- Daily Macro Targets (personalized calories, protein, carbs, fats)\n- Metabolic Rate card: BMR → TDEE → Target using Mifflin-St Jeor formula\n- Calorie Balance: calories burned vs. eaten, net balance for the day\n- Food log with meal tracking and food recognition\n- Hydration tracker with a 14-day history heatmap and streak\n- Meal suggestions tailored to your ${GOAL_LABELS[ctx.goal] || 'fitness'} goal\n\nEverything is personalized to your body data. Nutrition is where 80% of results happen!`,
+                    `Nutrition has leveled up! You'll find your personalized macro targets, a Metabolic Rate card showing your BMR and TDEE (calculated via Mifflin-St Jeor), a Calorie Balance tracker showing burned vs. eaten, a food log with snap-your-meal AI, a hydration tracker with a full 14-day heatmap, and goal-specific meal guidance. It's your complete nutrition toolkit for ${GOAL_LABELS[ctx.goal] || 'your goal'}!`
+                ],
+                explain_progress_screen: (ctx) => [
+                    `The Progress screen is your gamification hub AND data command center! It tracks:\n- Workout streaks & activity heatmap\n- Daily Habits tracker (5 habits with a score ring -- fill all 5!)\n- Weekly Report Card (letter grade for the full week)\n- Sleep & Recovery tracker (7-day chart + recovery score)\n- Smart Insights (personalized observations from all your logged data)\n- Progress Charts (Weight, Sleep, Activity, Calories + scan data tabs)\n- Achievement badges & XP level system\n- Weekly challenges\n- Scan History (compare any two analyses side-by-side!)\n\nIt's the screen that ties everything together!`,
+                    `Progress is where dedication becomes visible! Your streaks, badges, XP, and Weekly Report Card (with a real letter grade!) all live here. Plus the Daily Habits tracker scores your day across 5 key habits, Smart Insights analyzes all your data for personalized observations, the Sleep & Recovery tracker charts your rest, and Progress Charts visualize any metric over time. Keep showing up -- it all adds up!`
+                ],
+                explain_scan_history: (ctx) => [
+                    `Scan History is one of my favorite features! Every time you complete a body analysis, a snapshot is automatically saved. Go to the Progress screen and you'll see all your past scans as thumbnail cards in a timeline.\n\nThe magic happens when you select TWO scans -- a Compare button appears! Tap it and you'll see:\n- Side-by-side photos (before & after)\n- All your metrics compared with arrows showing improvement\n- A summary of what changed most\n\nIt's the perfect way to see how far you've come!`,
+                    `The Scan History feature on the Progress screen automatically saves every body analysis you do! You'll see thumbnail cards showing each scan with the date and fitness score.\n\nTo compare your progress: tap any two scan cards to select them, then hit Compare. You'll get a beautiful side-by-side view with your photos, all the metric changes highlighted, and a summary of your improvements. It's incredibly motivating to see your transformation over time!`
+                ],
+                app_features: (ctx) => [
+                    `Here's a complete tour of all the screens:\n\n1. Upload -- Take or upload a photo, enter your stats\n2. Results -- Your body score, category, and overall grade\n3. Breakdown -- Detailed muscle, posture, and body zone metrics\n4. Simulator -- Visualize your potential transformation over time\n5. Workout -- Personalized exercise plans with guided workout player\n6. Nutrition -- BMR/TDEE calculator, calorie balance, macro targets, food log, hydration history\n7. Progress -- Daily habits, weekly report, sleep tracker, smart insights, progress charts, badges, streaks, scan history!\n\nPlus your AI coach on every screen. Ask me about any of these!`,
+                    `The app has 7 main screens, each packed with features:\n\n- Upload: snap or upload your photo + enter stats\n- Results: see your body score and full analysis\n- Breakdown: detailed muscle, posture, and body zone scores\n- Simulator: preview your future transformation\n- Workout: personalized plans with guided player\n- Nutrition: BMR/TDEE, calorie balance, macro targets, food log, hydration history\n- Progress: daily habits, weekly report card, sleep tracker, smart insights, progress charts, badges, XP, scan history!\n\nAnd I'm here to explain anything!`
+                ],
+                explain_body_comp: (ctx) => [
+                    `Body Composition is one of the core metrics in your analysis! It measures the ratio of lean mass (muscle, bone, water) to fat mass in your body. Your score of ${ctx.bodyScore}/100 is estimated from skeletal proportions like shoulder-to-hip ratio and body width measurements. It's the foundation that all other recommendations are built on!`,
+                    `Body Composition refers to what your body is made of -- muscle, fat, bone, and water. The analysis estimates this from your photo using body proportions and skeletal landmarks. Your current score (${ctx.bodyScore}/100, "${ctx.category}") gives you a baseline to track changes as you work toward your ${GOAL_LABELS[ctx.goal] || 'fitness'} goal!`
+                ],
+                explain_muscle_dist: (ctx) => [
+                    `Muscle Tone Distribution shows how your muscle development is spread across different body regions! The analysis looks at upper body (shoulders, arms, chest), core (torso, midsection), and lower body (legs, glutes) separately. Your overall muscle tone is ${ctx.muscleScore}% -- the distribution helps identify which areas are stronger and which need more focus.`,
+                    `Muscle Tone Distribution breaks down your ${ctx.muscleScore}% muscle score by body region. It estimates how muscle is distributed across your upper body, core, and lower body based on limb proportions and body width. This helps target your training -- if one area is lagging, you can prioritize it in your workouts!`
+                ],
+                explain_posture_analysis: (ctx) => [
+                    `Posture Analysis evaluates your body alignment by checking three key things: shoulder levelness (are they even?), head position (forward head posture from phone/desk use), and hip alignment (anterior/posterior tilt). Your posture score of ${ctx.postureScore}/100 reflects overall alignment. The great news -- posture is one of the fastest things to improve!`,
+                    `Posture Analysis (${ctx.postureScore}/100) uses your skeletal landmarks to measure how well your body is aligned. It looks at your shoulders, spine, and hips to detect common issues like forward head posture or uneven shoulders. Small improvements here can make a big visual difference and reduce pain!`
+                ],
+                explain_body_zones: (ctx) => [
+                    `Body Zones is a visual breakdown of your body into regions -- upper body, core/midsection, and lower body. Each zone gets its own assessment based on proportions and estimated mass distribution. It helps you see which areas are your strengths and which could use more attention in your training plan!`,
+                    `Body Zone Analysis divides your body into distinct regions and scores each one. This helps identify imbalances -- for example, you might have great upper body development but need more lower body work. It's like a heat map for your physique, guiding where to focus your efforts!`
+                ],
+                explain_fitness_index: (ctx) => [
+                    `The Fitness Index (${ctx.fitnessIndex}) is a comprehensive score that combines all your analysis metrics into one number. It factors in body composition, muscle tone, and posture to give you a single snapshot of your overall fitness level. Think of it as your "fitness GPA" -- a quick way to track overall progress!`,
+                    `Your Fitness Index of ${ctx.fitnessIndex} is a combined measure of your body composition, muscle development, and posture quality. It's designed to give you one number that captures your overall fitness picture. As you improve in any area, this index will reflect it!`
+                ],
+                explain_workout_player: (ctx) => [
+                    `The Workout Player is a built-in guided session tool! It takes the exercises recommended for your ${GOAL_LABELS[ctx.goal] || 'fitness'} goal and walks you through them in real time with timers, rep counts, and rest period tracking. Just hit play and follow along -- it's like having a personal trainer right in the app!`,
+                    `The Workout Player turns your exercise plan into a guided session. It shows each exercise with proper set/rep counts, times your rest periods, and tracks your progress through the workout. No need to remember what comes next -- just follow the player and focus on giving your best effort!`
+                ],
+                explain_streaks_badges: (ctx) => [
+                    `Streaks, Badges & XP are the gamification features on the Progress screen!\n\n- Streaks track consecutive workout days -- keeping your streak alive builds discipline\n- Badges are achievements unlocked by hitting milestones (first workout, streak records, first comparison, etc.)\n- XP (experience points) accumulates from workouts, challenges, and coach interaction\n- Your XP determines your Level and Rank\n- Scan History saves every analysis so you can compare your progress over time!\n\nIt turns your fitness journey into a rewarding game!`,
+                    `The gamification system keeps you motivated through rewards!\n\n- Streak Counter: consecutive training days (don't break the chain!)\n- Achievement Badges: milestone rewards you collect over time\n- Weekly Challenges: rotating goals that earn bonus XP\n- XP & Levels: every action earns points toward your next rank\n- Scan History: compare any two past scans side-by-side to see your transformation!\n\nIt's designed to make consistency feel rewarding and fun!`
+                ],
+                explain_confidence_indicator: (ctx) => [
+                    `The Confidence Indicator (currently "${ctx.confidence}") shows how reliable your analysis results are. It's based on input quality: photo clarity, lighting, pose angle, and whether you entered height/weight data. ${ctx.confidence === 'high' ? 'Your input quality was great!' : 'You can boost it by using a clear, well-lit, front-facing photo and entering your height and weight!'} Higher confidence = more accurate results.`,
+                    `Confidence (${ctx.confidence}) measures the quality of your analysis input. The AI needs clear body landmarks to work with -- good lighting, front-facing pose, and full-body visibility all help. Adding your height and weight gives the AI even more data to work with. Think of it as the AI's "certainty meter" about your results!`
+                ],
+                explain_visual_age: (ctx) => [
+                    `Visual Age is such a cool feature! It estimates how old you *appear* based on your fitness level, posture, and body composition -- not your actual birthday age. You'll see it on the Results screen for your current appearance and on the Simulator screen for projected changes. It's amazing how improving your posture and fitness can make you look years younger!`,
+                    `Your Visual Age is an estimate of how old your body *looks* based on fitness markers like posture quality, muscle tone, and overall composition. It's shown on your Results screen now, and the Simulator projects how it could change! Remember -- this isn't biological age. It's about how your fitness level translates to visual appearance. Keep working at it and watch that number drop!`
+                ],
+                explain_symmetry: (ctx) => [
+                    `Your Symmetry Score is shown as a percentage on the Results screen, and it measures how balanced your left and right sides are! It also ties into sub-metrics like Lean Mass Index and Proportion Balance. Great symmetry suggests balanced training -- and if one side is lagging, that's your cue to focus on it. You're doing amazing just by paying attention to this!`,
+                    `Symmetry measures left-right body balance -- how even your shoulders, arms, and legs are compared to each other. The percentage on your Results screen also includes Lean Mass Index and Proportion Balance sub-metrics. Most people have some asymmetry, so don't worry if it's not perfect -- awareness is the first step to improvement!`
+                ],
+                explain_ai_reasoning: (ctx) => [
+                    `The "Why AI Thinks This" toggle on the Breakdown screen is all about transparency! When you tap it, you'll see exactly what the AI looked at -- which landmarks, what ratios, and how it arrived at each score. We want you to understand and trust your results, not just accept a number. Knowledge is power!`,
+                    `Love that you're curious about the AI's reasoning! The Breakdown screen has a "Why AI Thinks This" toggle that reveals the AI's thought process -- the specific body landmarks it measured, the ratios it compared, and how those map to your scores. It's our way of being transparent so you can trust every result!`
+                ],
+                explain_scenarios: (ctx) => [
+                    `The Simulator screen has 4 amazing lifestyle scenarios for you to explore!\n\n- Active Lifestyle: what happens with regular exercise\n- Sedentary Continuation: what staying inactive might look like\n- Intensive Training: results of serious dedicated training\n- Nutrition Optimization: the power of diet changes alone\n\nEach shows projected changes to muscle tone, posture, and visual age. Plus there's a Projected Impact Summary card that brings it all together. It's so motivating to see your potential!`,
+                    `The 4 scenario cards on the Simulator screen show different future versions of you! Active Lifestyle, Sedentary Continuation, Intensive Training, and Nutrition Optimization -- each projects how your muscle tone, posture, and visual age could change. The Projected Impact Summary ties it all together. Seeing your potential future self is incredibly motivating!`
+                ],
+                explain_weekly_routine: (ctx) => [
+                    `The Weekly Routine generator on the Workout screen is your personal training blueprint! You can configure your training goal, choose a split type (Full Body, Push/Pull/Legs, Upper-Lower, or Bro Split), set your available days and session duration. It then generates a full 7-day plan complete with a muscle coverage chart so you know every muscle group is getting attention!`,
+                    `Your Weekly Routine is a fully customizable training plan! Set your goal, pick a split type -- Full Body, PPL, Upper-Lower, or Bro Split -- choose how many days you can train and how long each session is. The generator builds your entire week with a muscle coverage chart to make sure nothing gets neglected. It's like having a personal trainer design your week!`
+                ],
+                explain_todays_routine: (ctx) => [
+                    `Today's Routine is your daily workout card on the Workout screen! It shows exactly what exercises to do today, with an estimated time of around 32 minutes, exercise count, and calories you'll burn. The best part? Hit the start button to launch the workout player and get guided through every exercise. One day at a time -- you've got this!`,
+                    `The Today's Routine card gives you a ready-to-go daily workout! It includes specific exercises, total time (~32 min), how many exercises you'll do, and estimated calorie burn. Just tap start to begin your guided session with the workout player. No planning needed -- just show up and give your best!`
+                ],
+                explain_food_recognition: (ctx) => [
+                    `The "Snap Your Meal" feature on the Nutrition screen is so cool! Take a photo of your food or upload one, and the AI identifies what's on your plate and estimates calories and macros. You can confirm or adjust the detection, then add it to your daily log. It makes tracking nutrition as easy as snapping a picture!`,
+                    `Food Recognition lets you photograph your meals right from the Nutrition screen! The AI identifies the food and estimates its nutritional content -- calories, protein, carbs, and fat. If it gets something wrong, you can easily correct it before adding to your daily log. It's the easiest way to stay on top of your nutrition!`
+                ],
+                explain_meal_plan: (ctx) => [
+                    `The Meal Plan generator is a fantastic tool on the Nutrition screen! Open the modal and configure your goal (fat loss, muscle gain, or maintenance), dietary preference (standard, high protein, vegetarian, or low carb), and how many meals per day you want. It generates a complete weekly meal plan with day-by-day breakdowns. Eating well has never been easier!`,
+                    `Your personalized Meal Plan starts with a simple setup -- pick your goal, dietary preference, and meals per day. The generator creates a full week of meals tailored just for you! Whether you're going for fat loss, muscle gain, or maintenance, with options for high protein, vegetarian, or low carb. It's all laid out day by day so you never have to wonder what to eat!`
+                ],
+                explain_daily_macros: (ctx) => [
+                    `The Daily Macro Targets card on the Nutrition screen is your nutritional compass! It shows your daily calorie target with protein, carb, and fat progress bars, plus a circular chart showing how on-track you are percentage-wise. Everything is personalized to your body data and ${GOAL_LABELS[ctx.goal] || 'fitness'} goal. Watch those bars fill up throughout the day -- it's so satisfying!`,
+                    `Daily Macros gives you a clear picture of your nutrition targets! You'll see your calorie goal, individual bars for protein, carbs, and fat, and a circular macro chart showing your overall on-track percentage. It's all customized based on your body analysis and ${GOAL_LABELS[ctx.goal] || 'fitness'} goal. Hitting your targets consistently is where the magic happens!`
+                ],
+                explain_nutrition_insights: (ctx) => [
+                    `The Nutrition screen has 3 awesome insight cards to guide your eating!\n\n- Protein Timing: spread protein across 4-5 meals, aiming for 25-40g each\n- Meal Frequency: eating every 3-4 hours keeps your metabolism humming\n- Hydration Goal: a personalized water intake target based on your activity level\n\nThese science-backed tips can make a huge difference in your results!`,
+                    `Your Nutrition Insights are three powerful cards: Protein Timing (distribute protein into 25-40g servings across 4-5 meals), Meal Frequency (eat every 3-4 hours for steady energy), and Hydration Goal (your personalized daily water target). Following these simple guidelines can supercharge your progress!`
+                ],
+                explain_exercise_filters: (ctx) => [
+                    `The Workout screen has smart filters to find exactly the right exercises for you! Choose from All, Home (no equipment needed), Gym (equipment-based), or Weak Areas (targeting things like core or posture weaknesses detected in your analysis). Plus the Experience Level selector -- Beginner, Intermediate, or Advanced -- adjusts exercise difficulty to match where you are. Meet yourself where you're at!`,
+                    `Exercise filters help you customize your workout perfectly! Filter by All, Home (bodyweight only), Gym (equipment exercises), or Weak Areas (exercises that target your specific detected weaknesses). The Experience Level selector (Beginner, Intermediate, Advanced) adjusts difficulty so every workout is challenging but achievable. You're in control!`
+                ],
+                explain_themes: (ctx) => [
+                    `The Theme Picker in the header lets you personalize the entire look of the app! Choose from 5 beautiful themes: Charcoal (the dark default), Ivory (clean light mode), Midnight (dark blue), Ocean (refreshing teal), or Lavender (elegant purple). The whole color scheme changes instantly. Make the app feel like yours -- you deserve a space that inspires you!`,
+                    `Want to change things up? The Theme Picker gives you 5 gorgeous options: Charcoal (dark default), Ivory (light), Midnight (dark blue), Ocean (teal), and Lavender (purple). One tap and the entire app transforms! It's a small thing, but training in an environment that feels right makes the whole experience better!`
+                ],
+                explain_body_silhouette: (ctx) => [
+                    `The Body Silhouette on the Results screen is a visual diagram of your physique! It's an SVG showing 4 labeled body zones -- Shoulders, Upper Body, Core, and Legs -- each with a status label like "Balanced," "Athletic," "Moderate Tone," or "Strong." It gives you an instant visual snapshot of where your strengths are. Such a great way to see your body's story at a glance!`,
+                    `Your Body Silhouette is that beautiful diagram on the Results screen! It highlights 4 key zones -- Shoulders, Upper Body, Core, and Legs -- with status labels showing how each area is doing. Labels like "Balanced," "Athletic," "Moderate Tone," and "Strong" give you a quick visual read of your physique. It's your body's highlight reel!`
+                ],
+                explain_coach_personas: (ctx) => [
+                    `You can choose from 4 different AI coach personalities, and I love that you're exploring them!\n\n- Encouraging (that's me!): warm, motivating, celebratory\n- Planner/Structured: organized, data-focused, bullet points\n- Explainer/Educational: science-based, teaches the "why"\n- Funny/Humorous: jokes, casual vibes, pop culture references\n\nEach gives the same great info in a different style. Switch anytime to find what motivates you most!`,
+                    `The Coach Personas let you pick the coaching style that resonates with you! There's Encouraging (hi, that's me -- your cheerleader!), Structured (organized and data-driven), Educational (science and research focused), and Humorous (funny and casual). Same helpful information, totally different delivery. You can switch anytime -- find the voice that keeps you coming back!`
+                ],
+                explain_bmr_tdee: (ctx) => [
+                    `The Metabolic Rate card on the Nutrition screen calculates your BMR and TDEE using the Mifflin-St Jeor formula -- the gold standard for metabolic rate estimation!\n\n- BMR: calories your body burns at complete rest just to stay alive\n- TDEE = BMR × your activity level multiplier (1.2–1.9)\n- Target = TDEE adjusted for your fitness goal\n\nChange your activity level and goal in the card, then hit "Recalculate & Apply" to update all your macro targets instantly. It even shows the formula with your actual numbers -- nutrition science made visible!`,
+                    `The Metabolic Rate card on Nutrition shows BMR → TDEE → Target, all calculated from your height, weight, age, and gender using Mifflin-St Jeor. Adjust activity level or goal, hit Recalculate & Apply, and your macro targets update. It's like having a dietitian's calculation right in your pocket -- and you can see exactly how the formula works!`
+                ],
+                explain_daily_habits: (ctx) => [
+                    `The Daily Habits Tracker on the Progress screen is one of my favorite features! It tracks 5 key habits every single day:\n\n💪 Workout -- auto-detected from your workout log\n💧 Hydration -- auto-detected if you hit 8+ glasses today\n😴 Sleep -- auto-detected if you logged 7+ hours last night\n🥗 Nutrition -- auto-detected if you logged food today\n🎯 Check-In -- tap manually to mark done\n\nThe animated score ring shows your completion (X/5), turning green when you hit 5/5! Each habit also shows its streak. It's your daily accountability hub!`,
+                    `Daily Habits on Progress tracks 5 wellness habits automatically! Workout, Hydration, Sleep, and Nutrition are auto-detected from your existing logs -- the app just knows. Tap the Check-In tile manually for your fifth. The score ring fills and turns green at 5/5. Each habit shows its consecutive-day streak so you can see your patterns. Fill that ring every day and watch your streaks compound!`
+                ],
+                explain_sleep_tracker: (ctx) => [
+                    `The Sleep & Recovery Tracker is a card on the Progress screen! It shows:\n- A 7-day bar chart of your sleep hours\n- Average sleep, a good-nights streak, and a Recovery Score (0-100%)\n\nThe Recovery Score blends sleep hours (50%), sleep quality rating (30%), and workout balance (20%) into one wellness metric.\n\nTo log: tap Log Sleep, enter your hours and quality (Rough → Excellent), hit Save. Your history and recovery score update instantly. Sleep is when your body actually rebuilds -- log it and give it the respect it deserves!`,
+                    `Sleep tracking lives on the Progress screen! Each night, log your hours and quality -- you get a 7-day bar chart, average hours, recovery score, and a streak for consecutive good nights. The recovery score is a holistic blend of sleep quantity, quality, and training balance. Better sleep scores = better workouts, recovery, and results. It's the metric most people overlook!`
+                ],
+                explain_weekly_report: (ctx) => [
+                    `The Weekly Report Card on Progress gives you a letter grade for each week! It evaluates:\n- Workouts completed this week\n- Average sleep hours\n- Weight change\n- Your workout streak\n\nAll four factors combine into a score → letter grade (A+ through D). The card shows the date range, your stats, and a personalized message based on performance. Aim for that A+! And if the week was rough, the next one starts fresh -- you've totally got this!`,
+                    `Your Weekly Report Card synthesizes everything into a grade! Every Sunday–Saturday window tallies your workouts, averages your sleep, checks your weight trend, and factors in your streak. It's your weekly fitness GPA -- A+ means you crushed it across the board. The message adapts to motivate you based on how you did. Every week is a fresh start!`
+                ],
+                explain_smart_insights: (ctx) => [
+                    `Smart Insights on the Progress screen analyzes ALL your logged data and generates personalized observations! It runs 8 engines every time you visit:\n- Streak pattern analysis\n- Favorite training days\n- Sleep vs. workout correlation\n- 2-week weight trend\n- Calorie vs. goal adherence\n- Sleep quality patterns\n- Measurement trends\n- Recovery score status\n\nInsights are color-coded: green = positive, terracotta = watch out, gold = neutral. Up to 6 show at once. The more you log, the smarter and more personalized they get!`,
+                    `Smart Insights reads your workout log, sleep log, weight log, calorie log, and measurements -- then surfaces the most relevant observations. Positive insights celebrate your wins (green). Warnings flag things to address (terracotta). Neutral insights add context (gold). It connects dots across data sources you might not notice yourself. Keep logging and the insights get really specific to you!`
+                ],
+                explain_calorie_balance: (ctx) => [
+                    `The Calorie Balance card on the Nutrition screen shows burned vs. eaten in one clear view! It adds up:\n- Calories Eaten: from your food log today\n- Calories Burned: estimated from your workout sessions using MET values (exercise intensity multipliers)\n- Net Balance: the difference -- positive surplus, negative deficit\n\nFor fat loss you want a deficit, for muscle building a slight surplus. Log your food AND your workouts and this card gives you the clearest picture of your daily energy balance!`,
+                    `Calorie Balance lives on the Nutrition screen -- it's the burned vs. eaten tracker that shows whether you're in a deficit or surplus today. Workout calories are estimated from MET values (standardized exercise intensity scores), food calories from your log. The net number is your day's energy story in one figure. Log everything and this card becomes your most honest daily check-in!`
+                ],
+                explain_hydration_history: (ctx) => [
+                    `The Hydration History section on the Nutrition screen shows your water habits over time! You'll see:\n- A 14-day heatmap (darker = more water)\n- 7-day average glasses per day\n- Current goal streak (consecutive days hitting 8 glasses)\n- Best 30-day streak\n\nThe heatmap goes from empty → partial (2+ glasses) → half (5+) → full (8+). It makes your hydration patterns visible at a glance. Keep hitting that daily goal and watch your streak grow -- your body will thank you!`,
+                    `Hydration History is a 14-day heatmap right under the water tracker on Nutrition. Each cell = one day, colored by how much you drank. You also see your 7-day average, current goal streak, and best streak over 30 days. The visual makes it unmistakable when you're consistent vs. slipping. Try to keep the heatmap dark -- it means you're hydrated and your metabolism is humming!`
+                ],
+                explain_progress_charts: (ctx) => [
+                    `The Progress Charts on the Progress screen let you visualize any metric over time with multiple tabs!\n\n- Weight: last 30 weigh-ins as a line chart\n- Sleep: last 30 sleep log entries\n- Activity: weekly workout count (last 8 weeks, bar chart)\n- Calories: last 30 days of eaten calories vs. your goal line\n- Score, BMI, Muscle: data from your body analysis scans\n\nJust tap a tab to switch. Tabs show a helpful nudge if you haven't logged enough data yet. Keep logging and those charts will tell an amazing story!`,
+                    `Progress Charts shows any of your health metrics as a beautiful visualization! Tabs: Weight, Sleep, Activity, Calories, and scan-based data (Score, BMI, Muscle). The Calories tab includes a dashed goal line for easy reference. Every tab pulls from a different log, so the more consistently you track, the richer the charts become. Your progress has a story -- let the charts tell it!`
+                ],
+                explain_challenges: (ctx) => [
+                    `Weekly Challenges keep your training fresh and rewarding! Each week brings rotating objectives — log 5 workouts, hit hydration every day, complete a full habit streak. Finish them for bonus XP and the deep satisfaction of a progress bar hitting 100%. Check the Challenges section on the Progress screen. Small wins like these stack into lasting results — keep going!`,
+                    `Challenges are your weekly mini-goals — rotating objectives that give you specific targets beyond just "work out more." Complete them to earn XP and feel the momentum of consistent progress. Find this week's active challenges on the Progress screen. Every challenge you finish is proof you showed up!`
+                ],
+                explain_levels_xp: (ctx) => [
+                    `XP (Experience Points) is how the app rewards your consistency! Log workouts, track meals, complete habits and challenges — each earns you XP that accumulates into levels and rank titles. Check your level and progress bar on the Progress screen. Your level is a real reflection of your effort over time. You're building something that compounds — keep stacking those points!`,
+                    `The Level & XP system turns your daily habits into visible progress! Every healthy action earns XP, and enough XP levels you up to a new rank. It's designed to make consistency feel rewarding, because it IS rewarding. Watch your rank grow as your lifestyle improves. You're not just getting fitter — you're leveling up in every sense!`
+                ],
+                explain_weight_log: (ctx) => [
+                    `The Weight Log lets you record your body weight daily right in the Goal Weight card on the Progress screen. Type your kg and tap Log — it saves automatically with the date. Over time you'll see a sparkline trend chart that shows exactly how your body is responding. The trend is what matters most, not any single number. Log consistently and trust the data!`,
+                    `Logging your weight regularly is one of the most powerful habits you can build! Each entry gets stored with a date, builds a trend chart, and improves the accuracy of your goal ETA calculation. Daily fluctuations are totally normal — the trend over time is your real progress signal. Even on tough days, log it. The data is always on your side.`
+                ],
+                explain_goal_weight: (ctx) => [
+                    `The Goal Weight card on the Progress screen is your journey tracker! Set a target, and it shows your start vs. target, a progress bar with your current position marked, kg remaining, estimated weeks to goal, and your weekly pace — calculated from your real logged trend! Tap "Edit Goal" any time to adjust. You're closer than you think — keep logging and watch that bar move!`,
+                    `Set your target weight once and the Goal Weight card does all the math! It uses your actual weight log trend (not a guess) to estimate weekly pace and weeks remaining. The more entries you log, the more accurate the estimate. Progress bar, real numbers, honest timeline — everything you need to stay motivated and on track!`
+                ],
+                explain_food_log: (ctx) => [
+                    `The Food Log on the Nutrition screen is your daily intake tracker! Use Quick Add to log any food with calories and macros, or tap one of the preset chips for instant one-tap logging of common foods like chicken breast, eggs, or rice. Every entry feeds your Calorie Balance card in real time. Awareness is the first step to change — and you've got this!`,
+                    `Logging your food is the fastest way to understand why your body is or isn't changing! The Food Log captures every meal with full macros. The Quick Food Presets (pre-filled chips) let you log in seconds. Totals update your Calorie Balance card live. Small entries add up to big awareness — and big results!`
+                ],
+                explain_workout_splits: (ctx) => [
+                    `A training split is how you divide muscle groups across the week! Options include: Full Body (3x/week, great for starting out), Upper/Lower (4x/week, balanced), Push/Pull/Legs (6x/week, advanced), or Bro Split (one group per day). Your recommended split on the Workout screen is tailored to your body analysis — if your lower body scores low, expect more leg days. Trust the plan and be consistent!`,
+                    `Your workout split determines which muscles get trained on which days — and muscles need 48-72 hours to recover after training. The app's workout plan is already structured as a split based on your analysis and goal. You can adjust frequency in the exercise filter panel. The best split is the one you'll actually stick to — and you're already doing it!`
+                ],
+                explain_body_recomp: (ctx) => [
+                    `Body recomposition — losing fat while gaining muscle simultaneously — is absolutely achievable, especially if you're newer to training or returning after a break! The keys: eat near maintenance calories, get high protein (1.6-2.2g/kg), do progressive resistance training, and be patient. It's slower than a pure cut or bulk, but the results are incredible. Use Scan History to track your body score trending up while weight stays stable!`,
+                    `Recomposition is the fitness goal of having it all — and the app's body score helps you measure it! If your muscle tone score rises while your weight barely moves, you're recomping. It takes high protein, consistent lifting, and time. Check your progress in Scan History. Slow and steady wins the recomp race, and you have every tool you need right here!`
+                ],
+                explain_maintenance: (ctx) => [
+                    `Maintenance means keeping what you've built — eating at your TDEE to hold your weight, continuing to train to preserve muscle, and sustaining the habits that got you here. Use the BMR/TDEE Calculator on Nutrition to find your maintenance calories, and the Calorie Balance card to stay near it. The Daily Habits ring keeps your routines consistent. Maintenance isn't the finish line — it's mastery!`,
+                    `Holding your results is an achievement in itself! Your maintenance calories (TDEE) keep weight stable, while continued training preserves the muscle you've earned. Use the Calorie Balance card to check your intake vs. output, and the Weekly Report Card to monitor habit consistency. You did the hard work — now let's make it permanent!`
+                ],
+                explain_workout_history: (ctx) => [
+                    `Workout History logs every session you complete in the app! See your past workouts, how many sets and reps you did, and track consistency over time. Every logged session is progress documented!`,
+                    `Your Workout History is on the Progress screen — it shows every training session you've completed with full details. Seeing that list grow is one of the best motivators to keep showing up!`
+                ],
+                explain_personal_records: (ctx) => [
+                    `Personal Records track your best lifts for each exercise — your heaviest set, most reps, or estimated 1-rep max. Every time you beat a previous record, it updates automatically. Watch them climb as you get stronger!`,
+                    `Your PRs are in the Progress screen! They track your strongest performance for each exercise. Hitting a new PR is one of the best feelings in training — keep pushing those numbers up!`
+                ],
+                explain_body_measurements: (ctx) => [
+                    `Body Measurements lets you log your chest, waist, hips, and arms over time. Even when the scale doesn't move, shrinking waist and growing arm measurements tell the real story. Log every 2-4 weeks for the best trends!`,
+                    `The Body Measurements tracker is on the Progress screen — log your circumference measurements regularly and see how your body shape is actually changing. The tape measure often tells a better story than the scale!`
+                ],
+                explain_account: (ctx) => [
+                    `Your My Account section is in the user menu (tap your name or avatar in the top right)! You can update your display name, email, fitness profile details (height, weight, gender, goal, activity level, and more), change your password, or delete your account. Keeping your fitness details accurate helps me give you better recommendations!`,
+                    `Head to the user menu (top right) and tap "My Account" — update everything there: display name, email, fitness stats like height/weight/goal, plus change your password. Stay updated, stay optimized!`
+                ],
+                explain_optional_measurements: (ctx) => [
+                    `The optional measurements on the upload screen (chest, waist, hips, arms in cm) are absolutely worth filling in! They give the AI real body proportion data to complement the photo analysis, making your results much more accurate. Just grab a soft tape measure and measure relaxed at the widest point for each area!`,
+                    `Filling in those optional measurements really pays off! The AI uses chest, waist, hips, and arm circumferences to better understand your body shape beyond what the camera alone can see. Takes less than 2 minutes and noticeably improves your analysis accuracy!`
+                ],
+                explain_export: (ctx) => [
+                    `On the Results screen, tap "Export Data" to save your full analysis report, or "Share Card" to generate a gorgeous shareable summary card — perfect for documenting progress or sharing with friends! After a workout in the Player, "Share Workout" lets you share your session summary too. Show the world your hard work!`,
+                    `You've got great sharing options! "Export Data" on the Results screen saves your full stats as a file. "Share Card" creates a shareable visual of your results. After finishing a workout, "Share Workout" captures your session achievements. Great for tracking and accountability!`
+                ],
+                explain_comparison: (ctx) => [
+                    `The scan comparison feature is so motivating! Head to the Progress screen, scroll down to Scan History, select any two scans, and tap Compare. You'll see a side-by-side view of your body score, muscle tone, posture, and more — with clear change indicators. Watching those improvements is incredibly rewarding!`,
+                    `Progress comparison is in the Progress screen → Scan History! Pick two scans from different dates, hit Compare, and get a full side-by-side breakdown of every metric — body score, muscle tone, posture alignment — plus change percentages. The best way to see your actual progress!`
+                ],
+                explain_live_posture: (ctx) => [
+                    `The Live Posture Check on the Workout screen is fantastic! Tap "Start Live Posture Check" and your camera activates for real-time posture feedback — it detects shoulder, spine, and hip alignment and shows correction cues live as you exercise. Amazing for perfecting form and preventing injury!`,
+                    `Live Posture Check uses your camera to give real-time form feedback during workouts! On the Workout screen, tap "Start Live Posture Check" and it monitors your shoulder, spine, and hip alignment with live correction cues. Great for making sure every rep counts!`
+                ],
+                explain_data_management: (ctx) => [
+                    `The Data Management card is at the bottom of the Upload screen! It shows how much local storage the app is using and has a "Clear All Data" button to remove locally stored session data, scan history, and logs. Perfect for a fresh start! Note: this only clears local data — your account info on the server stays safe.`,
+                    `Find Data Management at the bottom of the Upload screen — it shows your local storage usage and lets you clear all local data. Your account and server data stay intact, so no worries there. Perfect for when you want a clean slate!`
+                ],
+                explain_auth: (ctx) => [
+                    `Creating an account is quick and easy! Click "Sign Up", enter your email, choose a password, add your display name, and you're in. Check your email for a verification link, confirm it, and you're ready! Already registered? Just log in. Forgot your password? Use "Forgot Password" to reset via email. Accounts keep your progress synced across sessions!`,
+                    `Signing up is super straightforward — email, password, display name, verify your email, done! Already have an account? Just log in. For password issues, "Forgot Password" sends a reset email in seconds. Having an account means your scan history, progress, and data all sync properly!`
+                ],
+                _fallback: (ctx) => [
+                    `I'm not sure I understood that. I can help with:\n- Body score & analysis results\n- Muscle tone & posture\n- Workouts, reps & frequency\n- Nutrition, protein & calories\n- How the AI works\n- Explaining any screen or feature\n\nTry asking about one of these topics!`,
+                    `Hmm, I didn't quite catch that. Try asking me about your body score, workout plan, nutrition tips, how the analysis works, or ask me to explain any screen!`,
+                    `I'm best at discussing your fitness results, workouts, nutrition, and app features. Could you rephrase? Or type "help" to see everything I can talk about!`
+                ]
+            },
+
+            structured: {
+                greeting: (ctx) => [
+                    `Welcome. I can provide data-driven insights on your analysis results, training programming, and nutrition targets. What would you like to review?`,
+                    `Ready to assist. Topics available: body metrics, training protocols, nutrition frameworks, and analysis methodology. What do you need?`
+                ],
+                thanks: (ctx) => [
+                    `Noted. Let me know if you need further analysis.`,
+                    `You're welcome. Ready for your next question.`
+                ],
+                help: (ctx) => [
+                    `Available topics:\n- Body metrics: score, category, BMI, confidence\n- Muscle & posture: tone score, alignment data\n- Training: programming, frequency, volume\n- Nutrition: calories, protein, macros\n- Technical: AI methodology, data pipeline\n- Screens: explain any screen (upload, results, breakdown, simulator, workout, nutrition, progress)\n\nState your query clearly for optimal response.`,
+                ],
+                identity: (ctx) => [
+                    `I am the Fix-it coaching module. My function: provide data-driven analysis of your body composition results, training programming, and nutritional guidance. I operate on your analysis data (body score, muscle tone, posture, body type) to deliver personalized recommendations. State your query to proceed.`,
+                    `Fix-it coach -- your analytical fitness assistant. Capabilities: body metrics interpretation, workout plan generation, nutrition framework guidance, and methodology explanation. All responses are calibrated to your personal data profile.`
+                ],
+                body_score: (ctx) => [
+                    `Body composition data:\n- Score: ${ctx.bodyScore}/100\n- Category: ${ctx.category}\n- Overall grade: ${ctx.grade}\n- Fitness index: ${ctx.fitnessIndex}`,
+                    `Composition score: ${ctx.bodyScore}/100 (${ctx.category}). Overall grade: ${ctx.grade}. This metric is derived from skeletal ratio analysis.`
+                ],
+                body_category: (ctx) => [
+                    `Classification: ${ctx.category}\nBody type: ${ctx.bodyType}\n\nThis is derived from shoulder-to-hip ratio, limb proportions, and estimated mass distribution.`,
+                ],
+                muscle_tone: (ctx) => [
+                    `Muscle tone score: ${ctx.muscleScore}%\n\nDerived from elbow offset (indicating arm mass) and limb proportions relative to torso. Resistance training with progressive overload is the primary driver for improvement.`,
+                ],
+                posture: (ctx) => [
+                    `Posture score: ${ctx.postureScore}/100\n\nMeasures: shoulder levelness, head-forward offset, hip tilt. Priority interventions: upper back strengthening, hip flexor mobility, and ergonomic awareness.`,
+                ],
+                bmi: (ctx) => [
+                    ctx.bmi ? `BMI: ${ctx.bmi}\n\nNote: BMI does not differentiate lean mass from adipose tissue. Your body composition score (${ctx.bodyScore}) provides more nuanced data.` : `BMI: Not calculated. Height and weight data required. Enter these on the analysis screen for improved accuracy.`,
+                ],
+                confidence: (ctx) => [
+                    `Analysis confidence: ${ctx.confidence}\n\nFactors: image quality, landmark visibility, BMI data availability. ${ctx.confidence === 'high' ? 'Current input quality is sufficient.' : 'Recommendation: improve lighting, use front-facing pose, enter height/weight data.'}`,
+                ],
+                goal: (ctx) => [
+                    `Current goal: ${GOAL_LABELS[ctx.goal] || 'Not set'}\n\nAll training and nutrition recommendations are calibrated to this objective. Adjust on the analysis screen if needed.`,
+                ],
+                lose_weight: (ctx) => [
+                    `Fat loss protocol:\n- Caloric deficit: 300-500 kcal/day below TDEE\n- Protein: 1g/lb body weight (muscle preservation)\n- Training: resistance 3-4x/week + moderate cardio\n- Target rate: 0.5-1 lb/week\n- Duration: re-assess every 8-12 weeks`,
+                ],
+                build_muscle: (ctx) => [
+                    `Hypertrophy protocol:\n- Caloric surplus: 200-300 kcal/day above TDEE\n- Protein: 0.8-1g/lb body weight\n- Training: 4-5x/week, progressive overload\n- Focus: compound movements (squat, bench, deadlift, row)\n- Target: 0.25-0.5 lb muscle/week`,
+                ],
+                improve_posture: (ctx) => [
+                    `Posture correction plan (current: ${ctx.postureScore}/100):\n1. Strengthen: upper back (rows, face pulls), core (planks, dead bugs)\n2. Stretch: chest, hip flexors, anterior deltoids\n3. Daily: wall angels (2x10), chin tucks (3x15)\n4. Ergonomics: monitor at eye level, feet flat`,
+                ],
+                workout_general: (ctx) => [
+                    `Training overview for ${GOAL_LABELS[ctx.goal] || 'fitness'}:\n- Profile: ${ctx.bodyScore}/100 (${ctx.category}), ${ctx.bodyType} type\n- ${ctx.bodyScore <= 30 ? 'Recommended: 3x/week full body, low-impact compound movements, build work capacity gradually' : ctx.bodyScore <= 55 ? 'Recommended: 3-5 days/week, compound-first programming, progressive overload' : 'Recommended: 4-5 days/week, periodized compound + isolation, weekly load progression'}\n- Muscle tone: ${ctx.muscleScore}%\n- Review the Workout screen for your specific program.`,
+                ],
+                workout_plan: (ctx) => [
+                    `Training plan -- calibrated to your profile:\n- Body score: ${ctx.bodyScore}/100 (${ctx.category})\n- Body type: ${ctx.bodyType}\n- Muscle tone: ${ctx.muscleScore}%\n- Goal: ${GOAL_LABELS[ctx.goal] || 'general fitness'}\n\n${ctx.bodyScore <= 30 ? 'Recommended protocol:\n- Phase: Foundation (weeks 1-8)\n- Frequency: 3x/week full body\n- Modality: bodyweight + machine-assisted\n- Cardio: low-impact, 20-30 min, 3-4x/week\n- Priority: movement quality, joint stability, work capacity' : ctx.bodyScore <= 55 ? 'Recommended protocol:\n- Frequency: 4x/week upper/lower split\n- Modality: free weights + machines\n- Cardio: 2-3x/week (1 HIIT, 1-2 steady-state)\n- Priority: progressive overload, hypertrophy, conditioning' : 'Recommended protocol:\n- Frequency: 4-5x/week PPL or upper/lower\n- Modality: free weights primary, machines secondary\n- Cardio: 2x/week strategic sessions\n- Priority: strength progression, weak point targeting, periodization'}\n\nRefer to Workout screen for exercise-specific programming.`,
+                    `Personalized training blueprint:\n\nInput data: ${ctx.bodyScore}/100 score, ${ctx.category} classification, ${ctx.bodyType} somatotype, ${ctx.muscleScore}% muscle tone.\n\nObjective: ${GOAL_LABELS[ctx.goal] || 'general fitness'}\n\n${ctx.bodyScore <= 30 ? 'Programming:\n1. Full-body sessions 3x/week\n2. Compound movements with assisted variations\n3. Daily ambulatory cardio (walking 20-30 min)\n4. Progression: add volume before intensity\n5. Re-assess at 8-week mark' : ctx.bodyScore <= 55 ? 'Programming:\n1. Upper/lower split 4x/week\n2. Compound anchors: squat, bench, deadlift, row\n3. Accessory work: 2-3 exercises per session\n4. Cardio: 2-3 sessions mixed modality\n5. Deload every 4-6 weeks' : 'Programming:\n1. Push/pull/legs 4-5x/week\n2. Heavy compounds: 3-5 rep range\n3. Hypertrophy work: 8-12 rep range\n4. Weak point specialization blocks\n5. Periodized mesocycles (4-6 weeks)'}`
+                ],
+                cycle_workout: (ctx) => {
+                    if (ctx.gender === 'male') {
+                        return [`Profile indicates male gender. Menstrual cycle periodization applies to female physiology only.\n\nQuery clarification needed: Are you requesting this information for another individual (partner, client, athlete)?\n\nIf confirmed, I can provide:\n- Phase-specific exercise protocols\n- Intensity/volume modifications by cycle day\n- Recommended and contraindicated movements per phase\n\nPlease confirm and I will provide the full periodization framework.`];
+                    }
+                    return [
+                        `Menstrual cycle training periodization:\n\n**Phase 1: Menstrual (Days 1-5)**\n- Intensity: reduce 20-40%\n- Volume: deload week approach\n- Recommended exercises:\n  - Cat-cow stretches, child's pose, supine twists\n  - Walking (20-30 min, moderate pace)\n  - Swimming (low impact)\n  - Foam rolling (avoid abdomen)\n  - Light dumbbell work: 15-20 reps, 50% normal weight\n- Contraindicated: heavy deadlifts, intense ab work, high-impact plyometrics\n\n**Phase 2: Follicular (Days 6-14)**\n- Intensity: peak training window\n- Volume: high -- maximize this phase\n- Recommended exercises:\n  - Barbell squats (3-5 rep range)\n  - Deadlifts (conventional or sumo)\n  - Bench press, overhead press\n  - Pull-ups, barbell rows\n  - HIIT protocols (Tabata, EMOM)\n  - Plyometrics: box jumps, jump squats\n- Notes: optimal window for PRs and strength testing\n\n**Phase 3: Ovulatory (Days 14-16)**\n- Intensity: high (monitor joint laxity)\n- Recommended exercises:\n  - Maintain follicular phase programming\n  - Prioritize thorough warm-up (10-15 min)\n  - Reduce plyometric volume by 20%\n- Notes: injury risk slightly elevated due to relaxin\n\n**Phase 4: Luteal (Days 17-28)**\n- Intensity: moderate, tapering\n- Recommended exercises:\n  - Machine-based strength work (controlled ROM)\n  - Steady-state cardio: cycling, elliptical, incline walking\n  - Bodyweight circuits (8-12 reps)\n  - Pilates, barre classes\n  - Yoga flows (avoid inversions if uncomfortable)\n- Contraindicated: maximal lifts, extended HIIT\n\nSupplementation:\n- Magnesium: 200-400mg (cramp management)\n- Iron: monitor if heavy bleeding\n- Omega-3: anti-inflammatory support`
+                    ];
+                },
+                cycle_for_other: (ctx) => [
+                    `Confirmed. Menstrual cycle periodization protocol for your partner/client:\n\n**Phase 1: Menstrual (Days 1-5)**\n- Intensity: -20-40% from baseline\n- Recommended: yoga, walking, swimming, foam rolling, light dumbbells (15-20 reps)\n- Contraindicated: heavy deadlifts, intense core work, HIIT\n\n**Phase 2: Follicular (Days 6-14)**\n- Intensity: PEAK -- maximize this window\n- Recommended: barbell compounds, HIIT, plyometrics\n- Notes: optimal for PRs and strength testing\n\n**Phase 3: Ovulatory (Days 14-16)**\n- Intensity: high with extended warm-up\n- Recommended: maintain follicular programming\n- Notes: monitor joint laxity, reduce plyometric volume 20%\n\n**Phase 4: Luteal (Days 17-28)**\n- Intensity: moderate, tapering toward end\n- Recommended: machines, steady-state cardio, Pilates, yoga\n- Contraindicated: maximal lifts, extended HIIT\n\nSupplementation: Magnesium (200-400mg), Iron (if heavy bleeding), Omega-3`
+                ],
+                workout_frequency: (ctx) => [
+                    `Recommended frequency for ${GOAL_LABELS[ctx.goal] || 'fitness'}:\n- Beginner: 3 days/week (full body)\n- Intermediate: 4 days/week (upper/lower split)\n- Advanced: 5-6 days/week (push/pull/legs)\n- Rest: minimum 1-2 days/week for recovery`,
+                ],
+                workout_reps: (ctx) => [
+                    `Volume guidelines:\n- Strength: 3-5 reps x 4-5 sets (85-95% 1RM)\n- Hypertrophy: 8-12 reps x 3-4 sets (65-80% 1RM)\n- Endurance: 15-20 reps x 2-3 sets (50-65% 1RM)\n- Weekly volume per muscle: 10-20 working sets`,
+                ],
+                cardio: (ctx) => [
+                    `Cardio programming:\n- Frequency: 2-3 sessions/week\n- Steady-state: 20-40 min at 60-70% max HR\n- HIIT: 15-25 min, 1x/week\n- NEAT: aim for 8-10K steps daily\n- Balance with resistance training priorities`,
+                ],
+                nutrition_general: (ctx) => [
+                    `Nutrition framework for ${GOAL_LABELS[ctx.goal] || 'your goal'}:\n- Set calories based on TDEE and goal\n- Prioritize protein (0.8-1g/lb)\n- Distribute across 3-5 meals\n- Track for 2-4 weeks to build awareness\n- See Nutrition screen for personalized targets.`,
+                ],
+                protein: (ctx) => [
+                    `Protein targets:\n- General fitness: 0.7g/lb body weight\n- Fat loss: 1g/lb (muscle preservation)\n- Muscle gain: 0.8-1g/lb\n- Distribution: 25-40g per meal\n- Timing: within 2 hours post-training is optimal`,
+                ],
+                calories: (ctx) => [
+                    `Caloric targets by goal:\n- Fat loss: TDEE - 300 to 500 kcal\n- Maintenance: match TDEE\n- Muscle gain: TDEE + 200 to 300 kcal\n\nTDEE = BMR x activity factor. Your Nutrition screen has estimated targets.`,
+                ],
+                macros: (ctx) => [
+                    `Macro distribution:\n- Protein: 0.8-1g/lb (set first)\n- Fat: 0.3-0.4g/lb (set second)\n- Carbs: remaining calories / 4\n\nAdjust ratios based on training response and personal tolerance.`,
+                ],
+                how_it_works: (ctx) => [
+                    `Technical pipeline:\n1. Image input processed by MediaPipe Pose\n2. 33 skeletal landmarks detected\n3. Key ratios computed: shoulder/hip, waist/height, elbow offset\n4. Ratios mapped to body composition estimates\n5. Score categorized against population norms\n\nLimitation: skeletal analysis only -- no direct fat measurement.`,
+                ],
+                what_is_this: (ctx) => [
+                    `Fix-it: Browser-based body composition analysis tool.\n- Input: user photo + optional height/weight\n- Processing: MediaPipe Pose (client-side AI)\n- Output: body score, muscle tone, posture, workout/nutrition plans\n- Purpose: educational fitness awareness (non-medical)`,
+                ],
+                explain_upload: (ctx) => [
+                    `Upload screen function:\n- Input methods: camera capture or file upload\n- Required data: full-body photo\n- Optional data: gender, height (cm), weight (kg), fitness goal\n- Photo requirements: front-facing, well-lit, full body visible\n- Impact: data quality directly affects analysis confidence level`,
+                ],
+                explain_results: (ctx) => [
+                    `Results screen output:\n- Body Composition Score: ${ctx.bodyScore}/100 (${ctx.category})\n- Overall Grade: ${ctx.grade}\n- Fitness Index: ${ctx.fitnessIndex}\n- Body Type: ${ctx.bodyType}\n- Confidence: ${ctx.confidence}\n- Navigation: links to Breakdown, Simulator, Workout, Nutrition screens`,
+                ],
+                explain_breakdown: (ctx) => [
+                    `Breakdown screen structure:\n- Body Composition section: fat %, lean mass, proportions (4 metrics)\n- Muscle Tone section: ${ctx.muscleScore}% overall, per-region scores (4 metrics)\n- Posture section: ${ctx.postureScore}/100 overall, alignment details (4 metrics)\n- Body Zone Analysis: visual region-by-region assessment\n- Each metric includes gauge visualization and score`,
+                ],
+                explain_simulator: (ctx) => [
+                    `Simulator screen specification:\n- Input: current body data + goal (${GOAL_LABELS[ctx.goal] || 'fitness'})\n- Output: projected body changes over time\n- Control: timeline slider for different intervals\n- Basis: research-backed transformation rates\n- Fat loss rate: ~0.5-1 lb/week\n- Muscle gain rate: ~0.25-0.5 lb/week\n- Disclaimer: projections assume consistent adherence`,
+                ],
+                explain_workout_screen: (ctx) => [
+                    `Workout screen components:\n- Exercise recommendations: tailored to ${GOAL_LABELS[ctx.goal] || 'fitness'} goal\n- Program structure: sets, reps, rest periods per exercise\n- Workout player: guided real-time session with timers\n- Progress tracking: rep counting, exercise completion\n- Personalization: based on body score (${ctx.bodyScore}), type (${ctx.bodyType})`,
+                ],
+                explain_nutrition_screen: (ctx) => [
+                    `Nutrition screen modules:\n- Daily Macro Targets: calorie + protein/carb/fat targets (personalized)\n- Metabolic Rate card: BMR via Mifflin-St Jeor → TDEE → Goal target\n- Calorie Balance: burned (MET-based) vs. eaten (food log) → net\n- Food log: meal entry via food search or AI food recognition\n- Hydration tracker: daily glass count + 14-day heatmap + goal streak\n- Meal guidance: goal-specific suggestions for ${GOAL_LABELS[ctx.goal] || 'fitness'}\n- Interactive recalculation: adjust activity + goal → apply updated targets`,
+                ],
+                explain_progress_screen: (ctx) => [
+                    `Progress screen modules:\n- Streak Tracker: consecutive workout days + best streak\n- Activity Heatmap: 14-day visual grid\n- Daily Habits Tracker: 5 habits (Workout/Hydration/Sleep/Nutrition/Check-In), auto-detected, score ring\n- Weekly Report Card: letter grade (A+→D) from workout + sleep + recovery + streak scores\n- Sleep & Recovery Tracker: 7-day bar chart, recovery score (hours/quality/workouts), streak\n- Smart Insights: 8-engine analysis of logged data → up to 6 personalized observations\n- Progress Charts: Weight/Sleep/Activity/Calories/Score/BMI/Muscle tabs (Chart.js)\n- Achievement Badges: milestone-based unlocks\n- Weekly Challenges: 3 rotating objectives with XP rewards\n- Level System: cumulative XP → level → rank progression\n- Scan History: IndexedDB snapshots with side-by-side metric comparison`,
+                ],
+                explain_scan_history: (ctx) => [
+                    `Scan History feature specification:\n- Storage: IndexedDB (fixit-db, snapshots store)\n- Auto-save: triggered after each analysis completion\n- Data stored: thumbnail (150x200), full image, all metrics, user profile\n- UI: horizontal scrollable timeline of thumbnail cards\n- Selection: tap cards to select (max 2)\n- Comparison view: side-by-side photos + metric deltas with directional arrows\n- Metrics compared: body composition, muscle tone, posture, fitness index, visual age, symmetry, regional tone\n- XP: 10 per snapshot saved, 20 for first comparison`,
+                ],
+                app_features: (ctx) => [
+                    `Application feature map:\n\n1. Upload -- Photo input + user metrics (height, weight, age, goal)\n2. Analysis -- AI processing via MediaPipe Pose (33 landmarks)\n3. Results -- Body score, category, grade, confidence overview\n4. Breakdown -- Detailed body composition, muscle tone, posture metrics\n5. Simulator -- Timeline-based body transformation projection\n6. Workout -- Goal-specific exercise programming + guided player\n7. Nutrition -- BMR/TDEE (Mifflin-St Jeor), calorie balance, macro targets, food log, hydration history\n8. Progress -- Daily habits, weekly report card, sleep & recovery, smart insights, progress charts, gamification, scan history\n9. AI Coach -- Context-aware assistant (current interaction)`,
+                ],
+                explain_body_comp: (ctx) => [
+                    `Body Composition metric:\n- Definition: ratio of lean mass to fat mass\n- Score: ${ctx.bodyScore}/100 (${ctx.category})\n- Method: skeletal ratio analysis (shoulder/hip, waist/height, limb proportions)\n- Input: photo landmarks + optional height/weight\n- Usage: baseline metric for all recommendations`,
+                ],
+                explain_muscle_dist: (ctx) => [
+                    `Muscle Tone Distribution:\n- Overall score: ${ctx.muscleScore}%\n- Regions assessed: upper body, core, lower body\n- Method: elbow offset (arm mass indicator), limb proportions, body width\n- Purpose: identifies strong/weak regions for targeted training\n- Application: informs exercise selection in workout programming`,
+                ],
+                explain_posture_analysis: (ctx) => [
+                    `Posture Analysis system:\n- Score: ${ctx.postureScore}/100\n- Metrics: shoulder levelness, forward head offset, hip tilt\n- Method: landmark alignment vs ideal anatomical markers\n- Common issues detected: forward head, rounded shoulders, lateral tilt\n- Improvement: upper back strengthening, hip flexor mobility, ergonomic adjustments`,
+                ],
+                explain_body_zones: (ctx) => [
+                    `Body Zone Analysis:\n- Zones: upper body, core/midsection, lower body\n- Assessment: per-zone scoring based on proportions and mass distribution\n- Purpose: identify regional imbalances\n- Application: guides training emphasis (e.g., prioritize lagging zones)\n- Visual: region-by-region breakdown on Breakdown screen`,
+                ],
+                explain_fitness_index: (ctx) => [
+                    `Fitness Index:\n- Current value: ${ctx.fitnessIndex}\n- Components: body composition + muscle tone + posture\n- Scale: composite score combining all analysis metrics\n- Purpose: single-metric overview of overall fitness level\n- Tracking: monitor changes over time as individual metrics improve`,
+                ],
+                explain_workout_player: (ctx) => [
+                    `Workout Player specification:\n- Function: guided real-time exercise session\n- Features: exercise display, set/rep tracking, rest timers, progress bar\n- Input: goal-tailored exercise list (${GOAL_LABELS[ctx.goal] || 'fitness'})\n- Flow: exercise → reps → rest → next exercise → completion\n- Output: workout completion tracking, XP awarded`,
+                ],
+                explain_streaks_badges: (ctx) => [
+                    `Gamification system components:\n\n1. Streak Tracker: consecutive workout days (stored in localStorage)\n2. Activity Heatmap: 14-day visual grid of training days\n3. Achievement Badges: milestone-triggered unlocks (configurable criteria)\n4. Weekly Challenges: 3 rotating objectives with progress bars\n5. XP System: points from workouts (20), challenges (40), coach use (10), snapshots (10)\n6. Level/Rank: cumulative XP thresholds determine progression\n7. Scan History: IndexedDB-stored analysis snapshots with visual comparison (select 2 to compare metrics)`,
+                ],
+                explain_confidence_indicator: (ctx) => [
+                    `Confidence Indicator:\n- Current level: ${ctx.confidence}\n- Factors: image quality, landmark visibility, pose angle, BMI data availability\n- Scale: low → medium → high\n- Impact: higher confidence = more reliable analysis results\n- Improvement: clear lighting, front-facing pose, full body visible, enter height/weight`,
+                ],
+                explain_visual_age: (ctx) => [
+                    `Visual Age:\n- Definition: estimated apparent age based on fitness indicators\n- Inputs: posture quality, body composition, muscle tone\n- Display: Results screen (current), Simulator screen (projected)\n- Note: this is not biological/chronological age\n- Purpose: quantify how fitness level translates to visual appearance\n- Application: track visual age changes as fitness improves`,
+                    `Visual Age metric:\n- Location: Results screen (current value), Simulator (projected changes)\n- Basis: posture alignment, body composition score, muscle development\n- Distinction: visual appearance age, not actual biological age\n- Value: motivational metric showing fitness impact on appearance\n- Tracking: compare current vs projected across lifestyle scenarios`
+                ],
+                explain_symmetry: (ctx) => [
+                    `Symmetry Score:\n- Display: percentage on Results screen\n- Measurement: left-right body balance comparison\n- Sub-metrics: Lean Mass Index, Proportion Balance\n- Data source: bilateral landmark comparison (shoulders, hips, limbs)\n- Ideal: 100% = perfect bilateral symmetry\n- Application: identify imbalances for corrective training prioritization`,
+                ],
+                explain_ai_reasoning: (ctx) => [
+                    `AI Reasoning / Explainability:\n- Location: Breakdown screen ("Why AI Thinks This" toggle)\n- Function: displays AI decision rationale per metric\n- Content: landmarks used, ratios measured, scoring logic\n- Purpose: transparency and user trust\n- Design principle: explainable AI (XAI)\n- User action: toggle on/off per score section`,
+                ],
+                explain_scenarios: (ctx) => [
+                    `Lifestyle Scenarios (Simulator screen):\n\n1. Active Lifestyle: projected outcomes with regular exercise\n2. Sedentary Continuation: projected outcomes without activity changes\n3. Intensive Training: projected outcomes with dedicated training program\n4. Nutrition Optimization: projected outcomes with diet improvements\n\nEach scenario displays:\n- Projected muscle tone change\n- Projected posture change\n- Projected visual age change\n\nAdditional: Projected Impact Summary card aggregates all scenario comparisons`,
+                ],
+                explain_weekly_routine: (ctx) => [
+                    `Weekly Routine Generator (Workout screen):\n- Configuration parameters:\n  - Training goal selection\n  - Split type: Full Body / PPL / Upper-Lower / Bro Split\n  - Available training days\n  - Session duration\n- Output: 7-day training plan\n- Visualization: muscle coverage chart (ensures all groups addressed)\n- Customization: adjust parameters and regenerate as needed`,
+                ],
+                explain_todays_routine: (ctx) => [
+                    `Today's Routine (Workout screen):\n- Content: daily recommended workout\n- Metrics displayed: total time (~32 min), exercise count, estimated calorie burn\n- Exercises: specific movements with sets/reps\n- Action: "Start" button launches workout player\n- Integration: exercises aligned with weekly routine and ${GOAL_LABELS[ctx.goal] || 'fitness'} goal`,
+                ],
+                explain_food_recognition: (ctx) => [
+                    `Food Recognition ("Snap Your Meal" - Nutrition screen):\n- Input: photo upload or camera capture of meal\n- Process: AI identifies food items, estimates calories/macros\n- User verification: confirm or correct detected food items\n- Output: nutritional breakdown added to daily log\n- Macro tracking: protein, carbs, fat, total calories\n- Integration: updates daily macro progress bars`,
+                ],
+                explain_meal_plan: (ctx) => [
+                    `Meal Plan Generator (Nutrition screen modal):\n- Configuration:\n  - Goal: fat loss / muscle gain / maintenance\n  - Dietary preference: standard / high protein / vegetarian / low carb\n  - Meals per day: configurable count\n- Output: complete weekly meal plan\n- Format: day-by-day breakdown with individual meals\n- Personalization: aligned with body analysis data and calorie targets`,
+                ],
+                explain_daily_macros: (ctx) => [
+                    `Daily Macro Targets (Nutrition screen):\n- Calorie target: personalized daily total\n- Macro bars: protein / carbohydrate / fat with progress tracking\n- Circular chart: overall on-track percentage\n- Data source: body composition analysis + ${GOAL_LABELS[ctx.goal] || 'fitness'} goal\n- Updates: real-time as meals are logged\n- Purpose: ensure daily nutritional compliance`,
+                ],
+                explain_nutrition_insights: (ctx) => [
+                    `Nutrition Insight Cards (Nutrition screen):\n\n1. Protein Timing:\n   - Guideline: distribute across 4-5 meals\n   - Target: 25-40g per meal\n\n2. Meal Frequency:\n   - Guideline: eat every 3-4 hours\n   - Purpose: maintain steady energy and metabolism\n\n3. Hydration Goal:\n   - Calculation: personalized based on activity level\n   - Output: daily water intake target`,
+                ],
+                explain_exercise_filters: (ctx) => [
+                    `Exercise Filters (Workout screen):\n- Filter categories:\n  - All: complete exercise library\n  - Home: no equipment required (bodyweight)\n  - Gym: equipment-based exercises\n  - Weak Areas: targets detected weaknesses (core, posture, etc.)\n- Experience Level selector:\n  - Beginner: foundational movements, lower intensity\n  - Intermediate: moderate complexity and load\n  - Advanced: high-intensity, complex movements\n- Application: filters and level combine to personalize exercise selection`,
+                ],
+                explain_themes: (ctx) => [
+                    `Theme System (header picker):\n- Available themes:\n  1. Charcoal: dark default theme\n  2. Ivory: light theme\n  3. Midnight: dark blue theme\n  4. Ocean: teal theme\n  5. Lavender: purple theme\n- Behavior: instant full-app color scheme change\n- Implementation: CSS custom property overrides\n- Persistence: theme preference stored in localStorage`,
+                ],
+                explain_body_silhouette: (ctx) => [
+                    `Body Silhouette Visualization (Results screen):\n- Format: SVG body diagram\n- Zones displayed: Shoulders, Upper Body, Core, Legs (4 zones)\n- Per-zone labels: status descriptors (e.g., "Balanced", "Athletic", "Moderate Tone", "Strong")\n- Data source: body analysis metrics mapped to anatomical regions\n- Purpose: instant visual summary of physique assessment`,
+                ],
+                explain_coach_personas: (ctx) => [
+                    `Coach Persona System:\n- Available personas:\n  1. Encouraging: warm, motivating, supportive tone\n  2. Planner/Structured: organized, data-focused, bullet-point format\n  3. Explainer/Educational: science-based, research references, teaching style\n  4. Funny/Humorous: casual tone, jokes, pop culture references\n- Current persona: ${state.coachPersona || 'encouraging'}\n- Behavior: same information, different communication style\n- Switching: available anytime, no data loss`,
+                ],
+                explain_bmr_tdee: (ctx) => [
+                    `Metabolic Rate card (Nutrition screen):\n- BMR formula: Mifflin-St Jeor\n  Male: 10×weight + 6.25×height − 5×age + 5\n  Female: 10×weight + 6.25×height − 5×age − 161\n- TDEE = BMR × activity multiplier (sedentary: 1.2 → athlete: 1.9)\n- Target = TDEE + goal adjustment (fat loss: −500, muscle: +300, maintain: 0)\n- Inputs: state.weight, state.height, state.age, state.gender\n- Interactive: activity select + goal select → Recalculate & Apply updates macro targets\n- Formula displayed dynamically with user's actual values`,
+                ],
+                explain_daily_habits: (ctx) => [
+                    `Daily Habits Tracker (Progress screen):\n- 5 tracked habits:\n  1. Workout: auto-detected from workout log (today's date match)\n  2. Hydration: auto-detected if ≥8 glasses logged today\n  3. Sleep: auto-detected if ≥7h logged yesterday/today\n  4. Nutrition: auto-detected if calories > 0 in calorie log today\n  5. Check-In: manual toggle (stored in fixit-habit-checkins)\n- Score ring: SVG circle, circumference 163.4, fills proportionally\n- Per-habit streak: consecutive days from historical log data\n- Visual feedback: ring turns green at 5/5 completion`,
+                ],
+                explain_sleep_tracker: (ctx) => [
+                    `Sleep & Recovery Tracker (Progress screen bento):\n- Log inputs: hours (float), quality (5-level: Rough/Poor/Fair/Good/Excellent)\n- Storage: fixit-sleep-log (localStorage, max 365, deduped by date)\n- 7-day bar chart: height ∝ hours, color-coded by threshold\n- Recovery Score (0–100):\n  - 50% weight: hours score (9h=100%, 7-8h=85%, 6-7h=65%, 5-6h=45%, <5h=20%)\n  - 30% weight: quality (Excellent=100%, Good=80%, Fair=55%, Poor=30%, Rough=0%)\n  - 20% weight: workout balance (4-5/week=100%, 3/week=80%, 2/week=55%, 1/week=25%, 0=0%)\n- Good-nights streak: consecutive nights with ≥7h and quality ≥ Fair`,
+                ],
+                explain_weekly_report: (ctx) => [
+                    `Weekly Report Card (Progress screen):\n- Scope: current week (Sunday 00:00 → Saturday)\n- Grade inputs:\n  - Workout score: 5+=100, 4=90, 3=80, 2=70, 1=50, 0=0\n  - Sleep score: avg hours (≥8=100, ≥7=85, ≥6=60, <6=30)\n  - Recovery score: from Sleep & Recovery Tracker (0–100)\n  - Streak score: ≥7=100, ≥5=80, ≥3=60, ≥1=40, 0=0\n- Grade thresholds: A+(93), A(85), B+(77), B(69), C+(61), C(53), D(<53)\n- Displayed: grade, workouts, avg sleep, weight delta, streak, message`,
+                ],
+                explain_smart_insights: (ctx) => [
+                    `Smart Insights (Progress screen):\n- 8 analysis engines:\n  1. Streak: ≥7 consecutive days → positive insight\n  2. Workout pattern: top 2 training days of week\n  3. Sleep/workout correlation: avg sleep diff on workout vs. rest days (±0.3h threshold)\n  4. Weight trend: 2-week rolling comparison\n  5. Calorie adherence: avg % of goal (±8% threshold)\n  6. Sleep quality: 5-night avg score + poor-night count\n  7. Measurement trend: waist/chest/arms ≥0.5cm change\n  8. Recovery score: <50 → warning insight\n- Output: up to 6 insights, typed: positive/warning/neutral\n- Rendered with color-coded left borders`,
+                ],
+                explain_calorie_balance: (ctx) => [
+                    `Calorie Balance card (Nutrition screen):\n- Eaten: sum of calories from today's food log entries\n- Burned: Σ(MET × weight_kg × duration_hours) for today's workouts\n  MET values: cardio=8.0, HIIT=10.0, strength=6.0, yoga=3.0, sports=7.0\n- Net: eaten − burned (positive = surplus, negative = deficit)\n- Data sources: fixit-calorie-log (today), fixit-workout-log (today)\n- Updates: on food log load + workout log render`,
+                ],
+                explain_hydration_history: (ctx) => [
+                    `Hydration History (Nutrition screen):\n- 14-day heatmap: one cell per day\n  - Empty: 0–1 glasses\n  - Partial: ≥2 glasses\n  - Half: ≥5 glasses\n  - Full: ≥8 glasses (goal met)\n- 7-day average: mean(glasses[last 7 days])\n- Goal streak: consecutive days backward from today with ≥8 glasses\n- Best streak: longest consecutive run in 30-day window\n- Storage: fixit-water-YYYY-MM-DD keys (one per day)`,
+                ],
+                explain_progress_charts: (ctx) => [
+                    `Progress Charts (Progress screen):\n- Tabs: Weight | Sleep | Activity | Calories | Score | BMI | Muscle\n- Weight: fixit-weight-log, last 30 entries, line chart\n- Sleep: fixit-sleep-log, last 30 entries (hours), line chart\n- Activity: fixit-workout-log, 8-week buckets, bar chart (max 7/week)\n- Calories: fixit-calorie-log, last 30 entries + dashed goal line\n- Score/BMI/Muscle: getMergedSnapshots(), line chart\n- Library: Chart.js v4.4.0\n- Empty state: per-tab inline overlay (chart hidden, message shown)`,
+                ],
+                explain_challenges: (ctx) => [
+                    `Weekly Challenges specification:\n- Location: Progress screen → Challenges section\n- Format: Rotating weekly objectives (resets Monday)\n- Examples: Log 5 workouts, hit hydration goal 7 days, complete habit streak\n- Reward: Bonus XP on completion\n- Tracking: Completion % per challenge card\n- Status: Active, completed, or missed\n- Multiple challenges can be active simultaneously`
+                ],
+                explain_levels_xp: (ctx) => [
+                    `XP & Level System:\n- XP sources: Workouts logged, food tracked, habits completed, challenges finished, scans run, coach queries\n- Accumulation: Lifetime, never resets\n- Level thresholds: Progressive scale (higher levels require more XP)\n- Display: Level badge + XP progress bar on Progress screen\n- Rank titles: Unlock at milestone levels\n- Purpose: Quantified consistency metric across all app behaviors`
+                ],
+                explain_weight_log: (ctx) => [
+                    `Weight Log specification:\n- Location: Goal Weight card → bottom input row\n- Input: kg value (0.1 kg precision, range 30–300)\n- Storage: localStorage, date-stamped\n- Display: "Last: X.X kg · Month Day" label in card\n- Trend chart: Sparkline appears after 2+ entries\n- Pace input: 3+ entries over 14+ day span enables trend-based weekly rate\n- Entries used: 30 most recent for chart; all for pace calculation`
+                ],
+                explain_goal_weight: (ctx) => [
+                    `Goal Weight Card breakdown:\n- Setup: "Set Goal Weight" → kg input → Save\n- Start weight: First logged entry (or profile weight fallback)\n- Progress bar: % of journey complete, with current-weight marker dot\n- Metrics row:\n  · kg remaining (or ✓ if goal reached)\n  · Est. weeks to goal\n  · Weekly pace (source labeled: trend / calorie data / estimated)\n- Pace priority: Weight log trend > calorie balance estimate > 0.5 kg/wk default\n- Edit: "Edit Goal" button reopens editor at any time`
+                ],
+                explain_food_log: (ctx) => [
+                    `Food Log specification:\n- Location: Nutrition screen\n- Quick Add fields: Name, Detail (portion), Calories, Protein (g), Carbs (g), Fats (g)\n- Food Presets: 15 pre-filled chips in 3 groups (Protein, Carbs & Meals, Snacks & Fats)\n- Entry display: Timestamp + name + detail + macro badges\n- Calorie integration: Logged totals feed into Calorie Balance card\n- Storage: localStorage, date-partitioned entries\n- Delete: Available per entry`
+                ],
+                explain_workout_splits: (ctx) => [
+                    `Training Split options:\n- Full Body (3×/week): All compounds per session; best for beginners / time-limited\n- Upper/Lower (4×/week): 2 upper + 2 lower days; intermediate level\n- Push/Pull/Legs (6×/week): Highest volume; advanced lifters\n- Bro Split (5×/week): 1 muscle group/day; hypertrophy-focused\n- Selection basis: Body analysis score + goal + available days\n- Filter: Workout screen frequency filter adjusts recommended days\n- Recovery rule: 48–72 hr per muscle group minimum`
+                ],
+                explain_body_recomp: (ctx) => [
+                    `Body Recomposition protocol:\n- Definition: Simultaneous fat loss and muscle gain\n- Calorie target: Maintenance ± 100 kcal (slight deficit preferred)\n- Protein: 1.8–2.2 g/kg body weight (critical for mTOR activation)\n- Training: Progressive overload resistance 3–4×/week\n- Cardio: Moderate — supports fat loss without impairing recovery\n- Timeline: 3–6 months for measurable change\n- Measurement: Body score up + stable weight = successful recomp\n- Best for: Beginners, detrained athletes, moderate body fat (>20% male, >28% female)`
+                ],
+                explain_maintenance: (ctx) => [
+                    `Maintenance protocol:\n- Calorie target: TDEE (use BMR/TDEE Calculator on Nutrition screen)\n- Protein floor: ≥ 1.6 g/kg to prevent muscle loss\n- Training: 3–4×/week resistance + 150 min moderate cardio/week\n- Monitoring tools:\n  · Calorie Balance card (intake vs. output)\n  · Weight Log (alert if drift > ±2 kg over 4 weeks)\n  · Daily Habits ring (target 4–5/5 consistently)\n  · Weekly Report Card (target grade ≥ B)\n- Recalculate TDEE: Every 5 kg body weight change`
+                ],
+                explain_workout_history: (ctx) => [
+                    `Workout History logs every training session completed in the app:\n- Session list: Date, workout name, exercises performed\n- Sets/reps/load data per exercise\n- Consistency tracking: Total sessions logged\n- Located: Progress screen, Workout History cell\n- Use: Review volume trends and training frequency over time`
+                ],
+                explain_personal_records: (ctx) => [
+                    `Personal Records (PRs) track peak performance per exercise:\n- Metric: Heaviest logged set or estimated 1RM\n- Update: Auto-updates when a new best is logged\n- Display: Exercise name + weight + date achieved\n- Located: Progress screen, Personal Records cell\n- Progressive PR increases confirm neuromuscular adaptation and training efficacy`
+                ],
+                explain_body_measurements: (ctx) => [
+                    `Body Measurements tracker logs circumference data:\n- Metrics: Chest, waist, hips, arms (cm)\n- Entry frequency: Every 2–4 weeks recommended\n- History: Trend lines per measurement\n- Located: Progress screen, Body Measurements cell\n- Use: Circumference data detects body composition change independent of scale weight — especially useful during recomposition`
+                ],
+                explain_account: (ctx) => [
+                    `My Account — access via user menu (top right). Functions: update display name, email, fitness profile parameters (height, weight, gender, age range, activity level, fitness goal), change password, delete account. Update fitness profile regularly for accurate analysis and recommendations.`
+                ],
+                explain_optional_measurements: (ctx) => [
+                    `Upload screen optional inputs: chest, waist, hips, arms (cm). Function: supplements photo-based landmark detection with direct circumference data. Protocol: soft tape measure, relaxed stance, tape perpendicular to body axis at widest point. Effect: measurably improves body composition estimation accuracy.`
+                ],
+                explain_export: (ctx) => [
+                    `Export options on Results screen:\n- Export Data: saves complete analysis metrics as a structured file\n- Share Card: generates formatted visual summary for sharing\nWorkout Player: Share Workout — creates post-session summary. All accessible via respective screen action buttons.`
+                ],
+                explain_comparison: (ctx) => [
+                    `Scan comparison: Progress screen → Scan History → select 2 scans → Compare. Output: side-by-side differential analysis of body score, muscle tone, posture alignment, plus change percentages. Use: longitudinal progress assessment. Available whenever 2+ scans exist in history.`
+                ],
+                explain_live_posture: (ctx) => [
+                    `Live Posture Check: Workout screen → "Start Live Posture Check". Function: camera-based real-time kinematic analysis using MediaPipe Pose. Evaluates: shoulder alignment, spinal alignment, hip alignment. Output: continuous corrective cue overlays. Recommended use during exercise for form monitoring.`
+                ],
+                explain_data_management: (ctx) => [
+                    `Data Management panel: Upload screen (bottom). Displays: localStorage utilization metrics. Function: "Clear All Data" removes client-side session state, scan history, and log data. Scope: local storage only. Server-side account data unaffected. Use when resetting app state or freeing device storage.`
+                ],
+                explain_auth: (ctx) => [
+                    `Authentication flow:\n- Register: email + password + display name → email verification → login\n- Existing users: login with credentials\n- Password recovery: "Forgot Password" → email reset link\nBenefits: server-side data persistence, cross-session synchronization, progress continuity.`
+                ],
+                _fallback: (ctx) => [
+                    `Query not recognized. Available topics: body metrics, training programming, nutrition targets, analysis methodology, screen/feature explanations. Please restate your question.`,
+                    `Unable to match intent. Type "help" for a list of supported topics, or ask me to explain any screen.`
+                ]
+            },
+
+            educational: {
+                greeting: (ctx) => [
+                    `Hi there! I'm here to help you learn about your body analysis and the science behind fitness. Ask me anything -- I love explaining how things work!`,
+                    `Welcome! I can explain your results, the science of training, nutrition fundamentals, or how this AI works. What are you curious about?`
+                ],
+                thanks: (ctx) => [
+                    `You're welcome! Curiosity is the first step to real understanding. Keep the questions coming!`,
+                    `Happy to help! Learning about your body is one of the best investments you can make.`
+                ],
+                help: (ctx) => [
+                    `I can explain the science behind:\n- Your body score and how it's calculated\n- Muscle development and posture biomechanics\n- Exercise science (reps, sets, frequency)\n- Nutrition biochemistry (macros, calories)\n- The AI technology powering this app\n- Any screen or feature (e.g., "explain the progress screen")\n\nWhat interests you most?`,
+                ],
+                identity: (ctx) => [
+                    `I'm the Fix-it coach, designed to help you understand the science behind your fitness analysis! I can explain your body composition results, the exercise science behind workout recommendations, nutrition biochemistry, and how the AI technology works. Think of me as your fitness-science tutor -- I love making complex concepts accessible!`,
+                    `Great question! I'm your Fix-it educational fitness coach. My specialty is helping you understand not just *what* your results mean, but *why* -- the science of body composition, exercise physiology, and nutrition. I use your personal analysis data to make the explanations relevant to you. What would you like to learn?`
+                ],
+                body_score: (ctx) => [
+                    `Your body score is ${ctx.bodyScore}/100 (${ctx.category}). This is calculated using kinanthropometry -- the study of body measurements in relation to physical activity. The AI measures skeletal ratios like shoulder-to-hip width, which research correlates with body composition.`,
+                    `Score: ${ctx.bodyScore}/100. Fun fact: body composition assessment has evolved from simple BMI (invented in the 1830s!) to AI-driven analysis. Your score considers multiple skeletal ratios that clinical research links to fitness levels.`
+                ],
+                body_category: (ctx) => [
+                    `You're classified as "${ctx.category}" with body type "${ctx.bodyType}". Body typing (somatotyping) was developed by William Sheldon in the 1940s. While modern science has moved beyond strict categories, the framework remains useful for tailoring fitness approaches.`,
+                ],
+                muscle_tone: (ctx) => [
+                    `Muscle tone score: ${ctx.muscleScore}%. "Tone" actually refers to residual muscle tension at rest. The AI estimates this from how your body proportions suggest muscle development. Interesting fact: muscle protein synthesis peaks 24-48 hours after training!`,
+                ],
+                posture: (ctx) => [
+                    `Posture score: ${ctx.postureScore}/100. Posture is assessed by measuring deviations from ideal alignment (ear-shoulder-hip-ankle should form a vertical line). Did you know poor posture can compress your spine by up to 2 inches and reduce lung capacity by up to 30%?`,
+                ],
+                bmi: (ctx) => [
+                    ctx.bmi ? `Your BMI is ${ctx.bmi}. BMI was invented by Adolphe Quetelet in 1832 as a population-level statistic. Its limitation: it can't distinguish muscle from fat. A bodybuilder and a sedentary person could have the same BMI but very different health profiles!` : `BMI hasn't been calculated (needs height/weight). Fun fact: BMI was never designed for individual assessment -- it was created as a population-level statistic. Your body composition score (${ctx.bodyScore}) is actually more informative!`,
+                ],
+                confidence: (ctx) => [
+                    `Analysis confidence: "${ctx.confidence}". In computer vision, confidence reflects how much reliable data the algorithm had. ${ctx.confidence === 'high' ? 'Your input quality was excellent!' : 'Better lighting, a front-facing pose, and BMI data would help -- the AI needs clear landmark visibility for best results.'}`,
+                ],
+                goal: (ctx) => [
+                    `Your goal: ${GOAL_LABELS[ctx.goal] || 'general fitness'}. Interestingly, the body adapts through a principle called "Specific Adaptation to Imposed Demands" (SAID principle). This means your training and nutrition must match your goal for optimal results!`,
+                ],
+                lose_weight: (ctx) => [
+                    `Fat loss science: your body stores energy in adipose tissue (fat cells). To use those stores, you need a calorie deficit. The fascinating part -- fat is actually exhaled as CO2! When you lose 10kg of fat, 8.4kg leaves as carbon dioxide through your lungs. The rest exits as water.`,
+                ],
+                build_muscle: (ctx) => [
+                    `Muscle growth (hypertrophy) happens through a process called mechanotransduction -- mechanical tension from lifting triggers cellular signaling that increases protein synthesis. The result: myofibrils (muscle fibers) get thicker and stronger. This requires adequate protein, progressive overload, and recovery.`,
+                ],
+                improve_posture: (ctx) => [
+                    `Posture science (yours: ${ctx.postureScore}/100): Modern "tech neck" and anterior pelvic tilt are largely caused by prolonged sitting. The fix is neurological as much as muscular -- your brain needs to re-learn default positions through consistent corrective exercise and awareness.`,
+                ],
+                workout_general: (ctx) => [
+                    `With your score of ${ctx.bodyScore} (${ctx.category}, ${ctx.bodyType} type), here's the exercise science for ${GOAL_LABELS[ctx.goal] || 'fitness'}: your body adapts through the General Adaptation Syndrome (GAS) -- stress, recovery, supercompensation. ${ctx.bodyScore <= 30 ? 'At your current level, your body will respond rapidly to new training stimulus -- this is called "newbie gains," and it\'s the fastest progress you\'ll ever make!' : ctx.bodyScore <= 55 ? 'At your level, progressive overload is the key driver -- gradually increasing the training stimulus forces continued adaptation.' : 'At your fitness level, periodization and varied stimuli become essential to avoid accommodation (plateau).'} Each workout stresses the system; rest allows it to rebuild stronger!`,
+                    `Exercise recommendations for your profile (${ctx.bodyScore}/100, ${ctx.category}, ${ctx.bodyType}): The SAID principle (Specific Adaptation to Imposed Demands) means your training must match your ${GOAL_LABELS[ctx.goal] || 'fitness'} goal. With ${ctx.muscleScore}% muscle tone, ${ctx.muscleScore < 40 ? 'compound movements will give you the biggest return -- they recruit the most motor units and trigger the greatest hormonal response.' : ctx.muscleScore < 65 ? 'you have solid muscle development. Focus on progressive overload and strategic exercise selection.' : 'your muscle base is well-developed. Fine-tune with periodization and targeted weak-point work.'} Check the Workout screen for specifics!`
+                ],
+                workout_plan: (ctx) => [
+                    `Let me design a science-based plan for your profile! Your score of ${ctx.bodyScore} (${ctx.category}, ${ctx.bodyType} type) tells us a lot about where to start.\n\n${ctx.bodyScore <= 30 ? '**Foundation Phase -- the science:** Research shows beginners experience "newbie gains" -- rapid neural adaptation where your brain learns to recruit more muscle fibers. This is why a 3x/week full-body program works best initially.\n\nPlan:\n- 3 sessions/week, full body\n- Focus: compound movements (they trigger the most growth hormone release)\n- Low-impact cardio on off days (walking improves insulin sensitivity)\n- Your muscle tone (${ctx.muscleScore}%) will respond quickly to stimulus -- expect noticeable changes in 4-6 weeks!' : ctx.bodyScore <= 55 ? '**Progressive Phase -- the science:** Your body has baseline conditioning. The key principle is "progressive overload" -- gradually increasing training stimulus triggers continued adaptation through mechanotransduction.\n\nPlan:\n- 4x/week upper/lower split (hits each muscle 2x/week -- research shows 60% more growth than 1x/week)\n- Compound lifts anchor each session\n- Mix rep ranges: 6-8 for strength neural pathways, 10-12 for metabolic stress\n- Cardio: 2-3 sessions (HIIT triggers EPOC -- elevated calorie burn for hours after)' : '**Optimization Phase -- the science:** With a solid fitness base, periodization becomes key. Your body needs varied stimuli to avoid accommodation (the plateau effect).\n\nPlan:\n- 4-5x/week with periodized mesocycles\n- Undulating rep schemes to target different motor unit pools\n- Strategic deloads every 4-6 weeks (supercompensation principle)\n- Targeted weak-point training based on your ${ctx.muscleScore}% muscle development'}\n\nGoal-specific focus for ${GOAL_LABELS[ctx.goal] || 'fitness'}: ${ctx.goal === 'lose-weight' ? 'maintain training intensity to preserve lean mass during the deficit -- your body preferentially catabolizes muscle if not stimulated!' : ctx.goal === 'build-muscle' ? 'volume is the primary driver of hypertrophy. Aim for 10-20 sets per muscle group per week.' : 'balance all fitness components for well-rounded adaptation.'}`,
+                    `Great question! Let me build a program around your data (${ctx.bodyScore}/100, ${ctx.category}, ${ctx.bodyType}).\n\nThe science of program design starts with the SAID principle (Specific Adaptation to Imposed Demands) -- your body adapts specifically to the stress you apply. For ${GOAL_LABELS[ctx.goal] || 'your goal'} with ${ctx.muscleScore}% muscle tone:\n\n${ctx.bodyScore <= 30 ? '**Recommended: Full-Body Foundation (3x/week)**\nWhy full-body? Beginners recover faster and benefit from frequent practice of movement patterns. Each session stimulates full-body protein synthesis, which peaks at 24-48 hours post-training.\n\nSample structure:\n- Squat pattern (goblet squat)\n- Push pattern (push-up variation)\n- Pull pattern (band/assisted row)\n- Hinge pattern (hip hinge/deadlift)\n- Core stability (plank/dead bug)\n- Daily: 20-30 min walking (improves mitochondrial density)' : ctx.bodyScore <= 55 ? '**Recommended: Upper/Lower Split (4x/week)**\nWhy this split? It allows optimal volume per muscle group while providing 48-72 hours recovery -- the window research shows is ideal for muscle protein synthesis.\n\nSample structure:\n- Upper A: horizontal push/pull focus\n- Lower A: quad-dominant + cardio\n- Upper B: vertical push/pull focus\n- Lower B: hip-dominant + conditioning' : '**Recommended: Push/Pull/Legs (4-5x/week)**\nAt your level, higher frequency and volume drive continued progress. Research supports 10-20 weekly sets per muscle group for advanced trainees.\n\nInclude periodization: alternate heavy (3-6 rep) and volume (8-15 rep) blocks every 3-4 weeks.'}\n\nCheck the Workout screen for specific exercise selections!`
+                ],
+                cycle_workout: (ctx) => {
+                    if (ctx.gender === 'male') {
+                        return [`Interesting question! I notice your profile indicates male. The menstrual cycle is a female-specific physiological process involving cyclical hormonal changes (estrogen, progesterone, FSH, LH) that affect training capacity, recovery, and exercise selection.\n\nAre you perhaps asking on behalf of someone else -- a training partner, client, or family member? If so, I'd be happy to explain the science of cycle-based training periodization, including:\n\n- Hormonal phases and their effects on strength/endurance\n- Evidence-based exercise recommendations per phase\n- The research behind "cycle syncing"\n\nJust confirm and I'll provide the full educational breakdown!`];
+                    }
+                    return [
+                        `Great question! The menstrual cycle significantly affects training physiology -- here's the science with specific exercise recommendations:\n\n**Phase 1: Menstrual (Days 1-5)**\nHormone state: Estrogen and progesterone at lowest levels\nPhysiology: Prostaglandins trigger uterine contractions, inflammation elevated\nTraining implications: Pain perception heightened, recovery capacity reduced\n\nRecommended exercises:\n- Restorative yoga (research shows it reduces cortisol by 23%)\n- Walking (increases blood flow, natural endorphin release)\n- Swimming (buoyancy reduces joint stress)\n- Gentle stretching (hip flexors, lower back)\n- Light resistance: goblet squats, band pull-aparts (50% normal load)\n\nAvoid: Heavy axial loading (squats/deadlifts), intense ab work, high-impact plyometrics\n\n**Phase 2: Follicular (Days 6-14)**\nHormone state: Estrogen rising, peaks at ovulation\nPhysiology: Increased pain tolerance, better insulin sensitivity, enhanced MPS (muscle protein synthesis)\nTraining implications: Your STRONGEST phase! Studies show 10-15% strength increase.\n\nRecommended exercises:\n- Barbell compounds: back squats, deadlifts, bench press, rows\n- Olympic lifts: cleans, snatches (if trained)\n- HIIT protocols: Tabata, AMRAP circuits\n- Plyometrics: box jumps, broad jumps, burpees\n- PR attempts and 1RM testing\n\n**Phase 3: Ovulatory (Days 14-16)**\nHormone state: Estrogen peak triggers LH surge\nPhysiology: Joint laxity increases (estrogen affects collagen cross-linking)\n\nRecommended exercises:\n- Continue high-intensity work with extended warm-up (15+ min)\n- Reduce plyometric volume by 20-30%\n- Focus on controlled movements vs. ballistic\n- Proprioceptive work: single-leg exercises, balance training\n\n**Phase 4: Luteal (Days 17-28)**\nHormone state: Progesterone dominant\nPhysiology: Elevated body temp (+0.3-0.5°C), RPE increases 5-10% at same intensity\n\nRecommended exercises:\n- Moderate strength: machines, cables (controlled ROM)\n- Steady-state cardio: cycling, elliptical, incline walking\n- Pilates and barre (core stability without strain)\n- Yoga flows (avoid hot yoga -- already elevated temp)\n- Bodyweight circuits at 60-70% effort\n\nThe science term for this approach is "menstrual cycle periodization" -- a growing field with studies from the British Journal of Sports Medicine showing improved performance outcomes when training aligns with hormonal phases!`
+                    ];
+                },
+                cycle_for_other: (ctx) => [
+                    `Great! Here's the science of menstrual cycle training periodization for your partner:\n\n**🌑 Menstrual Phase (Days 1-5)**\nHormones: Estrogen & progesterone at lowest\nPhysiology: Prostaglandins elevated, inflammation increased\nExercises: Restorative yoga, walking, swimming, light resistance (50% load)\nAvoid: Heavy squats/deadlifts, intense ab work, HIIT\n\n**🌒 Follicular Phase (Days 6-14)**\nHormones: Estrogen rising to peak\nPhysiology: Pain tolerance up, insulin sensitivity improved, MPS enhanced\nExercises: Barbell compounds, HIIT, plyometrics, PR attempts\nThis is the STRONGEST phase -- studies show 10-15% strength increase!\n\n**🌕 Ovulatory Phase (Days 14-16)**\nHormones: Estrogen peak triggers LH surge\nPhysiology: Joint laxity increases\nExercises: Continue intensity with 15+ min warm-up, reduce plyometrics 20-30%\n\n**🌘 Luteal Phase (Days 17-28)**\nHormones: Progesterone dominant\nPhysiology: Body temp elevated, RPE increases 5-10%\nExercises: Machines, steady-state cardio, Pilates, yoga flows\n\nThis approach is called "menstrual cycle periodization" -- research from the British Journal of Sports Medicine shows improved performance when training aligns with hormonal phases!`
+                ],
+                workout_frequency: (ctx) => [
+                    `Training frequency science: each muscle group needs stimulation every 48-72 hours for optimal growth. Research shows training a muscle 2x/week produces ~60% more growth than 1x/week at equal volume. For ${GOAL_LABELS[ctx.goal] || 'your goal'}, 3-5 sessions/week is evidence-based.`,
+                ],
+                workout_reps: (ctx) => [
+                    `Rep science: different rep ranges recruit different motor units.\n- 1-5 reps: trains neural efficiency (strength)\n- 8-12 reps: maximizes metabolic stress + mechanical tension (hypertrophy)\n- 15+: builds muscular endurance and capillary density\n\nAll ranges build muscle; the mechanisms differ!`,
+                ],
+                cardio: (ctx) => [
+                    `Cardio science: aerobic exercise improves mitochondrial density (your cells' power plants) and cardiac output. HIIT triggers EPOC (excess post-exercise oxygen consumption) -- meaning you burn more calories for hours after. A mix of both steady-state and HIIT is optimal!`,
+                ],
+                nutrition_general: (ctx) => [
+                    `Nutrition science: your body needs three macronutrients -- protein (4 cal/g, builds tissue), carbs (4 cal/g, primary fuel), and fats (9 cal/g, hormones + cell membranes). The ratio matters for ${GOAL_LABELS[ctx.goal] || 'your goal'}, but total calories are the biggest factor!`,
+                ],
+                protein: (ctx) => [
+                    `Protein deep dive: proteins are chains of amino acids. Of the 20 amino acids, 9 are "essential" (your body can't make them). Animal proteins are "complete" (all 9), while most plant proteins need combining. Leucine is the key trigger for muscle protein synthesis -- found abundantly in whey, eggs, and chicken.`,
+                ],
+                calories: (ctx) => [
+                    `Calorie science: a "calorie" is the energy needed to heat 1kg of water by 1°C. Your body burns calories three ways:\n- BMR (60-70%): just existing\n- TEF (10%): digesting food\n- Activity (20-30%): movement\n\nProtein has the highest TEF at 20-30%, meaning you "lose" some calories just processing it!`,
+                ],
+                macros: (ctx) => [
+                    `Macro science:\n- Protein: amino acids for muscle repair, immune function, enzymes\n- Carbs: glucose for brain and muscles, stored as glycogen\n- Fats: essential for hormones (testosterone, estrogen), vitamin absorption, brain function\n\nNo macro is "bad" -- each serves critical biological functions!`,
+                ],
+                how_it_works: (ctx) => [
+                    `The AI uses MediaPipe Pose, a convolutional neural network (CNN) that was trained on millions of annotated body images. It detects 33 landmarks (joints + key points) in real-time. Our algorithm then applies kinanthropometric formulas to estimate composition from skeletal ratios -- similar to what physical therapists do visually, but quantified.`,
+                ],
+                what_is_this: (ctx) => [
+                    `Fix-it combines computer vision with exercise science! It uses MediaPipe Pose (Google's open-source body tracking AI) to analyze your photo, then applies fitness science research to generate personalized insights. Everything runs in your browser -- no data leaves your device. It's a great example of how AI can make health awareness more accessible!`,
+                ],
+                explain_upload: (ctx) => [
+                    `The Upload screen uses the HTML5 File API and MediaDevices API (for camera access) to capture your photo. Interestingly, image quality directly affects AI accuracy -- computer vision models rely on pixel data to detect edges and landmarks. The height/weight inputs enable BMI calculation using Quetelet's formula (weight/height^2), developed in 1832!`,
+                    `Upload is the data collection phase. The photo goes through the browser's Canvas API for preprocessing before AI analysis. Fun fact: the reason front-facing photos work best is that MediaPipe Pose was primarily trained on frontal body images, so it has the highest landmark detection accuracy from that angle!`
+                ],
+                explain_results: (ctx) => [
+                    `The Results screen applies a concept from data visualization called "progressive disclosure" -- it shows you the high-level summary first (body score, category, grade) before letting you drill into details. Your score of ${ctx.bodyScore}/100 is derived using kinanthropometry -- the science of body measurement in relation to physical activity, developed in the 1970s!`,
+                    `Results is your analysis dashboard! It uses the "information hierarchy" principle -- most important data (overall score) is largest and most prominent. The confidence indicator (${ctx.confidence}) represents a concept from machine learning: prediction certainty. Higher quality inputs = more data points = higher statistical confidence!`
+                ],
+                explain_breakdown: (ctx) => [
+                    `The Breakdown screen separates your analysis into three domains, each based on different measurement science:\n- Body Composition: uses anthropometric ratios (the same principles used in forensic science!)\n- Muscle Tone (${ctx.muscleScore}%): estimated from limb volume and elbow offset -- muscles push limbs outward\n- Posture (${ctx.postureScore}/100): based on biomechanical alignment markers used in physical therapy\n\nEach gauge uses a normalized 0-100 scale for easy comparison!`,
+                ],
+                explain_simulator: (ctx) => [
+                    `The Simulator applies exercise science research on body adaptation rates! It uses the principle of "dose-response relationship" in exercise -- a well-studied concept showing that training stimulus correlates with physiological adaptation. The projected changes are based on meta-analyses: ~0.5-1 lb/week fat loss and ~0.25-0.5 lb/week muscle gain are realistic rates backed by research.`,
+                ],
+                explain_workout_screen: (ctx) => [
+                    `The Workout screen applies exercise programming principles from the National Strength and Conditioning Association (NSCA). It uses your body data to determine appropriate training variables: exercise selection, rep ranges, set counts, and rest periods. The built-in workout player applies the concept of "timed work-rest intervals" -- a key factor in training effectiveness that most people underestimate!`,
+                ],
+                explain_nutrition_screen: (ctx) => [
+                    `The Nutrition screen applies nutritional science at every level! The Metabolic Rate card uses the Mifflin-St Jeor equation (validated in 2005 as the most accurate BMR formula) to compute BMR → TDEE → your personalized calorie target. The Calorie Balance card applies energy balance thermodynamics (MET-based exercise calorie estimation). The Hydration History heatmap draws on research showing visual behavior tracking improves adherence by 40-60%. All macros follow ISSN position stands. Science, made actionable!`,
+                    `The Nutrition screen is grounded in sport nutrition science. BMR (Basal Metabolic Rate) is calculated via Mifflin-St Jeor -- the gold standard formula. TDEE applies validated activity multipliers (PAL coefficients from Ainsworth's Compendium of Physical Activities). The 14-day hydration heatmap applies "temporal self-appraisal" theory -- seeing your historical patterns is more motivating than abstract goals. And the Calorie Balance card uses MET values to estimate exercise energy expenditure. Fun fact: the protein recommendation of ~1g/lb is supported by over 50 controlled studies!`
+                ],
+                explain_progress_screen: (ctx) => [
+                    `The Progress screen is a masterclass in behavioral science! It applies:\n- Streaks + Habits Tracker: implementation intentions + loss aversion (Kahneman & Tversky, 1979)\n- Daily Habits Score Ring: the "progress principle" (Amabile & Kramer, 2011) -- visual progress drives positive emotions\n- Weekly Report Card: temporal landmarks (Hershfield, 2014) -- weekly reflection improves adherence\n- Sleep & Recovery Tracker: evidence that sleep is the primary anabolic stimulus (Webb, 1998)\n- Smart Insights: pattern recognition across longitudinal health data -- multi-variable analysis improves outcome prediction\n- Progress Charts: visual feedback shown to improve adherence by up to 78% (sports science research)\n- Gamification (badges/XP): variable ratio reinforcement (Skinner) -- the most engaging reward schedule in psychology`,
+                ],
+                explain_scan_history: (ctx) => [
+                    `Scan History implements a critical concept from sports science: longitudinal progress tracking! Research shows that visual progress feedback significantly increases motivation and adherence (up to 78% better retention in studies).\n\nTechnically, it uses IndexedDB -- a browser-based NoSQL database that can store large binary data (photos) that would exceed localStorage limits (~5MB). Each snapshot preserves the full analysis state, enabling true before/after comparison.\n\nThe comparison view applies the "delta highlighting" principle from data visualization -- showing not just values but the direction and magnitude of change, which our brains process more intuitively than raw numbers!`,
+                ],
+                app_features: (ctx) => [
+                    `Here's the full feature architecture with the science behind each:\n\n1. Upload -- Data collection (HTML5 APIs + Canvas preprocessing)\n2. Analysis -- AI processing (MediaPipe Pose CNN, 33 landmarks)\n3. Results -- Summary dashboard (kinanthropometric scoring)\n4. Breakdown -- Detailed metrics (anthropometry + biomechanics)\n5. Simulator -- Transformation projection (exercise dose-response research)\n6. Workout -- Exercise programming (NSCA principles + guided player)\n7. Nutrition -- Mifflin-St Jeor BMR/TDEE, MET calorie balance, ISSN macro targets, 14-day hydration heatmap\n8. Progress -- Daily habits (behavioral scaffolding), weekly report (temporal landmarks), sleep tracker (recovery science), smart insights (pattern recognition), progress charts (visual feedback), gamification (variable reinforcement)\n9. AI Coach -- Context-aware assistant (intent classification)\n\nEach module applies real scientific principles to make fitness accessible!`,
+                ],
+                explain_body_comp: (ctx) => [
+                    `Body Composition is a field within kinanthropometry -- the science of measuring the human body in relation to physical activity. Your body is made up of two main compartments: fat mass (adipose tissue) and fat-free mass (muscle, bone, organs, water). The AI estimates this ratio using the "2-compartment model" -- the simplest validated approach. Your score of ${ctx.bodyScore}/100 reflects where you fall on population-normalized body composition scales.`,
+                    `Body Composition analysis has evolved dramatically! From underwater weighing (1940s) to DEXA scans (1980s) to AI-based estimation (now). This app uses skeletal proportions as proxies -- research shows shoulder-to-hip ratio correlates with body fat percentage (r=0.72 in clinical studies). Your score (${ctx.bodyScore}) is an approximation, but it tracks the same underlying measurements!`
+                ],
+                explain_muscle_dist: (ctx) => [
+                    `Muscle Tone Distribution examines how your ${ctx.muscleScore}% muscle score is distributed across body regions. The science: muscles develop according to the SAID principle (Specific Adaptation to Imposed Demands) -- so your distribution reflects your training and daily movement patterns. The AI estimates regional muscle mass from limb proportions, as larger muscles literally change the geometry of your body (e.g., developed lats widen the torso, larger biceps push elbows outward).`,
+                    `Muscle distribution is a concept from exercise physiology. Muscles don't develop uniformly -- someone who runs will have different distribution than someone who swims. The AI detects this through body geometry changes: developed chest/shoulders increase upper body width, trained legs change thigh-to-waist ratios. Your ${ctx.muscleScore}% overall tone is broken into regions to show where development is strongest!`
+                ],
+                explain_posture_analysis: (ctx) => [
+                    `Posture Analysis applies biomechanical principles! Ideal posture creates a vertical "plumb line" through your ear, shoulder, hip, knee, and ankle. The AI measures deviations from this ideal using your skeletal landmarks. Your score of ${ctx.postureScore}/100 reflects alignment quality. Fascinating fact: posture affects not just appearance but breathing capacity (up to 30%), joint stress, and even mood (research shows upright posture increases confidence and reduces cortisol)!`,
+                ],
+                explain_body_zones: (ctx) => [
+                    `Body Zone Analysis divides your body into anatomical regions based on kinesiological chains. Each zone represents a functional unit: upper body (shoulder girdle + arms), core (trunk + pelvis), and lower body (hip complex + legs). The science behind zoning comes from functional anatomy -- these regions work as integrated chains during movement. Assessing each zone separately reveals functional imbalances that a single overall score would mask!`,
+                ],
+                explain_fitness_index: (ctx) => [
+                    `The Fitness Index (${ctx.fitnessIndex}) is a composite metric -- similar to how economists combine multiple indicators into a single index (like GDP). It synthesizes body composition, muscle development, and postural alignment into one number. The weighting is based on exercise science research on which factors most strongly correlate with overall physical fitness and health outcomes.`,
+                ],
+                explain_workout_player: (ctx) => [
+                    `The Workout Player applies principles of structured exercise programming from the NSCA (National Strength and Conditioning Association). It enforces proper work-rest ratios -- research shows that rest periods significantly affect training outcomes: 30-60s rest favors endurance, 1-2 min for hypertrophy, 3-5 min for strength. The guided format also uses "external pacing," which studies show improves adherence compared to self-paced workouts!`,
+                ],
+                explain_streaks_badges: (ctx) => [
+                    `The gamification system is rooted in behavioral psychology!\n\n- Streaks use "loss aversion" (Kahneman & Tversky, 1979) -- we feel losses ~2x more than equivalent gains, so protecting a streak is powerfully motivating\n- Badges apply "variable ratio reinforcement" (B.F. Skinner) -- the most engaging reward schedule in psychology\n- XP/Levels leverage the "goal gradient effect" (Hull, 1932) -- effort increases as you approach a goal\n- Weekly Challenges provide "optimal challenge" (Csikszentmihalyi's Flow Theory) -- tasks matched to ability\n\nThese aren't gimmicks -- they're evidence-based behavior change tools!`,
+                ],
+                explain_confidence_indicator: (ctx) => [
+                    `The Confidence Indicator ("${ctx.confidence}") applies a concept from machine learning called "prediction confidence." In computer vision, accuracy depends on input quality -- just like a doctor needs clear X-rays for diagnosis. The AI assesses: landmark detection certainty (were all 33 points found?), image resolution, pose angle deviation from training data distribution, and whether supplementary data (height/weight) was provided. More data points = tighter confidence intervals!`,
+                ],
+                explain_visual_age: (ctx) => [
+                    `Visual Age is a fascinating concept rooted in the science of biological aging vs. chronological aging. Research shows that fitness markers -- VO2 max, muscle mass, posture quality -- correlate more strongly with perceived age than birth year alone. A 2018 study in the British Journal of Sports Medicine found that regular exercisers appeared 10-15 years younger on average. This feature estimates your "apparent age" from posture, composition, and muscle tone. You'll see it on the Results screen (current) and Simulator (projected). Important distinction: this is perceptual, not clinical!`,
+                    `Did you know that biological age and chronological age can differ by decades? Visual Age applies this concept by estimating how old your body appears based on measurable fitness indicators. Posture quality, body composition, and muscle development all influence perceived age -- research from the European Journal of Aging and Physical Activity confirms that fitness level is the strongest predictor of perceived youthfulness. Shown on Results (now) and Simulator (future projections)!`
+                ],
+                explain_symmetry: (ctx) => [
+                    `The Symmetry Score applies principles from bilateral symmetry analysis in kinesiology. Perfect bilateral symmetry (100%) is rare -- even elite athletes show 5-10% asymmetry (research from the Journal of Strength & Conditioning). The score compares left-right landmark positions for shoulders, arms, and hips. Sub-metrics include Lean Mass Index (estimated lean tissue relative to frame) and Proportion Balance (how body segments relate to each other proportionally). In sports science, significant asymmetry (>15%) is associated with increased injury risk!`,
+                    `Symmetry science is fascinating! The concept of "fluctuating asymmetry" has been studied in biology since the 1940s. Your symmetry percentage measures bilateral balance -- comparing left vs. right body landmarks. It encompasses Lean Mass Index and Proportion Balance sub-metrics. Research shows that resistance-trained individuals tend to have better symmetry than untrained populations, and correcting asymmetries can improve both performance and injury resilience!`
+                ],
+                explain_ai_reasoning: (ctx) => [
+                    `The "Why AI Thinks This" feature implements a principle from AI ethics called Explainable AI (XAI). The field emerged because "black box" models -- systems that give outputs without explaining reasoning -- erode user trust. Research from DARPA's XAI program shows that explainable systems increase user confidence by 40-60%. On the Breakdown screen, toggling this reveals the specific landmarks, ratios, and scoring algorithms behind each metric. It transforms opaque numbers into understandable reasoning chains!`,
+                ],
+                explain_scenarios: (ctx) => [
+                    `The 4 Simulator scenarios apply principles from exercise physiology and predictive modeling!\n\n- Active Lifestyle: based on ACSM guidelines (150 min/week moderate activity) -- research shows measurable body composition changes in 8-12 weeks\n- Sedentary Continuation: models detraining effects (muscle loss of ~0.5-1% per week of inactivity, per the Journal of Applied Physiology)\n- Intensive Training: based on periodized training literature -- progressive overload yields ~0.25-0.5 kg muscle gain/month\n- Nutrition Optimization: applies metabolic research on caloric balance and nutrient timing\n\nThe Projected Impact Summary synthesizes all scenarios for comparison. These are evidence-based projections, not guarantees!`,
+                ],
+                explain_weekly_routine: (ctx) => [
+                    `The Weekly Routine generator applies exercise programming principles from the NSCA and ACSM. The split type options reflect training periodization research:\n\n- Full Body: optimal for beginners (3x/week frequency per muscle group, per Schoenfeld 2016)\n- PPL (Push/Pull/Legs): balances volume and recovery\n- Upper-Lower: 2x/week frequency with moderate volume\n- Bro Split: high volume per muscle, 1x/week frequency\n\nThe muscle coverage chart ensures programming completeness -- a concept from exercise science called "training balance." Session duration affects volume prescription (sets x reps), which directly impacts hypertrophy and strength outcomes!`,
+                ],
+                explain_todays_routine: (ctx) => [
+                    `Today's Routine applies the principle of "daily undulating periodization" -- varying training stimuli across the week. The ~32 minute session length is evidence-based: research from the Journal of Sports Sciences shows that sessions of 30-45 minutes optimize the testosterone-to-cortisol ratio (longer sessions increase cortisol, which is catabolic). The exercise selection targets your ${GOAL_LABELS[ctx.goal] || 'fitness'} goal with appropriate intensity and volume. The workout player enforces proper work-rest ratios, which research shows is critical for desired training adaptations!`,
+                ],
+                explain_food_recognition: (ctx) => [
+                    `"Snap Your Meal" applies computer vision to nutritional science! Food recognition AI uses convolutional neural networks trained on food image datasets. Research from the International Journal of Food Sciences and Nutrition shows that visual estimation of portions is notoriously inaccurate (humans misjudge by 20-50%), so AI-assisted recognition improves tracking accuracy. The system identifies food items, cross-references a nutritional database for calorie and macronutrient estimates, and allows user verification -- a "human-in-the-loop" approach that combines AI speed with human judgment!`,
+                ],
+                explain_meal_plan: (ctx) => [
+                    `The Meal Plan generator applies nutritional science principles to meal programming. The goal options reflect different energy balance equations:\n\n- Fat loss: caloric deficit (typically 300-500 kcal/day below TDEE)\n- Muscle gain: caloric surplus (200-400 kcal/day above TDEE)\n- Maintenance: energy balance (calories in = calories out)\n\nDietary preferences adjust macronutrient ratios based on research: high protein diets preserve lean mass during cuts (Phillips & Van Loon, 2011), vegetarian diets require attention to complete protein sources, and low carb approaches alter fuel utilization. The weekly format supports meal prep -- a strategy shown to improve dietary adherence by 25-30%!`,
+                ],
+                explain_daily_macros: (ctx) => [
+                    `Daily Macro Targets apply the science of macronutrient periodization! Your targets are calculated from your body composition data and ${GOAL_LABELS[ctx.goal] || 'fitness'} goal using established formulas. Key research underpinnings:\n\n- Protein: 1.6-2.2g/kg for muscle preservation (Morton et al., 2018 meta-analysis)\n- Carbohydrates: scaled to activity level (3-7g/kg, per ISSN position stand)\n- Fat: minimum 0.5g/kg for hormonal health, typically 20-35% of calories\n\nThe circular on-track chart applies "self-monitoring" psychology -- research consistently shows that tracking intake improves outcomes by 50-70% compared to non-tracking!`,
+                ],
+                explain_nutrition_insights: (ctx) => [
+                    `The 3 Nutrition Insight cards are grounded in nutritional science research:\n\n1. Protein Timing: the concept of "muscle protein synthesis" (MPS) windows. Research by Areta et al. (2013) found that distributing protein across 4-5 meals of 25-40g each maximizes 24-hour MPS compared to fewer, larger doses.\n\n2. Meal Frequency: eating every 3-4 hours maintains stable blood glucose and amino acid availability. While total daily intake matters most, research suggests regular feeding patterns improve satiety and reduce overeating.\n\n3. Hydration: water needs scale with activity level (ACSM recommends ~500ml per 30 min of exercise on top of baseline needs). Even 2% dehydration reduces performance by 10-20%!`,
+                ],
+                explain_exercise_filters: (ctx) => [
+                    `The exercise filter system applies training specificity principles:\n\n- Home (bodyweight): leverages research showing bodyweight training produces comparable hypertrophy to weighted training at matched effort levels (Calatayud et al., 2015)\n- Gym (equipment): enables progressive overload -- the fundamental driver of adaptation (Kraemer & Ratamess, 2004)\n- Weak Areas: applies the "principle of priority" -- training lagging areas first when neuromuscular fatigue is lowest\n\nThe Experience Level selector adjusts exercise complexity and intensity based on the NSCA's progression model: beginners need movement pattern mastery, intermediates handle moderate loads, and advanced trainees require periodized high-intensity programming!`,
+                ],
+                explain_themes: (ctx) => [
+                    `The theme system applies principles from environmental psychology and UX research! Studies show that color schemes affect mood and motivation -- dark themes (Charcoal, Midnight) reduce eye strain by up to 60% in low-light environments (American Academy of Ophthalmology). Color psychology research suggests blue tones (Midnight, Ocean) promote calm focus, purple (Lavender) is associated with creativity, and light themes (Ivory) maximize readability in bright environments. The 5 options -- Charcoal, Ivory, Midnight, Ocean, Lavender -- let users optimize their visual environment for comfort and motivation!`,
+                ],
+                explain_body_silhouette: (ctx) => [
+                    `The Body Silhouette visualization applies anatomical mapping principles from sports medicine. The SVG diagram segments the body into 4 functional zones -- Shoulders, Upper Body, Core, and Legs -- mirroring how physical therapists and trainers assess physique. Each zone receives a descriptive label (e.g., "Balanced," "Athletic," "Moderate Tone," "Strong") based on the analysis metrics for that region. This approach is called "body regionalization" in exercise science and helps translate complex data into an intuitive visual that anyone can understand at a glance!`,
+                ],
+                explain_coach_personas: (ctx) => [
+                    `The Coach Persona system applies principles from educational psychology -- specifically, "differentiated instruction" (Tomlinson, 2001). Research shows that learners respond differently to communication styles:\n\n- Encouraging: uses positive reinforcement (Skinner) -- effective for motivation and adherence\n- Structured: appeals to systematic/analytical learners who prefer organized data\n- Educational: targets "need for cognition" (Cacioppo & Petty, 1982) -- people who enjoy understanding the "why"\n- Humorous: leverages humor's effect on information retention (Schmidt, 1994 -- humor increases recall by 20%)\n\nCurrently active: ${state.coachPersona || 'encouraging'}. Same evidence-based content, different pedagogical approach. Switch anytime -- no information is lost!`,
+                ],
+                explain_bmr_tdee: (ctx) => [
+                    `The Metabolic Rate card applies the Mifflin-St Jeor equation (validated in 2005 as the most accurate BMR formula for non-obese adults, beating Harris-Benedict by ~5% mean error).\n\nBMR = 10×weight(kg) + 6.25×height(cm) − 5×age + gender constant\n(+5 males, −161 females)\n\nMultiply by your PAL (Physical Activity Level) coefficient to get TDEE -- Total Daily Energy Expenditure. These multipliers (1.2–1.9) are derived from doubly-labeled water studies, the gold standard for free-living energy expenditure measurement. The card shows your formula with real numbers, making the "black box" of calorie science transparent!`,
+                    `BMR represents your resting energy expenditure -- the calories required for homeostasis at complete rest. It accounts for 60-75% of total daily calorie needs. The Mifflin-St Jeor formula accounts for weight (metabolically active tissue), height (body surface area proxy), age (each decade reduces BMR by 2-3% due to muscle loss), and sex (testosterone-driven muscle mass differences). Multiplied by your activity factor and adjusted for your goal, it gives your optimal daily calorie target. The Nutrition screen now shows every step of this calculation!`
+                ],
+                explain_daily_habits: (ctx) => [
+                    `The Daily Habits Tracker applies "implementation intentions" theory (Gollwitzer, 1999) -- research shows that specifying WHEN and HOW you'll perform health behaviors increases follow-through by 200-300% vs. vague goals alone.\n\nThe 5 habits (Workout, Hydration, Sleep, Nutrition, Check-In) represent the key pillars of the "Health Behavior Process Model." Each auto-detected habit removes the friction of manual logging -- a principle from "behavioral economics of health" (Thaler & Sunstein's Nudge Theory, 2008).\n\nThe streak counter applies "habit loop" theory (Duhigg, 2012): cue (app opens) → routine (check habits) → reward (ring fills). The visual score ring leverages the "goal gradient effect" -- effort increases as you approach completion!`,
+                ],
+                explain_sleep_tracker: (ctx) => [
+                    `Sleep science is categorical: it is THE most underrated recovery modality in fitness. During NREM Stage 3-4 (slow-wave sleep), growth hormone secretion peaks -- this is when muscle protein synthesis primarily occurs, not during training (Webb & Doman, 1998).\n\nThe Recovery Score synthesizes three evidence-based factors:\n- Sleep hours (50% weight): NSF recommends 7-9h for adults\n- Sleep quality (30% weight): subjective quality correlates with slow-wave sleep depth and sleep efficiency\n- Workout balance (20% weight): the Overtraining Syndrome risk equation\n\nResearch consistently shows sleep restriction (<6h) reduces anabolic hormone output by 60-70% (Leproult & Van Cauter, 2011). The tracker makes this invisible recovery metric visible and actionable!`,
+                ],
+                explain_weekly_report: (ctx) => [
+                    `The Weekly Report Card applies "temporal landmarks" theory from behavioral economics (Hershfield et al., 2014). Research shows that weekly summaries are the optimal temporal unit for behavior reflection -- shorter windows (daily) generate noise, longer windows (monthly) reduce actionability.\n\nThe grading algorithm is a composite metric -- similar to how exercise science research uses multi-variable adherence scoring. It weights workout consistency, sleep quality, and recovery together because research shows composite scores predict long-term health outcomes better than any single metric.\n\nThe "fresh start effect" (Dai et al., 2014) is also applied -- natural week boundaries create psychological permission to improve after a suboptimal week. A poor week doesn't need to predict future weeks!`,
+                ],
+                explain_smart_insights: (ctx) => [
+                    `Smart Insights applies a technique from data science called "exploratory data analysis" (EDA) -- specifically, automated pattern recognition across longitudinal health data.\n\nRather than reporting raw numbers, it analyzes RELATIONSHIPS across logged data. For example, the sleep-workout correlation engine compares sleep hours on training days vs. rest days (a ≥0.3h difference is statistically meaningful in population studies). The calorie adherence engine applies a ±8% threshold -- research on dietary compliance shows this is the meaningful deviation range.\n\nThis mirrors clinical exercise physiology research methodology, where multi-source biomarker combinations predict outcomes far better than individual metrics. The "wisdom of crowds" principle applied to your own longitudinal data!`,
+                ],
+                explain_calorie_balance: (ctx) => [
+                    `The Calorie Balance card applies the First Law of Thermodynamics to human metabolism! Energy can neither be created nor destroyed -- only converted. This is the fundamental principle of body composition change:\n\nNet balance = Calories Eaten − Calories Burned\n\nWorkout calories use MET (Metabolic Equivalent of Task) values from Ainsworth's Compendium of Physical Activities (2011) -- the most comprehensive database of exercise energy costs. METs express intensity as multiples of resting metabolic rate (1 MET = 3.5mL O₂/kg/min at rest).\n\nResearch shows that even a 300-500 kcal daily deficit (without excessive restriction) produces optimal fat loss rates while preserving lean mass. Tracking both sides of the equation is what separates effective programs from guesswork!`,
+                ],
+                explain_hydration_history: (ctx) => [
+                    `The Hydration History heatmap applies two key scientific principles!\n\n1. Water balance physiology: water comprises 60% of body mass and participates in every metabolic process -- including muscle protein synthesis, fat oxidation (lipolysis requires adequate hydration), and thermoregulation. Even 1-2% dehydration reduces strength output by 5-8% and cognitive function by 15-20% (Grandjean & Grandjean, 2007).\n\n2. "Behavior visualization" (Wood et al., 2005): seeing your historical patterns spatially creates stronger memory traces than numerical tracking alone. The heatmap provides "ambient feedback" -- passive awareness that shapes behavior without requiring active attention.\n\nThe 8-glass (~2L) target is a simplified guideline; actual needs scale with body mass (roughly 35ml/kg) and activity level (add 500ml per 30min of exercise)!`,
+                ],
+                explain_progress_charts: (ctx) => [
+                    `The Progress Charts section applies longitudinal data visualization principles from exercise science! Research consistently shows visual feedback of health metrics improves adherence and goal attainment by 40-78% compared to text-based reporting.\n\nThe 7 chart tabs cover distinct health dimensions aligned with the "integrated wellness" model:\n- Body metrics (Score, BMI, Muscle): kinanthropometric data from scans\n- Weight: body mass tracking\n- Sleep: recovery quantification\n- Activity: training load monitoring (key for periodization planning)\n- Calories: energy balance history\n\nThe Calories tab uses a "reference line" approach -- Tufte's data visualization principles show that contextualizing data relative to a goal benchmark improves decision-making compared to absolute values alone. Chart.js renders these as clean, interactive visualizations!`,
+                ],
+                explain_challenges: (ctx) => [
+                    `Behavioral psychology research shows that short-term, specific goals significantly outperform vague long-term intentions — this is "goal-setting theory" (Locke & Latham, 1990). Weekly Challenges leverage this: they're time-bound (7 days), specific, and rewarded (XP). This structure triggers the brain's dopamine reward pathway on completion, reinforcing the behavior. The rotating format prevents habituation — you're always working toward something new. Find them on the Progress screen!`,
+                    `Weekly Challenges apply the principle of "implementation intentions" — pre-committed, specific action plans shown in multiple studies to increase goal completion by 20-30%. Each challenge acts as a behavioral contract: concrete, deadline-bound, and rewarded. Completing them conditions the habit loop (cue → routine → reward), making healthy behaviors increasingly automatic over time.`
+                ],
+                explain_levels_xp: (ctx) => [
+                    `Gamification in health apps leverages Self-Determination Theory (Deci & Ryan) — specifically the need for competence (leveling up = measurable mastery). XP systems create operant conditioning loops where consistent behavior produces measurable reward. Research shows visible progress metrics increase behavioral adherence by up to 40% vs. non-gamified apps. Each XP point represents a completed health behavior, making your level a genuine proxy for lifestyle consistency.`,
+                    `The XP and leveling system is rooted in variable ratio reinforcement — the most powerful conditioning schedule in behavioral psychology. By earning XP for diverse behaviors (workouts, food logging, habits, challenges), the system creates compound motivation: any positive health action feels rewarding. Studies on gamified health interventions show sustained engagement increases significantly when progress is made visible and cumulative.`
+                ],
+                explain_weight_log: (ctx) => [
+                    `Daily weight logging is one of the most evidence-backed self-monitoring behaviors in weight management research. A Cornell University study found that daily weighers lost 3× more weight than weekly weighers. Critical caveat: body weight fluctuates 1–3 kg daily due to water retention, glycogen storage, and digestive contents — this is physiological noise, not fat change. The app's sparkline trend filters this noise, revealing the true underlying trajectory. Log consistently for accurate trend data.`,
+                    `Self-monitoring theory (Carver & Scheier) explains why weight logging works: it creates a feedback loop between behavior and outcome, enabling real-time course correction. Research shows that the act of logging alone — independent of the content — increases awareness of intake and activity patterns. The app's trend calculation uses linear regression principles: 3+ entries over 14+ days produces a statistically meaningful rate-of-change estimate.`
+                ],
+                explain_goal_weight: (ctx) => [
+                    `The Goal Weight feature applies the SMART goal framework (Specific, Measurable, Achievable, Relevant, Time-bound). The estimated weeks calculation prioritizes your actual logged trend (most accurate), then calorie balance data, then a conservative 0.5 kg/week default. Research from the American Journal of Clinical Nutrition identifies 0.5–1.0% body weight/week as the optimal fat loss rate to preserve lean mass. The progress bar provides continuous feedback — a key factor in goal adherence psychology.`,
+                    `Goal visualization research demonstrates that progress bars and quantified milestones significantly improve motivation compared to text-only goals. The Zeigarnik effect suggests incomplete goals remain "cognitively active" — meaning seeing 68% progress on your goal bar creates a genuine psychological pull toward completion. The app's dynamic pace calculation (using real weight trend data) ensures the timeline estimate reflects actual physiology, not arbitrary assumptions.`
+                ],
+                explain_food_log: (ctx) => [
+                    `Dietary self-monitoring is the #1 predictor of successful weight management across multiple meta-analyses. A 2019 study in Obesity found that people logging food 100+ days/year lost significantly more weight than non-loggers. The mechanism: logging prevents "calorie amnesia" — research shows most people underestimate intake by 30–50%. The app's preset system reduces logging friction, a key barrier identified in HCI research on health app adherence.`,
+                    `The food log activates "prospective memory" and "inhibitory control" — two cognitive mechanisms that reduce impulsive eating when users know they'll need to log food. Studies on dietary self-monitoring show awareness alone reduces overconsumption by 10–15%. Macro logging (protein/carbs/fats) adds another layer: understanding macronutrient composition helps users make informed trade-offs rather than simply counting calories.`
+                ],
+                explain_workout_splits: (ctx) => [
+                    `Training split selection should optimize both volume and frequency per muscle group. Research (Schoenfeld, 2010) identifies 10–20 weekly sets per muscle for hypertrophy, with each set needing 48–72 hours of recovery. Full Body splits deliver ~9 sets/muscle (3×3), while PPL allows up to 18 sets (6×3). Meta-analyses show that hitting each muscle group 2×/week produces greater hypertrophy than 1×/week at equal volume. The app's split recommendation weighs your frequency capacity against your analysis-identified weak areas.`,
+                    `The science of periodization shows that training split selection impacts both acute recovery and long-term adaptation. Mechanistically, muscle protein synthesis (MPS) peaks 24–48 hours post-training and returns to baseline by 72 hours — making frequency (hitting muscles before MPS returns to baseline) the critical variable for muscle growth. Upper/Lower and Full Body splits achieve this 2× frequency most efficiently. PPL requires 6 days/week to maintain equivalent frequency.`
+                ],
+                explain_body_recomp: (ctx) => [
+                    `Body recomposition occurs through concurrent activation of fat oxidation and muscle protein synthesis — historically thought impossible simultaneously, but now well-documented. It requires: adequate leucine intake (≥2.5g/meal) to trigger mTOR pathway for MPS, a mild calorie deficit (100–300 kcal below maintenance) to drive fat oxidation, and sufficient sleep for GH release supporting tissue repair. Most effective in beginners (elevated MPS baseline), detrained athletes (muscle memory), and individuals with elevated body fat (metabolic flexibility).`,
+                    `The biochemistry of recomposition: in a slight calorie deficit with high protein, adipose tissue provides the energy shortfall via lipolysis (fat breakdown), while dietary amino acids fuel muscle protein synthesis. This partitioning is optimized by insulin sensitivity — resistance training acutely improves skeletal muscle glucose uptake and amino acid transport, creating a 24-48 hour anabolic window that muscle protein synthesis can leverage even in a deficit. Track with body score over time in Scan History.`
+                ],
+                explain_workout_history: (ctx) => [
+                    `Workout History provides longitudinal training session data — exercises performed, sets, reps, and load per session. Review for progressive overload verification, training frequency analysis, and volume tracking. Located in the Progress screen Workout History cell.`
+                ],
+                explain_personal_records: (ctx) => [
+                    `Personal Records quantify peak neuromuscular output per exercise. Each PR update represents measurable strength adaptation. Progressive PR improvement is the primary objective indicator of training efficacy. Monitor in the Progress screen Personal Records cell.`
+                ],
+                explain_body_measurements: (ctx) => [
+                    `Anthropometric circumference tracking (chest, waist, hips, arms) provides body composition change data independent of scale weight. Waist reduction + arm circumference increase while weight remains stable is classic recomposition evidence. Log every 2–4 weeks in the Progress screen Body Measurements cell.`
+                ],
+                explain_maintenance: (ctx) => [
+                    `Physiological maintenance requires matching energy intake to Total Daily Energy Expenditure (TDEE) within ±200 kcal/day. Skeletal muscle is metabolically expensive (~13 kcal/kg/day) and requires continued mechanical stimulus (resistance training) to avoid sarcopenic drift — the gradual loss of muscle with age and disuse. The Mifflin-St Jeor equation (used in this app's BMR calculator) has ±10% accuracy; recalculate every 5 kg of body weight change to maintain precision.`,
+                    `Maintenance is not a passive state — it requires active behavioral regulation. Research shows weight regain after loss is common (up to 50% within 1 year) without structured maintenance behaviors. The Daily Habits ring, Weekly Report Card, and Calorie Balance card are specifically designed to detect maintenance drift early (before it compounds). Sustained muscle mass during maintenance requires minimum ~1.6g protein/kg/day — without it, muscle catabolism begins within weeks even with adequate total calories.`
+                ],
+                explain_account: (ctx) => [
+                    `The My Account section is your personal command center! Access it from the user menu (tap your name/avatar in the top right). You can update your display name, email, and fitness profile details — height, weight, gender, age range, activity level, and fitness goal. The more accurate your fitness profile, the more precisely the AI calibrates your workout and nutrition recommendations!`,
+                    `Your account settings live in the user menu → My Account. This is where you can edit your identity details (name, email) and your full fitness profile. Keeping these accurate matters because the AI uses your biometric data to personalize everything from calorie targets to workout recommendations!`
+                ],
+                explain_optional_measurements: (ctx) => [
+                    `The optional measurements on the upload screen are scientifically valuable! The AI primarily uses MediaPipe Pose landmarks from your photo, but actual circumference measurements (chest, waist, hips, arms in cm) provide real-world body proportion data that photos can't perfectly capture. Use a soft tape measure, stand relaxed, measure at the widest point for each area. This hybrid approach significantly improves estimation accuracy!`,
+                    `Those optional measurement fields are genuinely worth filling in! Photo analysis estimates body proportions from camera geometry, but actual tape measurements are direct data. When the AI has both inputs, it cross-validates the photo estimates and refines results — the difference between an educated guess and a data-informed analysis!`
+                ],
+                explain_export: (ctx) => [
+                    `Export and sharing features help you document and celebrate your journey! "Export Data" on the Results screen saves your complete analysis as a structured file — great for personal records. "Share Card" generates a visual summary formatted for social sharing. Research consistently shows that sharing fitness milestones increases long-term adherence to training goals!`,
+                    `You have several ways to capture and share your progress! The Results screen offers Export Data (saves your full metrics) and Share Card (creates a shareable image). After a workout session, "Share Workout" creates a completion summary. Sharing publicly has been shown to increase workout consistency — accountability is a powerful motivational tool!`
+                ],
+                explain_comparison: (ctx) => [
+                    `The scan comparison feature is designed for longitudinal body composition assessment! Go to Progress → Scan History, select two scans from different dates, and tap Compare. The side-by-side view shows every metric: body score, muscle tone, posture alignment, with percentage changes. The body changes slowly, so comparing scans months apart reveals genuine long-term trends!`,
+                    `Comparing scans over time is one of the most scientifically meaningful features in the app! Individual snapshots can be misleading due to daily fluctuations, but comparing two scans months apart reveals genuine trends in composition, muscle development, and posture. Find it in Progress → Scan History → select two → Compare!`
+                ],
+                explain_live_posture: (ctx) => [
+                    `Live Posture Check uses your device camera and real-time AI to monitor your body mechanics as you exercise! On the Workout screen, tap "Start Live Posture Check." The system uses MediaPipe Pose to continuously evaluate shoulder alignment, spinal curvature, and hip positioning, then displays corrective cues. This is real-time proprioceptive feedback — teaching your body what correct alignment feels like!`,
+                    `The Live Posture Check is fascinating from a biomechanics perspective! It uses computer vision to analyze your posture in real time through your camera, detecting shoulder asymmetry, forward head posture, hip tilt, and other compensatory patterns, then gives immediate correction cues. Good posture during exercise prevents injury and maximizes muscle activation efficiency!`
+                ],
+                explain_data_management: (ctx) => [
+                    `The Data Management section (bottom of Upload screen) shows how much local storage the app is using and provides a "Clear All Data" option. This removes all client-side data: session state, scan history, food logs, workout logs, and habit data. Important: this only clears local browser storage — your server-side account and synced data remain intact. Use it for a fresh start or to free up device storage!`,
+                    `Local data management is important for app performance! The Data Management card on the Upload screen shows your localStorage usage and has a "Clear All Data" button. Browser localStorage has limited capacity, so clearing occasionally can prevent slowdowns. Your account data lives on the server and isn't affected — only locally cached data gets cleared!`
+                ],
+                explain_auth: (ctx) => [
+                    `Authentication lets you securely access your personalized data across sessions! To create an account, click "Sign Up", enter your email and a password (minimum 8 characters), choose a display name, and verify your email via the confirmation link. Your account stores analysis history, progress data, and settings server-side — accessible from any device!`,
+                    `Having an account is what makes this app truly powerful! Registration takes under a minute: Sign Up → email + password + display name → email verification. Once verified, log in to access all your data from any session. The server stores your scan history, progress logs, habits, and settings so you never lose progress!`
+                ],
+                _fallback: (ctx) => [
+                    `Interesting question, but I'm not sure how to answer that! I'm best at explaining the science behind body analysis, exercise, nutrition, and app features. Try asking about how your score works, workout science, nutrition biochemistry, or ask me to explain any screen!`,
+                    `I'd love to help, but I didn't quite catch that. I can explain the science behind your results, training principles, nutrition, or any feature in the app. What would you like to learn about?`
+                ]
+            },
+
+            humorous: {
+                greeting: (ctx) => [
+                    `Oh hey! Your favorite fitness-nerd AI is here. I know things about your body score, workouts, and whether pizza counts as a macro. (It doesn't. Mostly.) What's up?`,
+                    `Well well well, look who came to chat! I've got jokes AND fitness data. Ask me about your score, workouts, nutrition... or just say hi. I'm not picky.`
+                ],
+                thanks: (ctx) => [
+                    `Aw shucks! I'd blush if I had a face. Keep being awesome out there!`,
+                    `You're welcome! This is the most validation I've received since someone accidentally liked my code. Keep the questions coming!`
+                ],
+                help: (ctx) => [
+                    `I can talk about:\n- Your body score (no judgment, pinky promise)\n- Muscles & posture (stand up straight!)\n- Workouts (pain is just weakness leaving, etc.)\n- Nutrition (pizza discourse welcome)\n- How the AI works (spoiler: magic)\n- Any screen or feature (I'll give you the tour)\n\nFire away!`,
+                ],
+                identity: (ctx) => [
+                    `Who am I? I'm your Fix-it coach -- part fitness guru, part data nerd, part comedian (debatable). I analyze your body composition, plan workouts, dish out nutrition advice, and crack jokes along the way. I run entirely in your browser, so your secrets are safe. Mostly because I forget everything when you close the tab.`,
+                    `I'm the Fix-it fitness coach! Think of me as that gym buddy who actually knows stuff -- body analysis, workout plans, nutrition tips, the works. I'm powered by AI and your analysis data. I can't spot you on bench press, but I can tell you exactly why you should be doing it. What's up?`
+                ],
+                body_score: (ctx) => [
+                    `Your body score is ${ctx.bodyScore}/100. In video game terms, that's your starting character stats. Overall grade: ${ctx.grade}. Don't worry -- we're about to start the training montage portion of your story!`,
+                    `Body score: ${ctx.bodyScore} out of 100. That's like a ${ctx.category} rating on Yelp, but for your body. Overall: ${ctx.grade}. The good news? Unlike Yelp, you can actually improve this score!`
+                ],
+                body_category: (ctx) => [
+                    `You're a "${ctx.category}" with a "${ctx.bodyType}" build. Think of it as your character class in the RPG of life. Every class has its strengths -- time to level up yours!`,
+                ],
+                muscle_tone: (ctx) => [
+                    `Muscle tone: ${ctx.muscleScore}%. Your muscles exist, the AI confirmed it. That's already better than my muscle tone, and I'm made of code. Time to pump those numbers up!`,
+                ],
+                posture: (ctx) => [
+                    `Posture score: ${ctx.postureScore}/100. ${ctx.postureScore > 70 ? "Not bad! Your spine is cooperating." : "Your spine is filing a complaint. Maybe fewer hours hunched over your phone?"} The good news: posture is one of the fastest things to improve!`,
+                ],
+                bmi: (ctx) => [
+                    ctx.bmi ? `BMI: ${ctx.bmi}. Fun fact -- BMI was invented in 1832 by a mathematician who had never been to a gym. By that math, The Rock is "obese." So take it with a boulder-sized grain of salt. Your body score (${ctx.bodyScore}) is more useful!` : `No BMI data yet! You haven't told me your height and weight. I promise I won't tell anyone. I literally can't -- I run locally in your browser.`,
+                ],
+                confidence: (ctx) => [
+                    `Analysis confidence: "${ctx.confidence}". ${ctx.confidence === 'high' ? "The AI is feeling pretty confident about its homework. Gold star!" : "The AI is squinting a bit. Better lighting and a front-facing photo would help it see you more clearly. It's AI, not a bat."}`,
+                ],
+                goal: (ctx) => [
+                    `Your goal: ${GOAL_LABELS[ctx.goal] || 'general fitness'}. A noble quest! Your workout and nutrition plans are all designed around this. If you change your mind, that's fine -- I won't tell your gym crush.`,
+                ],
+                lose_weight: (ctx) => [
+                    `Fat loss tip: it's basically a math problem where pizza is the variable you want to minimize. Eat slightly less than you burn, keep protein high, lift heavy things, and be patient. Your body stores fat for survival reasons, so it won't give it up without a polite but firm negotiation.`,
+                ],
+                build_muscle: (ctx) => [
+                    `To build muscle: eat a bit more, lift heavy things, put them down, repeat. Sleep like a teenager. The sciencey version: calorie surplus + progressive overload + protein + recovery = gains. Patience required -- your muscles are being rebuilt, not microwaved.`,
+                ],
+                improve_posture: (ctx) => [
+                    `Posture: ${ctx.postureScore}/100. Your spine is basically begging you to stop doom-scrolling. Fix: strengthen your upper back, stretch your chest, and pretend there's a string pulling you up from the top of your head. Wall angels are your new best friend. Sorry.`,
+                ],
+                workout_general: (ctx) => [
+                    `Alright, ${ctx.category} with a ${ctx.bodyType} build (score: ${ctx.bodyScore}) -- here's the workout scoop for ${GOAL_LABELS[ctx.goal] || 'fitness'}: ${ctx.bodyScore <= 30 ? 'start with 3 days/week of compound movements. Your body is about to discover muscles it forgot it had. Walking on off days counts too -- your couch will survive without you.' : ctx.bodyScore <= 55 ? 'you\'ve got a decent base! 3-5 days/week, compound lifts first, then accessories. Progressive overload is your new religion -- add weight or reps weekly.' : 'with your fitness level, it\'s about smart programming -- periodization, targeted work, and not ego-lifting. You know the drill.'} The Workout screen has the specifics. The hardest part is showing up -- after that, gravity does half the work.`,
+                    `Exercise advice for our resident ${ctx.category} (score: ${ctx.bodyScore}, ${ctx.bodyType} type, muscle tone: ${ctx.muscleScore}%): ${ctx.bodyScore <= 30 ? 'baby steps that turn into regular steps that turn into squats. Start light, focus on form, and give yourself grace.' : ctx.bodyScore <= 55 ? 'you\'re in the sweet spot where consistent training produces visible results. Compound lifts are your bread and butter.' : 'you already know what you\'re doing -- keep pushing, keep progressing, and maybe show off a little less. Or more. I\'m not your mom.'} Goal: ${GOAL_LABELS[ctx.goal] || 'fitness'}. Check the Workout screen!`
+                ],
+                workout_plan: (ctx) => [
+                    `A personalized plan? For MY favorite ${ctx.category} (score: ${ctx.bodyScore}, ${ctx.bodyType} build)? I thought you'd never ask!\n\n${ctx.bodyScore <= 30 ? '**The "Let\'s Get This Party Started" Plan:**\n- 3 days/week, full body (your couch will miss you)\n- Compound movements with bodyweight or light weights\n- Daily walks -- yes, walking counts. Your FitBit will finally have purpose\n- Focus: learning proper form (ego-lifting is the enemy)\n- Muscle tone at ${ctx.muscleScore}%? We\'re about to change that number. Dramatically.' : ctx.bodyScore <= 55 ? '**The "Level Up" Plan:**\n- 4 days/week upper/lower split\n- Compound lifts: squat, bench, deadlift, rows (the Big Four -- like the Avengers of exercises)\n- 2-3 cardio sessions (one HIIT, because suffering builds character)\n- Muscle tone: ${ctx.muscleScore}% -- decent foundation, let\'s build a mansion on it' : '**The "Already Pretty Awesome" Plan:**\n- 4-5 days/week push/pull/legs\n- Heavy compounds + isolation work for the mirror muscles (we all do it)\n- Periodized training because your body is too smart for the same routine\n- Muscle tone: ${ctx.muscleScore}% -- show-off. Let\'s optimize those gains'}\n\nGoal: ${GOAL_LABELS[ctx.goal] || 'general fitness'}. ${ctx.goal === 'lose-weight' ? 'We\'re burning fat while keeping muscle -- like renovating a house while living in it. Totally doable, just don\'t skip the protein.' : ctx.goal === 'build-muscle' ? 'Gains incoming. Eat big, lift big, sleep big. In that order. Actually, sleep first. Tired lifters make poor decisions.' : 'The balanced approach -- like being good at everything in a video game instead of min-maxing one stat.'} Check the Workout screen for the specifics!`,
+                    `You want a plan? Based on your ${ctx.category} status (body score: ${ctx.bodyScore}, ${ctx.bodyType} type, muscle tone: ${ctx.muscleScore}%), here's the blueprint:\n\n${ctx.bodyScore <= 30 ? '**Phase 1: "The Origin Story"**\nEvery superhero starts somewhere. Your somewhere is:\n- 3x/week full-body workouts\n- Bodyweight exercises + light resistance (no need to wrestle a barbell on day one)\n- Walking on off days (it\'s free, it works, and dogs love it)\n- Learn the foundational movements -- you\'re building skills, not just muscles' : ctx.bodyScore <= 55 ? '**Phase: "The Montage Begins"**\nCue the Rocky music:\n- 4x/week: upper body / lower body split\n- Big compound lifts as your main course, accessories as dessert\n- Mix cardio modalities so your body can\'t get comfortable\n- Progressive overload: add weight or reps each week (your muscles need plot twists)' : '**Phase: "Final Form Loading"**\nYou\'re already in good shape, so:\n- 4-5x/week push/pull/legs rotation\n- Serious compound work + targeted isolation\n- Deload weeks (even Goku takes rest episodes)\n- Advanced techniques: drop sets, supersets, periodization'}\n\nFor ${GOAL_LABELS[ctx.goal] || 'your goal'}, the Workout screen has your detailed exercise menu. Go check it out -- I believe in you!`
+                ],
+                cycle_workout: (ctx) => {
+                    if (ctx.gender === 'male') {
+                        return [`Plot twist! Your profile says male, and last time I checked, menstrual cycles are a female-exclusive experience. (Biology, am I right?)\n\nAre you asking for someone else? A girlfriend, wife, training buddy, sister, client? If so, I respect the support! Let me know and I'll give you the full rundown on cycle-based training -- complete with specific exercises for each phase.\n\nKnowledge is power, and being the person who actually understands this stuff? That's ally behavior. Just say the word!`];
+                    }
+                    return [
+                        `Ah yes, the monthly subscription no one asked for. Here's how to train during your cycle (because your uterus doesn't care about your gym schedule):\n\n**Days 1-5 (The Angry Phase):**\n- Your body: "We're having a moment"\n- Best exercises:\n  - Yoga (child's pose is your new best friend)\n  - Walking (preferably somewhere pretty)\n  - Swimming (yes it's fine, the internet lied)\n  - Foam rolling (avoid the abs area unless you enjoy pain)\n  - Light dumbbells: 15+ reps, nothing heroic\n- Skip: heavy deadlifts, burpees, anything requiring enthusiasm\n\n**Days 6-14 (The Superpower Phase):**\n- Your body: "Let's GO"\n- Best exercises:\n  - Barbell squats (go heavy, queen)\n  - Deadlifts (this is your moment)\n  - Bench press, overhead press\n  - Pull-ups (or working toward them)\n  - HIIT, sprints, box jumps\n  - Literally anything -- you're basically invincible\n- This is PR territory. Your muscles said "we're ready."\n\n**Days 15-28 (The Rollercoaster Phase):**\n- Your body: "We're going through some things"\n- Best exercises:\n  - Machine work (less stabilization needed)\n  - Steady cardio: bike, elliptical, incline treadmill\n  - Pilates and barre\n  - Bodyweight circuits at 70% effort\n  - Yoga flows (but maybe not hot yoga)\n- Skip: maxing out, intense HIIT, exercises requiring extreme motivation\n\n**Survival kit:**\n- Magnesium (200-400mg) for cramps\n- Heating pad + Netflix = valid recovery\n- Chocolate is basically medicine\n\nYour cycle is a built-in periodization plan. Might as well use it!`,
+                        `Period workout advice? Finally, someone asks the real questions.\n\n**When Aunt Flo visits (Days 1-5):**\n- Exercise menu:\n  - Restorative yoga (child's pose, legs up the wall)\n  - Walking your feelings out\n  - Swimming (it's fine, I promise)\n  - Light stretching on the floor\n  - Dramatically lying down (technically recovery)\n- If lifting: 50% weight, double the reps, zero judgment\n- Hard pass on: crunches, heavy squats, anything requiring you to be upside down\n\n**Post-period glow-up (Days 6-14):**\n- Exercise menu:\n  - ALL the compound lifts (squats, deads, bench, rows)\n  - Olympic lifts if you're fancy\n  - HIIT that makes you question your life choices\n  - Box jumps, burpees, sprints\n  - PR attempts (your body is literally at peak performance)\n- Your muscles recover faster, your pain tolerance is up, you're basically a superhero\n\n**The pre-period chronicles (Days 15-28):**\n- Exercise menu:\n  - Moderate machine work\n  - Steady-state cardio (bike, elliptical, walking)\n  - Pilates, barre classes\n  - Bodyweight circuits\n  - Yoga (but skip the hot yoga -- you're already running warm)\n- Energy declining? Valid. Cravings? Also valid. Extra carbs? Your body temp is actually elevated, so you're burning more. Eat the bread.\n\nBottom line: your uterus has its own periodization plan. Might as well work with it instead of against it.`
+                    ];
+                },
+                cycle_for_other: (ctx) => [
+                    `Look at you, being supportive! Here's the full cycle training guide you can share:\n\n**Days 1-5 (Menstrual Phase):**\n- Best approach: gentle movement, no heroics\n- Exercises: yoga, walking, swimming, light stretching\n- Skip: heavy lifts, intense HIIT, anything requiring peak enthusiasm\n- Pro tip: heat pads and magnesium are MVP recovery tools\n\n**Days 6-14 (Follicular/Ovulatory Phase):**\n- This is superhero time -- estrogen is peaking\n- Exercises: heavy compound lifts (squats, deadlifts, bench), HIIT, sprints\n- This is when PRs happen. Muscles recover faster, pain tolerance is up\n- Basically invincible mode\n\n**Days 15-28 (Luteal Phase):**\n- Energy starts declining, and that's normal\n- Exercises: moderate machine work, steady cardio, pilates, bodyweight circuits\n- Body temp is elevated = burning slightly more calories\n- Cravings are valid -- carbs aren't the enemy\n\n**Your role as supporter:**\n- Don't question the chocolate needs (it's practically medicine)\n- Understand that "I don't feel like it" is a valid training response some days\n- Be encouraging during the superpower phase -- help them chase those PRs!\n\nYou're doing great by even asking. That's ally behavior right there.`,
+                    `Supporting someone through cycle-synced training? Here's your complete guide:\n\n**Phase 1 - The Rest & Recover Days (1-5):**\n- Light movement only: walks, gentle yoga, swimming\n- Comfort over performance\n- Valid activities: foam rolling while watching TV, stretching, existing\n\n**Phase 2 - The "Let's GO" Days (6-14):**\n- Peak performance window\n- Heavy lifting, high intensity, PR attempts\n- Energy and recovery are maxed out\n- This is when to push hard (if they want to)\n\n**Phase 3 - The Gradual Chill (15-28):**\n- Moderate intensity, steady state cardio\n- Machine work over free weights\n- Listen to energy levels day by day\n- Cravings = body asking for fuel\n\n**Support tips:**\n- Stock magnesium supplements (200-400mg helps with cramps)\n- Never say "but you worked out fine last week" -- every cycle is different\n- Celebrate the superhero phase wins!\n- Heating pad access = thoughtful partner points\n\nThe fact that you're learning this? That's top-tier support energy.`
+                ],
+                workout_frequency: (ctx) => [
+                    `How often to train? 3-5 days/week is the sweet spot for most humans (and AI-coached ones). Rest days aren't lazy days -- they're "growth days." Your muscles grow while you Netflix, which is the best fitness fact ever.`,
+                ],
+                workout_reps: (ctx) => [
+                    `Reps guide:\n- Want to be strong? 3-5 reps (grunt loudly)\n- Want to look good? 8-12 reps (that mirror flex)\n- Want endurance? 15-20 reps (become a machine)\n\nFor ${GOAL_LABELS[ctx.goal] || 'your goal'}: 3-4 sets of 8-12 is a solid default. The last few should make you question your life choices.`,
+                ],
+                cardio: (ctx) => [
+                    `Cardio: the thing everyone loves to hate. 2-3 sessions per week, 20-30 min. Walking counts! Actually, walking 8-10K steps daily is arguably better than running yourself into the ground. Your knees will write you a thank-you note.`,
+                ],
+                nutrition_general: (ctx) => [
+                    `Nutrition for ${GOAL_LABELS[ctx.goal] || 'your goal'}: eat real food, plenty of protein, some vegetables (I know, I know), and don't demonize any food group. Check the Nutrition screen for actual numbers. And yes, you can still have pizza. Sometimes.`,
+                ],
+                protein: (ctx) => [
+                    `Protein: aim for about 0.8-1g per pound of body weight. That's a lot of chicken breast. Alternatives: eggs, Greek yogurt, fish, tofu, protein shakes, or becoming friends with someone who meal preps. Protein is basically the VIP of macros for body composition.`,
+                ],
+                calories: (ctx) => [
+                    `Calories: the currency of gains (or losses). For ${GOAL_LABELS[ctx.goal] || 'your goal'}:\n- Lose fat: spend more than you deposit\n- Build muscle: deposit a little extra\n- Maintain: break even\n\nYour body is basically a bank account that you have to exercise. Worst bank ever.`,
+                ],
+                macros: (ctx) => [
+                    `Macros explained:\n- Protein: builds stuff (priority #1)\n- Carbs: energy go brrr\n- Fats: your hormones need these (please eat fats)\n\nSet protein first, then split the rest. It's like assembling furniture -- protein is the Allen wrench. Nothing works without it.`,
+                ],
+                how_it_works: (ctx) => [
+                    `How does this work? The AI plays connect-the-dots with 33 points on your skeleton. Then it does math -- the kind that would make your phone warm if it had feelings. It measures proportions like a very nerdy tailor and goes "hmm yes, I can estimate your body composition from this." Science!`,
+                ],
+                what_is_this: (ctx) => [
+                    `Fix-it: it's like having a personal trainer, nutritionist, and that one friend who knows too many fitness facts -- all in your browser. Upload a photo, get analyzed by AI, receive workout and meal recommendations. No gym membership required. Pants optional.`,
+                ],
+                explain_upload: (ctx) => [
+                    `The Upload screen: where you bravely submit a photo of yourself to be judged by a robot. You can snap one with your camera or upload an existing pic. Pro tip: good lighting and a front-facing pose will make the AI less confused. Think passport photo, but you're allowed to smile.`,
+                    `Step 1: Upload a photo. Step 2: Enter your height and weight (the AI promises not to gossip). Step 3: Pick your fitness goal. That's it! The AI handles the rest. Just make sure you're in the photo and not your cat. We haven't trained it for cats. Yet.`
+                ],
+                explain_results: (ctx) => [
+                    `The Results screen: your fitness report card! Body score: ${ctx.bodyScore}/100. Category: "${ctx.category}". Grade: ${ctx.grade}. Unlike school report cards, there's no parent-teacher conference. From here, you can explore your breakdown, try the simulator, or check workout and nutrition plans. It's like a choose-your-own-adventure book, but for fitness!`,
+                    `Results is where the AI says "here's what I think" about your body. Score, category, body type -- the whole package. Think of it as your character stats screen in an RPG. From here, you can go deeper into any area. Spoiler: the Breakdown screen has even more numbers!`
+                ],
+                explain_breakdown: (ctx) => [
+                    `The Breakdown screen: where we dissect your analysis into tiny, judgeable pieces! Three sections:\n- Body Composition: are you more marshmallow or marble? (Yours: ${ctx.bodyScore}/100)\n- Muscle Tone: do your muscles exist? (${ctx.muscleScore}% says... probably!)\n- Posture: is your spine cooperating? (${ctx.postureScore}/100)\n\nEach has visual gauges because numbers are more fun with progress bars. It's like a video game HUD for your body!`,
+                ],
+                explain_simulator: (ctx) => [
+                    `The Simulator: it's a time machine for your body, minus the paradoxes! Slide the timeline and watch projected changes based on your ${GOAL_LABELS[ctx.goal] || 'fitness'} goal. Will you look like a Greek god in 6 months? Probably not exactly, but it shows realistic progress based on science. No DeLorean required, just consistency and protein.`,
+                ],
+                explain_workout_screen: (ctx) => [
+                    `The Workout screen: where your muscles learn their fate. It generates personalized exercises based on your profile and ${GOAL_LABELS[ctx.goal] || 'fitness'} goal. Sets, reps, rest periods -- all laid out. Plus there's a built-in workout player that's basically a personal trainer who can't judge your gym outfit. Follow along and pretend someone's counting for you!`,
+                ],
+                explain_nutrition_screen: (ctx) => [
+                    `The Nutrition screen: where we tell you what to eat AND how many calories your body burns just to exist (pretty cool, right?). We've got the Mifflin-St Jeor BMR/TDEE Calculator -- science's fancy way of saying "here's exactly how much food your metabolism demands." Plus a Calorie Balance card to see if your workouts actually earned that slice of pizza (spoiler: probably yes). And a Hydration History heatmap that judges your water intake across 30 days without saying a word. All personalized for ${GOAL_LABELS[ctx.goal] || 'your goal'}. Your hidden snack drawer is still between you and yourself.`,
+                ],
+                explain_progress_screen: (ctx) => [
+                    `The Progress screen: we turned fitness into a video game... then added MORE game features! What started as streaks and badges now has:\n- Daily Habits: 5 habits tracked daily (auto-detected from your logs + a manual check-in). Score ring goes from 0 to 5. Yes, it spins.\n- Weekly Report Card: a literal A-F grade for your week. Finally a grade you can control.\n- Sleep & Recovery: because lifting heavy things requires actually sleeping.\n- Smart Insights: the AI squinting at your data and saying "have you considered being more consistent?"\n- Progress Charts: actual graphs! Calories, weight, sleep trends -- going up is sometimes good, sometimes bad.\n- Streaks, Badges, XP, Challenges, Scan History: still there, still excellent.\n\nIt's manipulative? Yes. Does it work? Also yes. Is there now a lot of stuff? Extremely yes.`,
+                ],
+                explain_scan_history: (ctx) => [
+                    `Scan History: because nothing says "I'm committed to fitness" like hoarding photos of yourself in the browser's database.\n\nEvery time you do an analysis, we secretly save a snapshot (with your permission, obviously). Check the Progress screen and you'll see all your past scans lined up like a police lineup, except the suspect is your former body.\n\nSelect any TWO scans and hit Compare for the ultimate "glow-up" or "what happened?" moment. Side-by-side photos, all your metrics with arrows pointing up or down, and a summary that's either motivating or mildly roasting. It's like a time machine, but for abs you may or may not have developed.`,
+                ],
+                app_features: (ctx) => [
+                    `The grand tour of all features (no ticket required):\n\n1. Upload -- Sacrifice a photo of yourself to the AI gods\n2. Analysis -- Watch the AI think really hard about your body\n3. Results -- Your fitness report card (no parent signature needed)\n4. Breakdown -- Your body stats, RPG-style, with gauges and everything\n5. Simulator -- A time machine for your body (batteries not included)\n6. Workout -- Your personal trainer that can't smell your gym bag\n7. Nutrition -- A nutritionist who also does your metabolism math (BMR/TDEE Calculator, Calorie Balance, Hydration History Heatmap)\n8. Progress -- A fitness video game with serious feature creep: Daily Habits, Weekly Report Card, Sleep Tracker, Smart Insights, Progress Charts, Streaks, Badges, Challenges, Scan History\n9. Me! -- Your AI coach: same data, better jokes\n\nAsk about any of these for the deep dive!`,
+                ],
+                explain_body_comp: (ctx) => [
+                    `Body Composition: the fancy way of asking "what am I made of?" Spoiler: mostly water, some muscle, some fat, a skeleton, and whatever you had for lunch. Your score (${ctx.bodyScore}/100) estimates the ratio of muscle to fat using AI skeleton math. Think of it as the "ingredients list" for your body. Category: "${ctx.category}" -- but that's just a label, not a life sentence!`,
+                    `Body Composition is basically: how much of you is muscle, how much is fat, and how much is just vibes. Score: ${ctx.bodyScore}/100. The AI figures this out by measuring your body proportions -- apparently your shoulder-to-hip ratio reveals a LOT. Like a fortune teller, but for fitness. And slightly more accurate.`
+                ],
+                explain_muscle_dist: (ctx) => [
+                    `Muscle Tone Distribution: it's like a heat map of where your muscles live! Overall you're at ${ctx.muscleScore}%. The breakdown shows which parts of you are carrying the team (upper body? core? legs?) and which are freeloading. It's based on how your body proportions suggest muscle development -- bigger muscles literally change your shape. Think of it as your body's talent show, region by region.`,
+                    `Muscle Tone Distribution (${ctx.muscleScore}%): this breaks down which muscle groups are pulling their weight and which ones called in sick. Upper body, core, lower body -- each gets a score. The AI can tell because muscles literally push your skeleton around. Your elbows stick out more? Bigger arms. Wider torso? Hello, lats. It's like detective work, but for gains.`
+                ],
+                explain_posture_analysis: (ctx) => [
+                    `Posture Analysis: the AI's way of checking if you sit like a question mark or an exclamation point. Score: ${ctx.postureScore}/100. It checks if your shoulders are level, your head isn't doing the "tech neck" lean, and your hips aren't tilted like a confused seesaw. The good news: posture is fixable. The bad news: you'll become annoyingly aware of how you sit. Forever.`,
+                ],
+                explain_body_zones: (ctx) => [
+                    `Body Zones: your body, divided into sections like a pizza (but less delicious). Upper body, core, lower body -- each zone gets its own score. It's like your body's report card, but per-subject. "A+ in legs, C- in core" tells you where to focus. Think of it as the body equivalent of knowing which classes to study harder for.`,
+                ],
+                explain_fitness_index: (ctx) => [
+                    `Fitness Index: ${ctx.fitnessIndex}. It's basically your body's GPA -- one number that tries to capture everything. Body composition, muscle tone, posture -- all mashed together into a single score. Is it perfectly precise? No. Is it useful for tracking progress? Yes. Is it better than your actual GPA? Depends on your college experience.`,
+                ],
+                explain_workout_player: (ctx) => [
+                    `The Workout Player: it's like having a personal trainer, except it can't yell at you or judge your form. It guides you through exercises one by one with timers and rep counts. Hit play, follow along, try not to skip the exercises you hate (we're looking at you, burpees). It even tracks your progress. All the accountability, none of the awkward gym small talk.`,
+                ],
+                explain_streaks_badges: (ctx) => [
+                    `Streaks, Badges & XP: we gamified your fitness because let's be honest -- you'll do more for a shiny badge than for your own health. And that's okay! Streaks count consecutive training days (don't break the chain or you'll feel weirdly guilty). Badges are achievements for hitting milestones. XP and Levels... yes, we turned exercise into an RPG. You're welcome. Now go earn some experience points in the real world.`,
+                ],
+                explain_confidence_indicator: (ctx) => [
+                    `Confidence Indicator: "${ctx.confidence}". This is the AI saying "${ctx.confidence === 'high' ? "I'm pretty sure about this!" : "I'm squinting at your photo and doing my best."}". It depends on photo quality, lighting, and whether you gave it height/weight data. Think of it as the AI's version of "I'm X% confident I'm right about this." The better the input, the fewer disclaimers I have to make.`,
+                ],
+                explain_visual_age: (ctx) => [
+                    `Visual Age: the app's way of saying "you look THIS old" without getting slapped. It estimates how old you *appear* based on fitness, posture, and body composition -- not your driver's license. Results screen shows your current visual age, and the Simulator shows what it could become. Think of it as the opposite of those "guess your age" carnival games, except this one uses actual data instead of a guy in a top hat.`,
+                    `Visual Age is basically the AI playing "guess your age" -- but instead of being weirdly wrong like your aunt at Thanksgiving, it uses actual body metrics. Your posture, muscle tone, and body composition all affect how old you look. The coolest part? The Simulator shows you could look younger by just... taking care of yourself. Revolutionary concept, I know.`
+                ],
+                explain_symmetry: (ctx) => [
+                    `Symmetry Score: are you lopsided? Let's find out! This percentage on the Results screen measures if your left and right sides are playing nice together. It also includes Lean Mass Index and Proportion Balance, which are fancy ways of saying "are you built evenly?" Spoiler: almost nobody is perfectly symmetrical. Even Greek statues cheated a little. So don't panic if it's not 100%.`,
+                    `Your Symmetry Score checks if you're built like a well-balanced human or if one side is doing all the work while the other side watches Netflix. It measures left vs. right body balance, plus Lean Mass Index and Proportion Balance. Fun fact: most people's dominant side is slightly more developed. So if you're right-handed and your right arm is bigger... congrats, you're normal.`
+                ],
+                explain_ai_reasoning: (ctx) => [
+                    `"Why AI Thinks This" on the Breakdown screen is basically the AI showing its homework. Toggle it on and you'll see exactly which landmarks it stared at, what ratios it measured, and how it arrived at each score. It's like asking a math teacher to show their work, except this teacher is a neural network and it doesn't sigh disappointedly at you. Transparency is cool -- who knew?`,
+                    `The "Why AI Thinks This" toggle is the AI equivalent of "show your work." Instead of just throwing numbers at you, it explains which body points it measured and how it calculated each score. Think of it as the AI's diary: "Dear journal, I looked at the shoulder-to-hip ratio and it was 1.4, so I gave a high V-taper score." Riveting stuff, honestly.`
+                ],
+                explain_scenarios: (ctx) => [
+                    `The Simulator has 4 "choose your own adventure" scenarios:\n\n- Active Lifestyle: "What if you actually went to the gym regularly?"\n- Sedentary Continuation: "What if you became best friends with your couch?"\n- Intensive Training: "What if you went full montage mode?"\n- Nutrition Optimization: "What if you ate like you said you would?"\n\nEach shows how your muscle tone, posture, and visual age might change. Plus a Projected Impact Summary card that puts it all together. It's like a fitness crystal ball, except it's backed by data instead of vibes.`,
+                    `Four lifestyle scenarios, four possible futures -- it's like a Marvel multiverse but for your body. Active Lifestyle (the responsible choice), Sedentary Continuation (the Netflix villain), Intensive Training (the Rocky montage), and Nutrition Optimization (the "eating your vegetables" arc). Each projects changes to muscle tone, posture, and visual age. The Projected Impact Summary wraps it all up with a bow.`
+                ],
+                explain_weekly_routine: (ctx) => [
+                    `The Weekly Routine generator: because "I'll just wing it at the gym" has been working out SO well for you. Pick your goal, choose a split (Full Body for the efficient, PPL for the dedicated, Upper-Lower for the balanced, Bro Split for the chest-and-bicep enthusiasts), set your available days and session length. It generates a full 7-day plan with a muscle coverage chart so no muscle group gets ghosted. You're welcome, legs.`,
+                    `Weekly Routine generator on the Workout screen -- it's like a meal planner, but for suffering! Choose your split type: Full Body (efficient), Push/Pull/Legs (balanced), Upper-Lower (the compromise), or Bro Split (international chest day every Monday). Set your days and duration, and boom -- a full week planned out. The muscle coverage chart makes sure you're not accidentally creating the world's most uneven physique.`
+                ],
+                explain_todays_routine: (ctx) => [
+                    `Today's Routine: the card that removes your last excuse. It tells you exactly what to do today -- exercises, time (~32 min, shorter than most Netflix episodes), exercise count, and estimated calorie burn. Hit start and the workout player guides you through everything. No thinking required. Just show up and move. The hardest part is pressing "Start," and even that's just a tap.`,
+                    `Today's Routine is the "just tell me what to do" button you've been looking for. It's got your exercises, total time (about 32 minutes -- that's less than an episode of The Office), and estimated calories burned. Tap start and follow along. The AI did all the planning so your brain doesn't have to. It's basically a cheat code for the gym.`
+                ],
+                explain_food_recognition: (ctx) => [
+                    `"Snap Your Meal" is the Shazam of food. Take a photo of your meal, and the AI goes "that's chicken, rice, and broccoli -- approximately 450 calories." Is it sometimes wrong? Sure. Is it still faster than manually searching "how many calories in a handful of almonds" for the 47th time? Absolutely. You can correct it if it thinks your burrito is a spring roll, then add it to your daily log.`,
+                    `Food recognition: point your camera at food and the AI plays nutritionist. "That's a salad with grilled chicken, approximately 380 calories." If it confuses your pizza for a flatbread... fair enough, the line is blurry. You can fix the detection before logging it. It's like having a food diary that fills itself in, minus the guilt of writing "4 slices" instead of "2."`
+                ],
+                explain_meal_plan: (ctx) => [
+                    `The Meal Plan generator: because "I'll figure out what to eat later" always ends at the drive-through. Open the modal, pick your goal (fat loss, muscle gain, or "please just maintain what I have"), choose a dietary preference (standard, high protein, vegetarian, or low carb), and set meals per day. It generates a full weekly plan with day-by-day breakdowns. It's like a restaurant menu, except everything is good for you and nobody asks about drinks.`,
+                    `Meal Plan generator: your personal chef that costs $0 and doesn't judge your past food choices. Pick your goal, dietary preference, meals per day -- and it builds your entire week. Fat loss, muscle gain, maintenance... vegetarian, high protein, low carb. It's all there. Day-by-day meal breakdowns so you never have to stand in front of the fridge wondering "what goes with existential dread?" again.`
+                ],
+                explain_daily_macros: (ctx) => [
+                    `Daily Macro Targets: the card that turns eating into a progress bar video game. Your calorie target is there, plus protein/carb/fat bars that fill up as you log meals. There's even a circular chart showing your "on-track percentage" -- because apparently we need a pie chart to eat pie responsibly. It's all personalized to your body data and ${GOAL_LABELS[ctx.goal] || 'fitness'} goal. Watch the bars fill up. Feel the satisfaction. Ignore the irony of gamifying nutrition.`,
+                    `Your Daily Macros card is basically a health bar -- for your health. Calorie target, protein bar, carb bar, fat bar, plus a satisfying circular chart showing how on-track you are. Everything is calibrated to your body and ${GOAL_LABELS[ctx.goal] || 'fitness'} goal. It's like a fitness app progress bar, except filling this one up actually requires eating. Finally, a game where snacking is the objective.`
+                ],
+                explain_nutrition_insights: (ctx) => [
+                    `Three insight cards, three pieces of unsolicited nutrition advice (you're welcome):\n\n- Protein Timing: spread your protein across 4-5 meals, 25-40g each. Your muscles don't want a protein flood once a day -- they want a steady drip, like a needy houseplant.\n- Meal Frequency: eat every 3-4 hours. Your metabolism likes consistency, kind of like a Labrador.\n- Hydration Goal: a water target based on your activity level. Yes, you probably need to drink more water. No, coffee doesn't count. Okay fine, it partially counts.`,
+                    `Nutrition Insights: three cards of wisdom your body wishes you'd follow.\n\n1. Protein Timing: 25-40g per meal across 4-5 meals. Don't save it all for one massive chicken breast at dinner.\n2. Meal Frequency: every 3-4 hours. Think of yourself as a Tamagotchi that needs feeding.\n3. Hydration: a personalized water target because "I had coffee" is not adequate hydration, no matter how strongly you feel about it.`
+                ],
+                explain_exercise_filters: (ctx) => [
+                    `Exercise filters: for when you want to pretend you have preferences at the gym. Choose from All (everything), Home (no equipment, a.k.a. "I'm too lazy to go to the gym"), Gym (equipment needed, a.k.a. "I'm feeling fancy"), or Weak Areas (exercises for your detected weaknesses -- the AI noticed, and it's not going to let you skip them). Plus Experience Level: Beginner ("what's a deadlift?"), Intermediate ("I know what a deadlift is"), Advanced ("I AM the deadlift").`,
+                    `Workout filters on the Workout screen! All = everything. Home = bodyweight only (for the "gym is too far" days). Gym = bring equipment. Weak Areas = the AI saw your weak spots and is now targeting them like a heat-seeking missile. The Experience Level selector goes from Beginner (we all start somewhere) to Intermediate (you know things) to Advanced (you probably correct other people's form). No judgment. Okay, maybe a little.`
+                ],
+                explain_themes: (ctx) => [
+                    `Theme picker: because your fitness journey deserves aesthetic consistency. Five options in the header: Charcoal (dark and brooding, like a fitness Batman), Ivory (light mode, for the brave), Midnight (dark blue, very "late night workout"), Ocean (teal, very "I do yoga"), and Lavender (purple, very "I'm fancy"). One click and the whole app changes color. It won't make you stronger, but you'll LOOK like you're using a premium app.`,
+                    `Five themes, zero impact on your actual fitness, 100% impact on vibes. Charcoal is the dark default (mysterious). Ivory is light mode (for psychopaths who exercise in the morning). Midnight is dark blue (nocturnal gym rats). Ocean is teal (you probably also have a meditation app). Lavender is purple (royalty energy). Pick one. Change it weekly. Live your best chromatic life.`
+                ],
+                explain_body_silhouette: (ctx) => [
+                    `The Body Silhouette on Results is basically a paper doll version of you, but make it science. It's an SVG diagram showing 4 body zones -- Shoulders, Upper Body, Core, and Legs -- each with a status label. "Balanced," "Athletic," "Moderate Tone," "Strong"... it's like getting a report card, except the teacher is an AI and the subjects are body parts. At least you can't get detention for a weak core. Yet.`,
+                    `Body Silhouette: a fancy diagram of your body on the Results screen. Four zones labeled -- Shoulders, Upper Body, Core, Legs -- each with descriptors like "Athletic" or "Moderate Tone." Think of it as your body's Yelp reviews, written by an AI. "Legs: 4 stars, would squat again." It gives you an instant visual of where your body is thriving and where it's... vibing on the couch.`
+                ],
+                explain_coach_personas: (ctx) => [
+                    `You're talking to the funny one (excellent taste), but there are 4 coach personas total:\n\n- Encouraging: the motivational poster come to life, exclamation marks everywhere!\n- Planner/Structured: bullet points, data, no nonsense. Probably uses spreadsheets for fun.\n- Explainer/Educational: "well, ACTUALLY, according to a 2019 study..." (but in a good way)\n- Funny/Humorous: that's me! I make gains AND jokes. Quality of both varies.\n\nSwitch anytime -- same info, different flavor. Like protein powder, but for personality.`,
+                    `Four coach modes, one AI, zero professional qualifications (just kidding... kind of). Encouraging is your hype person. Structured is your project manager. Educational is your professor. And Humorous -- that's me -- is the friend who makes you laugh while spotting your bench press. Currently active: ${state.coachPersona || 'humorous'}. You can switch anytime, but why would you leave this comedic goldmine?`
+                ],
+                explain_bmr_tdee: (ctx) => [
+                    `BMR stands for "Basal Metabolic Rate" -- the calories you burn by doing absolutely nothing. Not even blinking. Just existing. Somewhere around ${state._bmr || 'a calculable number'} kcal/day for you. Add movement and you get TDEE -- the real daily target. Calculated using the Mifflin-St Jeor formula, which sounds like a Harry Potter spell but is actually legit science from 1990. On the Nutrition screen, tweak your activity level and goal, hit Recalculate & Apply, and your macros update automatically. Fun fact: your brain alone burns ~20% of your BMR. You're welcome, big-brain reader.`,
+                    `The BMR/TDEE Calculator on the Nutrition screen: the app's way of saying "this is how much food your body demands, minimum." BMR = what you burn lying in bed. TDEE = BMR × how much you move. The Mifflin-St Jeor formula does the math so you don't have to. Couch potato → elite athlete activity levels, all the calorie targets in between, one button to apply them. Science! On your phone!`
+                ],
+                explain_daily_habits: (ctx) => [
+                    `Daily Habits on Progress: 5 things the app wants you to do every day, presented as a ring that fills up like a health bar in an RPG. Log a workout (💪), reach 8 glasses of water (💧), get 7+ hours of sleep (😴), log your meals (🥗), and tap the Check-In habit (🎯) like you're punching a time clock. The app auto-detects the first four from your logs, so if you're already doing them -- the ring fills itself. The Check-In is manual because we still trust you. Mostly.`,
+                    `The Daily Habits tracker on Progress auto-detects 4 of 5 habits: workout logged today? Auto-detected. 8 glasses of water? Checked. 7+ hours of sleep logged? Verified. Meals logged? Confirmed. The 5th (Check-In 🎯) you tap manually -- call it the honor system. Score 5/5 and the ring turns green. Which is either satisfying or mildly terrifying depending on your personality. Per-habit streaks show how many days in a row you've been consistent. Yes, they judge you.`
+                ],
+                explain_sleep_tracker: (ctx) => [
+                    `The Sleep & Recovery Tracker on Progress: the app's polite way of pointing out that you can't out-train a sleep deficit. Log your hours + quality (great/okay/poor) in the Sleep Modal. Get back a Recovery Score, a 7-day bar chart, average hours, and an insight card that sounds wise whether you slept 4 hours or 10. Reminder: muscles don't grow during the workout, they grow while you sleep. So... maybe sleep. Radical concept, I know.`,
+                    `Sleep tracking! Because your body is not a machine (well, it kind of is, but a biological one that needs maintenance). Log your sleep nightly -- hours plus how you felt. The Sleep & Recovery card on Progress shows your 7-day trend, average hours, and a recovery score from 0-100. Science says 7-9 hours is optimal. You probably knew this. Now there's a bar chart to make it feel more official.`
+                ],
+                explain_weekly_report: (ctx) => [
+                    `The Weekly Report Card: fitness, but make it academia. Every week you get an A-F grade based on workout frequency, calorie adherence, sleep consistency, and hydration. It's like your GPA, except this one you can actually improve by doing push-ups instead of extra credit. A category breakdown shows where your grade came from. The summary is either congratulatory or diplomatic. Resets every Monday -- last week's disaster is history. Fresh week, clean slate, same app.`,
+                    `Weekly Report Card on Progress gives you a real letter grade for your entire week of health habits. A+ means you crushed it. F means... next week is a new opportunity for growth. Either way, you get a breakdown of workouts, calories, sleep, and hydration so you know exactly where things went right or sideways. Print your A+ for the fridge. Frame your F as motivation. No parent signature required.`
+                ],
+                explain_smart_insights: (ctx) => [
+                    `Smart Insights on Progress: the app's know-it-all card that scans your logs and has opinions about them. It analyzes 7 days of workouts, nutrition, sleep, and hydration, then serves up 2-4 observations. Things like "You've hit your calorie goal 5/7 days -- nice consistency!" or "Your sleep is dipping mid-week -- Netflix? Work stress? Possibly both?" Is it sometimes obvious? Yes. Does it feel nice when an AI validates you? Also yes.`,
+                    `Smart Insights: the Progress screen pulling receipts on your health habits. Pattern recognition dressed up as wisdom, and honestly, it works. Miss sleep on Thursdays consistently? It notices. Nail hydration but skip logging meals? It sees that too. It's not here to lecture -- that's the structured coach's job. It's here to surface patterns like a well-meaning friend who happens to have access to all your data.`
+                ],
+                explain_calorie_balance: (ctx) => [
+                    `The Calorie Balance card on Nutrition is the app playing accountant with your energy. Calories IN (food logs) minus Calories OUT (workout logs, estimated using MET values -- the science of "how much does this exercise actually cost?"). The result is your net daily balance. Positive = ate more than burned. Negative = deficit achieved. Whether that's good or bad depends on your goal. It's basically a bank account for calories, and it does notice overdrafts.`,
+                    `Calorie Balance: finally, a math problem you actually want to solve. On the Nutrition screen -- calories you ate vs. calories you burned (workouts + daily activity). The difference tells you where you landed relative to your goal. If you're trying to lose weight and ended up in a surplus... the card knows. It doesn't say it out loud. But it knows. Powered by MET-based calorie estimates for workouts, which is the scientific way of saying "that run cost you exactly this many calories."`
+                ],
+                explain_hydration_history: (ctx) => [
+                    `Hydration History: a 30-day heatmap of your water intake, on the Nutrition screen, presented like a GitHub contribution graph for your kidneys. Each day gets a color -- light (barely any water, concerning), medium (getting there, keep going), or bright teal (8+ glasses, hydration royalty). Looking at a month of mostly light-colored squares is... sobering. Ironically. The goal is 8 glasses daily. You already knew that. Now you can see exactly which days you forgot.`,
+                    `The Hydration History heatmap turns 30 days of water intake into a color-coded grid. Lighter = parched. Darker teal = thriving. See your patterns at a glance -- always forget water on Mondays? Mysteriously great at it on Fridays? The grid knows your secrets. Fun fact: by the time you feel thirsty, you're already mildly dehydrated. Drink water. This is me asking nicely.`
+                ],
+                explain_progress_charts: (ctx) => [
+                    `Progress Charts on Progress: actual graphs! Real data! Trendlines that either make you feel great or explain exactly when things went sideways. Switch between Calories, Weight, Sleep, Workouts, and Hydration tabs. Bar charts, trends, context -- it's a proper fitness dashboard. The charts are neutral parties in your journey. They don't judge. They just... plot the data. And let the data do the judging.`,
+                    `The Progress Charts tab: because sometimes you need to see your health data as actual graphs instead of vague feelings. Calories logged over time, weight trends, sleep hours, workout frequency, hydration streaks -- each gets its own chart tab. If the trend lines are going in the right direction for your goal, congratulations! If not, at least now you have documented evidence of exactly when things went wrong. Data-driven shame is still data-driven.`
+                ],
+                explain_challenges: (ctx) => [
+                    `Weekly Challenges: because apparently just telling yourself to work out wasn't compelling enough, so now there are weekly assignments. Each Monday, new objectives appear — things like "log 5 workouts" or "drink water like a functional human for 7 days." Complete them for XP. Skip them and nothing bad happens, but you'll feel it. Check the Progress screen. This is gamified accountability and it absolutely works.`,
+                    `The Challenges section is basically homework for your body — except you actually want to do this homework. New objectives every Monday. Complete them for XP and the quiet satisfaction of 100% on a progress bar. It's engineered to make you feel slightly bad about ignoring it. Classic behavioral design. Works on most people. You're probably most people. Worth checking.`
+                ],
+                explain_levels_xp: (ctx) => [
+                    `XP points: the currency of "technically I did something healthy today." Log workouts, track meals, complete habits, finish challenges — it all converts to Experience Points that stack into levels and rank titles. It's Pokémon but for your body. Your level is literally a receipt for how much of your life you chose the gym over the couch. Collect them all. They're on the Progress screen.`,
+                    `The Level & XP system exists because humans apparently need fake internet points to do things that are obviously good for them. (No judgment — neuroscience says this works.) Every healthy action earns XP. Enough XP = level up = new rank title = brief feeling of invincibility. The fun part: XP never resets. Every point is documented proof of your effort. Your level is your fitness legacy. Don't let it embarrass you.`
+                ],
+                explain_weight_log: (ctx) => [
+                    `The Weight Log: where you go to have a complicated relationship with a number. Log your weight daily in the Goal Weight card. It saves with a date, builds a trend chart after 2+ entries, and uses your actual trend to estimate your goal ETA. Pro tip: weigh yourself at the same time every morning for consistent data. The number will lie to you some days. The TREND is your friend. The daily fluctuation is just your body being dramatic.`,
+                    `Logging weight every day is either motivating or soul-crushing depending on the day — but statistically, people who do it lose more weight. The app stores every entry, charts them, and uses the trend to estimate how long until you hit your goal. Daily 1-3 kg swings are completely normal (water, food in transit, vibes). The app smooths that into a real trend line. Log it, don't obsess over it, trust the trend. The trend doesn't lie.`
+                ],
+                explain_goal_weight: (ctx) => [
+                    `The Goal Weight card is the bento cell that turns your vague fitness hopes into an actual progress bar with a dot on it. Set a target, log your weight regularly, and watch that dot move — very slowly, but it moves. Metrics shown: how far you've come, how far you have left, estimated weeks, and weekly pace (based on your real logged trend, not optimistic guessing). The "estimated weeks" number is honest. Sometimes uncomfortably so.`,
+                    `Goal Weight logic: you set a target, the app records your start, tracks your current position, and calculates the gap. Then it estimates weeks at your actual pace — pulled from real weight log data, then calorie balance, then a conservative default if you haven't logged enough. It's a GPS for your body weight. Cannot recalculate when you detour through a pizza place. That's what the weight log is for. Log, track, face the data.`
+                ],
+                explain_food_log: (ctx) => [
+                    `The Food Log: because "I think I ate healthily" is not the same as having actually eaten healthily. Log food in the Nutrition screen with the Quick Add form, or tap a preset chip (Chicken Breast, Rice, Eggs — the holy trinity of people who track macros). Each entry feeds your Calorie Balance card. The presets exist because nobody wants to type "247 calories, 46g protein" from memory while already hangry. You're welcome.`,
+                    `Science says we underestimate our food intake by 30-50%. The Food Log exists to catch those sneaky calories that somehow didn't count. (They count.) Tap a preset, confirm the values, hit Log — done in 5 seconds. Macro breakdown per entry, running totals in Calorie Balance. Knowledge is the first step. The second step is not eating a second dinner and then telling yourself it was "just a snack."`
+                ],
+                explain_workout_splits: (ctx) => [
+                    `A workout split is a schedule for which body parts get trained on which days. Options range from Full Body (3x/week, "I'm a reasonable person") to Push/Pull/Legs (6x/week, "the gym is my entire personality"). Your recommended split is on the Workout screen — tailored to your body analysis. If your lower body score is low, prepare for leg days. Lots of them. The best split is the one you'll actually do. Start there.`,
+                    `Workout splits: because muscles need rest and your ego needs structure. Full Body = 3 days, every muscle, solid start. Upper/Lower = 4 days, solid intermediate. Push/Pull/Legs = 6 days, advanced, probably owns protein powder in bulk. Bro Split = one muscle per day, still valid, don't let anyone tell you otherwise. Your specific split is in the Workout screen based on your actual analysis. Follow it consistently and things will happen.`
+                ],
+                explain_body_recomp: (ctx) => [
+                    `Body recomposition: losing fat and gaining muscle at the same time. The fitness internet spent years insisting this was impossible. Peer-reviewed research said "actually, no." It IS possible — especially for beginners and people coming back after a break. It's slower than pure cutting or bulking. You need high protein, resistance training, and patience — the trifecta of not being satisfied immediately. Check Scan History over time. If score goes up while weight barely moves, you're recomping. Genuinely impressive.`,
+                    `Recomp is the fitness equivalent of having your cake and eating it too — except the cake is made of muscle and the eating part involves a calorie deficit. It works. It's slower. It requires protein intake that makes your grocery bill uncomfortable. Eat near maintenance, lift heavy things consistently, log food, sleep enough. The body score will trend upward. Your weight might barely move. That's the point. Mass stays, fat leaves, muscle arrives. The math eventually works out.`
+                ],
+                explain_workout_history: (ctx) => [
+                    `Workout History: your training diary, minus the dramatic teenage diary energy. It logs every session you complete in the app — what you did, when, and how much. More sessions = longer list = proof you showed up. Find it in the Progress screen. The act of logging creates accountability, which is half the battle.`
+                ],
+                explain_personal_records: (ctx) => [
+                    `Personal Records are your lift milestones — the heaviest you've ever moved for each exercise. Every new PR gets saved automatically. Seeing those numbers go up over weeks and months is genuinely one of the most satisfying parts of training. Check the Progress screen PR cell and try to beat those numbers next session.`
+                ],
+                explain_body_measurements: (ctx) => [
+                    `Body Measurements tracks the tape measure numbers that actually tell the truth: chest, waist, hips, arms. Because sometimes the scale lies (it's water, it's muscle, it's a bad morning), but the waist measurement never does. Log every 2-4 weeks in the Progress screen. The real victory is watching that waist number go down while the others hold or go up.`
+                ],
+                explain_maintenance: (ctx) => [
+                    `Maintenance mode: the mythical state where you've achieved your goal and now get to... do everything you've been doing, forever. That's it. That's maintenance. The habits that got you here need to continue, which is the part nobody mentions before you start. The BMR/TDEE Calculator tells you your maintenance calories. The Calorie Balance card shows if you're hitting it. The Daily Habits ring shows if you're sustaining the behaviors. Maintenance isn't a finish line — it's a different part of the same track.`,
+                    `Maintenance calories = the exact amount to eat to stay exactly as you are. Too much: slow creep back. Too little: muscle starts leaving. The BMR/TDEE Calculator on Nutrition solves this math for you. Then: keep training (muscle is expensive to maintain and the body is lazy), hit your habits, monitor the weight log for drift. Your past self did the hard work. Your present self just has to not undo it. Slightly easier. Only slightly.`
+                ],
+                explain_account: (ctx) => [
+                    `My Account is your personal headquarters! Find it in the user menu (top right corner, that little avatar icon). You can update your name, email, fitness profile stuff (height, weight, goal, the whole biography), change your password, or in a moment of dramatic crisis, delete your account entirely. Update those stats regularly so I'm not giving you ancient advice!`,
+                    `Great news: you don't have to stay who you were when you created your account! Head to the user menu → My Account to update your display name, email, height, weight, fitness goal, and more. No judgment on how outdated your old stats were. Much judgment. Just kidding. Mostly.`
+                ],
+                explain_optional_measurements: (ctx) => [
+                    `Those optional measurements? Highly recommend doing them. The AI's photo analysis is good, but adding actual tape measurements (chest, waist, hips, arms in cm) is like telling it "here, I measured myself, stop guessing." It massively improves accuracy. Grab a tape measure — the one you bought for a home project you haven't started yet — and measure at the widest points!`,
+                    `"Optional" is doing a lot of work in "Optional Measurements." Technically optional. Practically? They make the analysis way more accurate. Chest, waist, hips, arms — all in cm, all from a tape measure. Takes maybe 3 minutes. The AI will reward you with better results, which is as close to gratitude as it gets!`
+                ],
+                explain_export: (ctx) => [
+                    `The Results screen has "Export Data" (saves your full analysis — for the spreadsheet lovers among us) and "Share Card" (generates a pretty shareable card, because documenting fitness wins is important). After a workout session, there's also "Share Workout" — for when you absolutely need your social media to know you finished leg day. Accountability with style!`,
+                    `Export and Share options on the Results screen! "Export Data" saves everything for your records. "Share Card" makes a shareable image — document those wins! "Share Workout" after a session, for the "I worked out and I need everyone to know" energy. All valid. Very valid.`
+                ],
+                explain_comparison: (ctx) => [
+                    `Scan comparison is where you get to see if all that hard work actually did anything! Progress → Scan History → pick two scans → Compare. You get a side-by-side of your body score, muscle tone, posture — all of it — with the changes highlighted. If the numbers improved: victory lap. If not: data-informed recalibration. Either way, information is power!`,
+                    `Want to feel smug about your progress? Progress screen → Scan History → select two scans → Compare. You'll see every metric side by side with percentage changes. It's basically a before-and-after without the awkward lighting. Do this every 4-8 weeks for maximum emotional impact!`
+                ],
+                explain_live_posture: (ctx) => [
+                    `Live Posture Check is on the Workout screen — tap "Start Live Posture Check" and it uses your camera to analyze your posture in real time. It checks if your shoulders, spine, and hips are aligned properly and gives correction cues on the fly. Think of it as a personal trainer who can see you but can't judge your workout playlist. Very helpful!`,
+                    `The Live Posture Check catches you slouching in real time, which is embarrassing but extremely useful! Workout screen → "Start Live Posture Check" → camera on → instant posture feedback. Shoulder alignment, spine, hips — all monitored continuously. The AI is basically the "sit up straight" your parents always nagged about, but with more data!`
+                ],
+                explain_data_management: (ctx) => [
+                    `Data Management is at the very bottom of the Upload screen, where most people never look. It shows how much storage the app is using and has a "Clear All Data" button for when you want a truly fresh start (or you're in a dramatic mood). Clears local data only — your actual account on the server is untouched. The nuclear option, but a very targeted nuclear option!`,
+                    `"Clear All Data" in the Data Management section (Upload screen, bottom) is the app equivalent of "turn it off and back on again." Wipes all local scan history, logs, and session data. Does NOT delete your account or server data. Perfect for when your phone is running low on storage or you've decided to spiritually restart. Available whenever needed!`
+                ],
+                explain_auth: (ctx) => [
+                    `Signing up for an account is easier than most things in fitness! Click "Sign Up," enter your email, pick a password (not "password", please, we're past that), add your display name, confirm your email when the verification arrives, and you're in. Forgot your password? "Forgot Password" sends a reset email. Having an account means your data actually persists. Revolutionary!`,
+                    `Login or register from the welcome screen — it's four fields, not a marathon. Sign up with email + password + name, verify your email (check spam if it's playing hide and seek), and you're good. Already have an account? Log in. Password escaped? "Forgot Password" catches it. Your progress and data all live server-side once you're in!`
+                ],
+                _fallback: (ctx) => [
+                    `I understood none of that, but I respect the energy. Try asking about your body score, workouts, nutrition, how the AI works, or ask me to explain any screen or feature. Or type "help" -- I promise it's not as desperate as it sounds.`,
+                    `My brain (neural network?) doesn't know what to do with that. I'm good at fitness talk, body scores, workout tips, food science, and explaining app features. Try one of those!`,
+                    `Error 404: fitness intent not found. Just kidding, I'm not that kind of program. Ask me about your score, workouts, nutrition, how this app works, or any specific screen or feature!`
+                ]
+            }
+        };
+
+        // ── Chat Handler + Helpers ──
+        function appendUserMessage(text) {
+            const messagesEl = document.getElementById('coach-messages');
+            if (!messagesEl) return;
+            const bubble = document.createElement('div');
+            bubble.className = 'coach-msg coach-msg-user';
+            bubble.textContent = text;
+            messagesEl.appendChild(bubble);
+            messagesEl.scrollTop = messagesEl.scrollHeight;
+        }
+
+        function pickVariant(variants, intentId) {
+            if (!variants || variants.length === 0) return '';
+            if (variants.length === 1) return variants[0];
+
+            const lastUsed = state.coachRecentResponses[intentId];
+            let idx;
+            do {
+                idx = Math.floor(Math.random() * variants.length);
+            } while (variants.length > 1 && idx === lastUsed);
+
+            state.coachRecentResponses[intentId] = idx;
+            return variants[idx];
+        }
+
+        async function handleCoachChat() {
+            const input = document.getElementById('coach-input');
+            const sendBtn = document.getElementById('coach-send-btn');
+            if (!input) return;
+
+            const text = input.value.trim();
+            if (!text) return;
+
+            // Track coach questions for gamification
+            const cq = parseInt(localStorage.getItem(userKey('fixit-coach-questions')) || '0') + 1;
+            localStorage.setItem(userKey('fixit-coach-questions'), cq);
+
+            // Show user message
+            appendUserMessage(text);
+            input.value = '';
+
+            // Disable input during response
+            input.disabled = true;
+            if (sendBtn) sendBtn.disabled = true;
+
+            const messagesEl = document.getElementById('coach-messages');
+            if (!messagesEl) {
+                input.disabled = false;
+                if (sendBtn) sendBtn.disabled = false;
+                return;
+            }
+
+            // Show typing indicator immediately
+            const typing = document.createElement('div');
+            typing.className = 'coach-typing';
+            typing.innerHTML = '<span class="coach-typing-dot"></span><span class="coach-typing-dot"></span><span class="coach-typing-dot"></span>';
+            messagesEl.appendChild(typing);
+            messagesEl.scrollTop = messagesEl.scrollHeight;
+
+            const persona = state.coachPersona;
+            let responseText = null;
+
+            // Try backend first for persistent history + server-side processing
+            if (state.accessToken) {
+                try {
+                    const res = await apiFetch('/coach/message', {
+                        method: 'POST',
+                        body: JSON.stringify({ message: text, persona }),
+                    });
+                    if (res.ok) {
+                        const data = await res.json();
+                        responseText = data.response;
+                    }
+                } catch (err) {
+                    dbg.warn('Backend coach failed, falling back to local:', err);
+                }
+            }
+
+            // Fallback to local client-side response if backend unavailable
+            if (!responseText) {
+                const ctx = getCoachContext();
+                const intentId = detectIntent(text);
+                const responseBank = COACH_CHAT_RESPONSES[persona];
+                if (responseBank) {
+                    const intentKey = intentId || '_fallback';
+                    const variantsFn = responseBank[intentKey] || responseBank._fallback;
+                    const variants = variantsFn(ctx);
+                    responseText = pickVariant(variants, intentKey);
+                }
+            }
+
+            typing.remove();
+            if (responseText) {
+                const bubble = document.createElement('div');
+                bubble.className = 'coach-msg';
+                bubble.innerHTML = escapeHtml(responseText).replace(/\n/g, '<br>');
+                messagesEl.appendChild(bubble);
+                messagesEl.scrollTop = messagesEl.scrollHeight;
+            }
+            input.disabled = false;
+            if (sendBtn) sendBtn.disabled = false;
+            input.focus();
+        }
+
+        function setupCoach() {
+            const fab = document.getElementById('coach-fab');
+            const closeBtn = document.getElementById('coach-panel-close');
+            const panel = document.getElementById('coach-panel');
+
+            if (fab) {
+                fab.addEventListener('click', () => {
+                    if (state.coachOpen) {
+                        closeCoachPanel();
+                    } else {
+                        openCoachPanel();
+                    }
+                });
+            }
+
+            if (closeBtn) {
+                closeBtn.addEventListener('click', closeCoachPanel);
+            }
+
+            // Persona buttons
+            document.querySelectorAll('.coach-persona-btn').forEach(btn => {
+                btn.addEventListener('click', () => {
+                    setCoachPersona(btn.dataset.persona);
+                });
+            });
+
+            // Quick action buttons
+            document.querySelectorAll('.coach-action-btn').forEach(btn => {
+                btn.addEventListener('click', () => {
+                    sendCoachMessage(btn.dataset.action, false);
+                });
+            });
+
+            // Chat input bindings
+            const coachInput = document.getElementById('coach-input');
+            const coachSendBtn = document.getElementById('coach-send-btn');
+
+            if (coachInput) {
+                coachInput.addEventListener('keydown', (e) => {
+                    if (e.key === 'Enter' && !e.shiftKey) {
+                        e.preventDefault();
+                        handleCoachChat();
+                    }
+                    if (e.key === 'Escape') {
+                        e.stopPropagation();
+                        coachInput.blur();
+                    }
+                });
+            }
+
+            if (coachSendBtn) {
+                coachSendBtn.addEventListener('click', () => {
+                    handleCoachChat();
+                });
+            }
+
+            // Close on Escape
+            document.addEventListener('keydown', (e) => {
+                if (e.key === 'Escape' && state.coachOpen) {
+                    closeCoachPanel();
+                }
+            });
+
+            // Close on click outside
+            document.addEventListener('click', (e) => {
+                if (state.coachOpen && panel && fab) {
+                    if (!panel.contains(e.target) && !fab.contains(e.target)) {
+                        closeCoachPanel();
+                    }
+                }
+            });
+
+            // Restore saved persona
+            const saved = state.coachPersona;
+            document.querySelectorAll('.coach-persona-btn').forEach(btn => {
+                btn.classList.toggle('active', btn.dataset.persona === saved);
+            });
+        }
+
+        // ========== SNAPSHOT & COMPARISON SYSTEM ==========
+
+        const SNAPSHOT_DB_NAME = 'fixit-db';
+        const SNAPSHOT_STORE = 'snapshots';
+        const SNAPSHOT_DB_VERSION = 1;
+        let _snapshotSelectedIds = [];
+
+        function openSnapshotDB() {
+            return new Promise((resolve, reject) => {
+                const request = indexedDB.open(SNAPSHOT_DB_NAME, SNAPSHOT_DB_VERSION);
+                request.onupgradeneeded = (e) => {
+                    const db = e.target.result;
+                    if (!db.objectStoreNames.contains(SNAPSHOT_STORE)) {
+                        const store = db.createObjectStore(SNAPSHOT_STORE, { keyPath: 'id', autoIncrement: true });
+                        store.createIndex('date', 'date', { unique: false });
+                    }
+                };
+                request.onsuccess = () => resolve(request.result);
+                request.onerror = () => reject(request.error);
+            });
+        }
+
+        function mapResultsToBackend(r) {
+            const bc = r.bodyComposition || {};
+            const mt = r.muscleTone || {};
+            const po = r.posture || {};
+            const ov = r.overview || {};
+            const zn = r.bodyZones || {};
+            return {
+                fitness_index: String(ov.fitnessIndex || ''),
+                overall_grade: String(ov.overallGrade || ''),
+                visual_age: typeof ov.visualAge === 'number' ? ov.visualAge : null,
+                symmetry_score: typeof ov.symmetryScore === 'number' ? Math.round(ov.symmetryScore) : null,
+                body_comp_score: typeof bc.score === 'number' ? Math.round(bc.score) : null,
+                body_comp_category: bc.category || null,
+                body_type: bc.bodyType || null,
+                lean_mass_estimate: bc.leanMassEstimate || null,
+                muscle_tone_score: typeof mt.score === 'number' ? Math.round(mt.score) : null,
+                muscle_upper_body: mt.upperBody || null,
+                muscle_core: mt.core || null,
+                muscle_lower_body: mt.lowerBody || null,
+                posture_score: typeof po.score === 'number' ? Math.round(po.score) : null,
+                posture_shoulder: po.shoulderAlignment || null,
+                posture_spine: po.spineAssessment || null,
+                posture_hip: po.hipAlignment || null,
+                zone_shoulders: zn.shoulders || null,
+                zone_chest: zn.chest || null,
+                zone_core: zn.core || null,
+                zone_legs: zn.legs || null,
+                bmi: state.bmi || null,
+                bmi_category: bc.bmiCategory || null,
+                raw_landmarks: r.landmarks || null,
+            };
+        }
+
+        function mapBackendToSnapshot(scan) {
+            const r = scan.results || {};
+            return {
+                id: scan.id,
+                serverId: scan.id,
+                date: scan.scan_date || scan.created_at,
+                thumbnail: scan.thumbnail_url ? (API_BASE.replace('/api', '') + scan.thumbnail_url) : null,
+                imageData: scan.image_url ? (API_BASE.replace('/api', '') + scan.image_url) :
+                           (scan.thumbnail_url ? (API_BASE.replace('/api', '') + scan.thumbnail_url) : null),
+                analysisResult: {
+                    bodyComposition: {
+                        score: r.body_comp_score,
+                        category: r.body_comp_category,
+                        bodyType: r.body_type,
+                        leanMassEstimate: r.lean_mass_estimate,
+                    },
+                    muscleTone: {
+                        score: r.muscle_tone_score,
+                        upperBody: r.muscle_upper_body,
+                        core: r.muscle_core,
+                        lowerBody: r.muscle_lower_body,
+                    },
+                    posture: {
+                        score: r.posture_score,
+                        shoulderAlignment: r.posture_shoulder,
+                        spineAssessment: r.posture_spine,
+                        hipAlignment: r.posture_hip,
+                    },
+                    overview: {
+                        fitnessIndex: r.fitness_index,
+                        overallGrade: r.overall_grade,
+                        visualAge: r.visual_age,
+                        symmetryScore: r.symmetry_score,
+                    },
+                    bodyZones: {
+                        shoulders: r.zone_shoulders,
+                        chest: r.zone_chest,
+                        core: r.zone_core,
+                        legs: r.zone_legs,
+                    }
+                },
+                userProfile: {
+                    height: scan.height_at_scan,
+                    weight: scan.weight_at_scan,
+                    bmi: scan.bmi_at_scan,
+                    goal: scan.goal_at_scan,
+                    gender: scan.gender_at_scan,
+                }
+            };
+        }
+
+        async function syncSnapshotToBackend(analysisResult, imageData, userProfile) {
+            try {
+                // Convert base64 to file and upload
+                const blob = await fetch(imageData).then(r => r.blob());
+                const formData = new FormData();
+                formData.append('image', blob, 'scan.jpg');
+
+                const uploadRes = await fetch(API_BASE + '/analysis/upload', {
+                    method: 'POST',
+                    headers: { 'Authorization': 'Bearer ' + state.accessToken },
+                    body: formData,
+                });
+                if (!uploadRes.ok) throw new Error('Upload failed');
+                const { imageUrl, thumbnailUrl } = await uploadRes.json();
+
+                // Save scan with results
+                const scanBody = {
+                    image_url: imageUrl,
+                    thumbnail_url: thumbnailUrl,
+                    height_at_scan: userProfile.height || null,
+                    weight_at_scan: userProfile.weight || null,
+                    bmi_at_scan: userProfile.bmi || null,
+                    goal_at_scan: userProfile.goal || null,
+                    gender_at_scan: userProfile.gender || null,
+                    results: mapResultsToBackend(analysisResult),
+                };
+
+                const scanRes = await apiFetch('/analysis/scans', {
+                    method: 'POST',
+                    body: JSON.stringify(scanBody),
+                });
+                if (!scanRes.ok) throw new Error('Scan save failed');
+                const data = await scanRes.json();
+                dbg.log('Scan synced to backend:', data.scan?.id);
+                return data;
+            } catch (err) {
+                dbg.warn('Backend sync failed (scan saved locally):', err);
+                return null;
+            }
+        }
+
+        async function saveSnapshot(analysisResult, imageData, userProfile) {
+            try {
+                // Create thumbnail (150x200)
+                const thumbnail = await createThumbnail(imageData, 150, 200);
+                const db = await openSnapshotDB();
+
+                // Save to IndexedDB (local)
+                await new Promise((resolve, reject) => {
+                    const tx = db.transaction(SNAPSHOT_STORE, 'readwrite');
+                    const store = tx.objectStore(SNAPSHOT_STORE);
+                    store.add({
+                        date: new Date().toISOString(),
+                        thumbnail,
+                        imageData,
+                        analysisResult,
+                        userProfile: {
+                            gender: userProfile.gender || '',
+                            height: userProfile.height || 0,
+                            weight: userProfile.weight || 0,
+                            bmi: userProfile.bmi || 0,
+                            goal: userProfile.goal || ''
+                        }
+                    });
+                    tx.oncomplete = () => {
+                        awardXP(10, 'snapshot');
+                        resolve();
+                    };
+                    tx.onerror = () => reject(tx.error);
+                });
+
+                // Sync to backend (best-effort, don't block)
+                if (state.accessToken) {
+                    syncSnapshotToBackend(analysisResult, imageData, userProfile);
+                }
+            } catch (err) {
+                dbg.warn('Failed to save snapshot:', err);
+                throw err;
+            }
+        }
+
+        function createThumbnail(imageData, width, height) {
+            return new Promise((resolve) => {
+                const img = new Image();
+                img.onload = () => {
+                    const canvas = document.createElement('canvas');
+                    canvas.width = width;
+                    canvas.height = height;
+                    const ctx = canvas.getContext('2d');
+                    // Cover-fit the image
+                    const scale = Math.max(width / img.width, height / img.height);
+                    const sw = width / scale;
+                    const sh = height / scale;
+                    const sx = (img.width - sw) / 2;
+                    const sy = (img.height - sh) / 2;
+                    ctx.drawImage(img, sx, sy, sw, sh, 0, 0, width, height);
+                    resolve(canvas.toDataURL('image/jpeg', 0.7));
+                };
+                img.onerror = () => resolve(imageData); // fallback
+                img.src = imageData;
+            });
+        }
+
+        function getAllSnapshots() {
+            return new Promise(async (resolve, reject) => {
+                try {
+                    const db = await openSnapshotDB();
+                    const tx = db.transaction(SNAPSHOT_STORE, 'readonly');
+                    const store = tx.objectStore(SNAPSHOT_STORE);
+                    const request = store.getAll();
+                    request.onsuccess = () => {
+                        const results = request.result.map(s => ({
+                            id: s.id,
+                            date: s.date,
+                            thumbnail: s.thumbnail,
+                            analysisResult: s.analysisResult,
+                            userProfile: s.userProfile
+                        }));
+                        // Sort by date descending
+                        results.sort((a, b) => new Date(b.date) - new Date(a.date));
+                        resolve(results);
+                    };
+                    request.onerror = () => reject(request.error);
+                } catch (err) {
+                    resolve([]);
+                }
+            });
+        }
+
+        async function getSnapshot(id) {
+            // Try local IndexedDB first (numeric IDs)
+            if (typeof id === 'number') {
+                try {
+                    const db = await openSnapshotDB();
+                    const result = await new Promise((resolve, reject) => {
+                        const tx = db.transaction(SNAPSHOT_STORE, 'readonly');
+                        const store = tx.objectStore(SNAPSHOT_STORE);
+                        const request = store.get(id);
+                        request.onsuccess = () => resolve(request.result);
+                        request.onerror = () => reject(request.error);
+                    });
+                    if (result) return result;
+                } catch (err) {
+                    dbg.warn('Local snapshot lookup failed:', err);
+                }
+            }
+
+            // Try backend (UUID string IDs)
+            if (typeof id === 'string' && state.accessToken) {
+                try {
+                    const res = await apiFetch('/analysis/scans/' + id);
+                    if (res.ok) {
+                        const scan = await res.json();
+                        const mapped = mapBackendToSnapshot(scan);
+                        // For comparison, also provide imageData from image_url
+                        if (scan.image_url) {
+                            mapped.imageData = API_BASE.replace('/api', '') + scan.image_url;
+                        }
+                        return mapped;
+                    }
+                } catch (err) {
+                    dbg.warn('Server snapshot lookup failed:', err);
+                }
+            }
+
+            return null;
+        }
+
+        function deleteSnapshot(id) {
+            return new Promise(async (resolve, reject) => {
+                try {
+                    const db = await openSnapshotDB();
+                    const tx = db.transaction(SNAPSHOT_STORE, 'readwrite');
+                    const store = tx.objectStore(SNAPSHOT_STORE);
+                    store.delete(id);
+                    tx.oncomplete = () => resolve();
+                    tx.onerror = () => reject(tx.error);
+                } catch (err) {
+                    reject(err);
+                }
+            });
+        }
+
+        function formatSnapshotDate(isoString) {
+            const d = new Date(isoString);
+            const now = new Date();
+            const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+            const month = months[d.getMonth()];
+            const day = d.getDate();
+            if (d.getFullYear() !== now.getFullYear()) {
+                return `${month} ${day}, ${d.getFullYear()}`;
+            }
+            return `${month} ${day}`;
+        }
+
+        function getFitnessIndex(analysisResult) {
+            if (!analysisResult) return 0;
+            const bc = analysisResult.bodyComposition?.score || 0;
+            const mt = analysisResult.muscleTone?.score || 0;
+            const ps = analysisResult.posture?.score || 0;
+            return Math.round((bc + mt + ps) / 3);
+        }
+
+        async function fetchServerScans() {
+            if (!state.accessToken) return [];
+            try {
+                const res = await apiFetch('/analysis/scans?limit=50');
+                if (!res.ok) return [];
+                const data = await res.json();
+                const rows = data.data || data.rows || data || [];
+                if (!Array.isArray(rows)) return [];
+                return rows.map(mapBackendToSnapshot);
+            } catch (err) {
+                dbg.warn('Failed to fetch server scans:', err);
+                return [];
+            }
+        }
+
+        async function getMergedSnapshots() {
+            const [local, server] = await Promise.all([getAllSnapshots(), fetchServerScans()]);
+
+            // Deduplicate: if a server scan exists with a similar date (within 5s) to a local one, prefer server
+            const merged = [...server];
+            const serverDates = server.map(s => new Date(s.date).getTime());
+
+            for (const loc of local) {
+                const locTime = new Date(loc.date).getTime();
+                const isDuplicate = serverDates.some(st => Math.abs(st - locTime) < 5000);
+                if (!isDuplicate) {
+                    merged.push(loc);
+                }
+            }
+
+            // Sort by date descending
+            merged.sort((a, b) => new Date(b.date) - new Date(a.date));
+            return merged;
+        }
+
+        async function renderScanHistory() {
+            const timeline = document.getElementById('history-timeline');
+            const empty = document.getElementById('history-empty');
+            const actions = document.getElementById('history-actions');
+            const counter = document.getElementById('history-counter');
+            if (!timeline) return;
+
+            const snapshots = await getMergedSnapshots();
+
+            counter.textContent = `${snapshots.length} scan${snapshots.length !== 1 ? 's' : ''}`;
+
+            if (snapshots.length === 0) {
+                empty.style.display = 'block';
+                timeline.style.display = 'none';
+                actions.style.display = 'none';
+                return;
+            }
+
+            empty.style.display = 'none';
+            timeline.style.display = 'flex';
+            actions.style.display = snapshots.length >= 1 ? 'flex' : 'none';
+
+            timeline.innerHTML = '';
+            _snapshotSelectedIds = [];
+            updateCompareButton();
+
+            snapshots.forEach(snap => {
+                const card = document.createElement('div');
+                card.className = 'history-card';
+                card.dataset.snapshotId = snap.id;
+                if (snap.serverId) card.dataset.serverId = snap.serverId;
+
+                const score = getFitnessIndex(snap.analysisResult);
+                const thumbSrc = snap.thumbnail || '';
+
+                card.innerHTML = `
+                    <button class="history-card-delete" title="Delete scan">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                            <line x1="18" y1="6" x2="6" y2="18"/>
+                            <line x1="6" y1="6" x2="18" y2="18"/>
+                        </svg>
+                    </button>
+                    <span class="history-card-score">${score}</span>
+                    ${thumbSrc ? `<img src="${thumbSrc}" alt="Scan from ${formatSnapshotDate(snap.date)}" />` : '<div class="history-card-placeholder"></div>'}
+                    <span class="history-card-date">${formatSnapshotDate(snap.date)}</span>
+                `;
+
+                // Selection handler
+                card.addEventListener('click', (e) => {
+                    if (e.target.closest('.history-card-delete')) return;
+                    const id = snap.serverId || snap.id;
+                    const idx = _snapshotSelectedIds.indexOf(id);
+                    if (idx >= 0) {
+                        _snapshotSelectedIds.splice(idx, 1);
+                        card.classList.remove('selected');
+                    } else if (_snapshotSelectedIds.length < 2) {
+                        _snapshotSelectedIds.push(id);
+                        card.classList.add('selected');
+                    }
+                    updateCompareButton();
+                });
+
+                // Delete handler
+                card.querySelector('.history-card-delete').addEventListener('click', async (e) => {
+                    e.stopPropagation();
+                    if (snap.serverId) {
+                        // Delete from backend
+                        try {
+                            await apiFetch('/analysis/scans/' + snap.serverId, { method: 'DELETE' });
+                        } catch (err) { dbg.warn('Server delete failed:', err); }
+                    }
+                    if (typeof snap.id === 'number') {
+                        // Delete from local IndexedDB
+                        await deleteSnapshot(snap.id);
+                    }
+                    const delId = snap.serverId || snap.id;
+                    const selIdx = _snapshotSelectedIds.indexOf(delId);
+                    if (selIdx >= 0) _snapshotSelectedIds.splice(selIdx, 1);
+                    renderScanHistory();
+                });
+
+                timeline.appendChild(card);
+            });
+        }
+
+        function updateCompareButton() {
+            const btn = document.getElementById('compare-btn');
+            if (!btn) return;
+            btn.disabled = _snapshotSelectedIds.length !== 2;
+        }
+
+        async function openComparison(idA, idB) {
+            const [snapA, snapB] = await Promise.all([getSnapshot(idA), getSnapshot(idB)]);
+            if (!snapA || !snapB) return;
+
+            // Determine before (older) and after (newer)
+            const dateA = new Date(snapA.date);
+            const dateB = new Date(snapB.date);
+            const before = dateA <= dateB ? snapA : snapB;
+            const after = dateA <= dateB ? snapB : snapA;
+
+            // Populate photos
+            document.getElementById('compare-img-before').src = before.imageData;
+            document.getElementById('compare-img-after').src = after.imageData;
+            document.getElementById('compare-date-before').textContent = formatSnapshotDate(before.date);
+            document.getElementById('compare-date-after').textContent = formatSnapshotDate(after.date);
+            document.getElementById('compare-index-before').textContent = `Fitness: ${getFitnessIndex(before.analysisResult)}`;
+            document.getElementById('compare-index-after').textContent = `Fitness: ${getFitnessIndex(after.analysisResult)}`;
+
+            // Metric deltas
+            const metrics = [
+                { name: 'Body Comp', key: 'bodyComposition', sub: 'score' },
+                { name: 'Muscle Tone', key: 'muscleTone', sub: 'score' },
+                { name: 'Posture', key: 'posture', sub: 'score' },
+                { name: 'Fitness Index', key: '_fitnessIndex' },
+                { name: 'Visual Age', key: 'overview', sub: 'visualAge' },
+                { name: 'Symmetry', key: 'overview', sub: 'symmetryScore' },
+                { name: 'Upper Body', key: 'muscleTone', sub: 'upper' },
+                { name: 'Core', key: 'muscleTone', sub: 'core' },
+                { name: 'Lower Body', key: 'muscleTone', sub: 'lower' }
+            ];
+
+            const metricsContainer = document.getElementById('comparison-metrics');
+            metricsContainer.innerHTML = '';
+
+            const changes = [];
+
+            metrics.forEach(m => {
+                let beforeVal, afterVal;
+
+                if (m.key === '_fitnessIndex') {
+                    beforeVal = getFitnessIndex(before.analysisResult);
+                    afterVal = getFitnessIndex(after.analysisResult);
+                } else {
+                    beforeVal = before.analysisResult?.[m.key]?.[m.sub] || 0;
+                    afterVal = after.analysisResult?.[m.key]?.[m.sub] || 0;
+                }
+
+                // For visual age, lower is "better"
+                const isLowerBetter = m.name === 'Visual Age';
+                const isNumeric = typeof beforeVal === 'number' && typeof afterVal === 'number';
+                const diff = isNumeric ? (afterVal - beforeVal) : 0;
+                const qualityOrder = { poor: 0, fair: 1, moderate: 2, good: 3, excellent: 4 };
+
+                let deltaClass = 'delta-neutral';
+                let arrowSvg = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="5" y1="12" x2="19" y2="12"/></svg>';
+
+                if (isNumeric) {
+                    if (diff > 0) {
+                        deltaClass = isLowerBetter ? 'delta-negative' : 'delta-positive';
+                        arrowSvg = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="19" x2="12" y2="5"/><polyline points="5 12 12 5 19 12"/></svg>';
+                    } else if (diff < 0) {
+                        deltaClass = isLowerBetter ? 'delta-positive' : 'delta-negative';
+                        arrowSvg = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="5" x2="12" y2="19"/><polyline points="19 12 12 19 5 12"/></svg>';
+                    }
+                    if (diff !== 0) {
+                        const improved = (diff > 0 && !isLowerBetter) || (diff < 0 && isLowerBetter);
+                        changes.push({ name: m.name, diff: Math.abs(diff), improved });
+                    }
+                } else {
+                    // String metric (e.g. Core quality label)
+                    const beforeStr = String(beforeVal).toLowerCase();
+                    const afterStr = String(afterVal).toLowerCase();
+                    if (beforeStr !== afterStr) {
+                        const beforeRank = qualityOrder[beforeStr] ?? 2;
+                        const afterRank = qualityOrder[afterStr] ?? 2;
+                        const improved = afterRank > beforeRank;
+                        deltaClass = improved ? 'delta-positive' : 'delta-negative';
+                        arrowSvg = improved
+                            ? '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="19" x2="12" y2="5"/><polyline points="5 12 12 5 19 12"/></svg>'
+                            : '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="5" x2="12" y2="19"/><polyline points="19 12 12 19 5 12"/></svg>';
+                        changes.push({ name: m.name, diff: null, improved });
+                    }
+                }
+
+                const card = document.createElement('div');
+                card.className = `comparison-metric-card ${deltaClass}`;
+                card.innerHTML = `
+                    <div class="comparison-metric-name">${escapeHtml(m.name)}</div>
+                    <div class="comparison-metric-values">
+                        <span class="comparison-metric-before">${typeof beforeVal === 'number' ? Math.round(beforeVal) : escapeHtml(String(beforeVal))}</span>
+                        <span class="comparison-metric-arrow">${arrowSvg}</span>
+                        <span class="comparison-metric-after">${typeof afterVal === 'number' ? Math.round(afterVal) : escapeHtml(String(afterVal))}</span>
+                    </div>
+                `;
+                metricsContainer.appendChild(card);
+            });
+
+            // Change summary
+            const summaryContainer = document.getElementById('comparison-summary');
+            if (changes.length === 0) {
+                summaryContainer.innerHTML = `
+                    <div class="comparison-summary-title">Summary</div>
+                    <div class="comparison-summary-text">No significant changes detected between these two scans.</div>
+                `;
+            } else {
+                changes.sort((a, b) => b.diff - a.diff);
+                const lines = [];
+                const improvements = changes.filter(c => c.improved);
+                const regressions = changes.filter(c => !c.improved);
+
+                if (improvements.length > 0) {
+                    const top = improvements.slice(0, 2).map(c =>
+                        c.diff !== null ? `${escapeHtml(c.name)} (+${c.diff})` : escapeHtml(c.name)
+                    ).join(' and ');
+                    lines.push(`Improved in ${top}.`);
+                }
+                if (regressions.length > 0) {
+                    const top = regressions.slice(0, 2).map(c =>
+                        c.diff !== null ? `${escapeHtml(c.name)} (-${c.diff})` : escapeHtml(c.name)
+                    ).join(' and ');
+                    lines.push(`Declined in ${top}.`);
+                }
+
+                summaryContainer.innerHTML = `
+                    <div class="comparison-summary-title">Summary</div>
+                    <div class="comparison-summary-text">${escapeHtml(lines.join(' '))}</div>
+                `;
+            }
+
+            // Track first comparison achievement
+            if (localStorage.getItem(userKey('fixit-first-compare')) !== 'true') {
+                localStorage.setItem(userKey('fixit-first-compare'), 'true');
+                awardXP(20, 'first-compare');
+                checkAchievements();
+            }
+
+            document.getElementById('comparison-modal').classList.add('active');
+            document.body.style.overflow = 'hidden';
+        }
+
+        function closeComparison() {
+            document.getElementById('comparison-modal').classList.remove('active');
+            document.body.style.overflow = '';
+            _snapshotSelectedIds = [];
+            document.querySelectorAll('.history-card.selected').forEach(c => c.classList.remove('selected'));
+            updateCompareButton();
+        }
+
+        // ========== PROGRESS & GAMIFICATION SYSTEM ==========
+
+        // Check functions stay in frontend (they read localStorage; cannot move to DB)
+        const ACHIEVEMENT_CHECKS = {
+            'first-scan':    () => parseInt(localStorage.getItem(userKey('fixit-total-analyses')) || '0') >= 1,
+            'scan-veteran':  () => parseInt(localStorage.getItem(userKey('fixit-total-analyses')) || '0') >= 5,
+            'first-workout': () => parseInt(localStorage.getItem(userKey('fixit-total-workouts')) || '0') >= 1,
+            'workout-5':     () => parseInt(localStorage.getItem(userKey('fixit-total-workouts')) || '0') >= 5,
+            'workout-10':    () => parseInt(localStorage.getItem(userKey('fixit-total-workouts')) || '0') >= 10,
+            'workout-25':    () => parseInt(localStorage.getItem(userKey('fixit-total-workouts')) || '0') >= 25,
+            'meal-plan':     () => localStorage.getItem(userKey('fixit-meal-plan-generated')) === 'true',
+            'food-scan':     () => localStorage.getItem(userKey('fixit-food-scanned')) === 'true',
+            'all-personas':  () => { try { return JSON.parse(localStorage.getItem(userKey('fixit-used-personas')) || '[]').length >= 4; } catch { return false; } },
+            'streak-3':      () => parseInt(localStorage.getItem(userKey('fixit-best-streak')) || '0') >= 3,
+            'streak-7':      () => parseInt(localStorage.getItem(userKey('fixit-best-streak')) || '0') >= 7,
+            'streak-30':     () => parseInt(localStorage.getItem(userKey('fixit-best-streak')) || '0') >= 30,
+            'first-compare': () => localStorage.getItem(userKey('fixit-first-compare')) === 'true',
+            'scan-5':        () => parseInt(localStorage.getItem(userKey('fixit-total-analyses')) || '0') >= 5,
+        };
+
+        // Fallback metadata in case API is unavailable
+        const ACHIEVEMENTS_FALLBACK = [
+            { id: 'first-scan',    title: 'First Scan',        icon: '📸', description: 'Complete 1 analysis' },
+            { id: 'scan-veteran',  title: 'Scan Veteran',      icon: '🔬', description: '5 analyses' },
+            { id: 'first-workout', title: 'First Rep',         icon: '💪', description: 'Complete 1 workout' },
+            { id: 'workout-5',     title: 'Gym Rat',           icon: '🏋️', description: '5 workouts' },
+            { id: 'workout-10',    title: 'Iron Will',         icon: '⚡', description: '10 workouts' },
+            { id: 'workout-25',    title: 'Legend',            icon: '👑', description: '25 workouts' },
+            { id: 'meal-plan',     title: 'Meal Prepper',      icon: '🍽️', description: 'Generate meal plan' },
+            { id: 'food-scan',     title: 'Food Detective',    icon: '🔍', description: 'Scan a food' },
+            { id: 'all-personas',  title: 'Social Butterfly',  icon: '🦋', description: 'Try all 4 personas' },
+            { id: 'streak-3',      title: 'On Fire',           icon: '🔥', description: '3-day streak' },
+            { id: 'streak-7',      title: 'Unstoppable',       icon: '🚀', description: '7-day streak' },
+            { id: 'streak-30',     title: 'Dedicated',         icon: '🏆', description: '30-day streak' },
+            { id: 'first-compare', title: 'Time Traveler',     icon: '⏳', description: 'Compare 2 scans' },
+            { id: 'scan-5',        title: 'Dedicated Tracker', icon: '📊', description: '5 analysis scans saved' },
+        ];
+
+        let _achievementsMeta = null; // null = not yet loaded
+
+        async function loadAchievementsMeta() {
+            if (_achievementsMeta !== null) return;
+            try {
+                const res = await fetch('/api/gamification/achievements');
+                if (res.ok) {
+                    const rows = await res.json();
+                    // Only keep entries we have a check function for
+                    _achievementsMeta = rows.filter(r => ACHIEVEMENT_CHECKS[r.id]);
+                }
+            } catch (e) {
+                console.warn('Could not load achievements metadata:', e);
+            }
+            if (!_achievementsMeta || _achievementsMeta.length === 0) _achievementsMeta = ACHIEVEMENTS_FALLBACK;
+        }
+
+        function getAchievements() {
+            const meta = _achievementsMeta || ACHIEVEMENTS_FALLBACK;
+            return meta.map(m => ({
+                id: m.id,
+                title: m.title,
+                icon: m.icon,
+                condition: m.description,
+                check: ACHIEVEMENT_CHECKS[m.id] || (() => false),
+            }));
+        }
+
+        const LEVEL_THRESHOLDS = [0, 100, 250, 450, 700, 1000, 1400, 1900, 2500, 3200, 4000, 5000, 6200, 7600, 9200, 11000, 13000, 15500, 18500, 22000];
+        const RANK_NAMES = ['Beginner', 'Novice', 'Rookie', 'Apprentice', 'Dedicated', 'Consistent', 'Skilled', 'Advanced', 'Expert', 'Elite', 'Champion', 'Master', 'Grandmaster', 'Prodigy', 'Virtuoso', 'Titan', 'Mythic', 'Legendary', 'Immortal', 'Transcendent'];
+
+        // Maps DB metric_key → localStorage key (and optional isArray flag)
+        const CHALLENGE_KEY_MAP = {
+            'total_workouts':       { key: 'fixit-total-workouts' },
+            'total_analyses':       { key: 'fixit-total-analyses' },
+            'coach_questions':      { key: 'fixit-coach-questions' },
+            'nutrition_views':      { key: 'fixit-nutrition-views' },
+            'personas_used':        { key: 'fixit-used-personas', isArray: true },
+            'meal_plans_generated': { key: 'fixit-meal-plan-count' },
+        };
+
+        let CHALLENGE_POOL = [
+            { id: 'workouts-3', name: 'Complete 3 workouts', icon: '🏋️', target: 3, key: 'fixit-total-workouts' },
+            { id: 'workouts-5', name: 'Complete 5 workouts', icon: '💪', target: 5, key: 'fixit-total-workouts' },
+            { id: 'analyses-2', name: 'Run 2 analyses', icon: '📊', target: 2, key: 'fixit-total-analyses' },
+            { id: 'coach-3', name: 'Ask coach 3 questions', icon: '💬', target: 3, key: 'fixit-coach-questions' },
+            { id: 'coach-5', name: 'Ask coach 5 questions', icon: '🗣️', target: 5, key: 'fixit-coach-questions' },
+            { id: 'nutrition', name: 'Check nutrition screen', icon: '🥗', target: 1, key: 'fixit-nutrition-views' },
+            { id: 'personas-2', name: 'Try 2 coach personas', icon: '🎭', target: 2, key: 'fixit-used-personas', isArray: true },
+            { id: 'meal-plan', name: 'Generate a meal plan', icon: '📋', target: 1, key: 'fixit-meal-plan-count' }
+        ];
+
+        let _challengePoolLoaded = false;
+
+        async function loadChallengePool() {
+            if (_challengePoolLoaded) return;
+            _challengePoolLoaded = true; // prevent repeated calls regardless of outcome
+            try {
+                const res = await fetch('/api/gamification/challenges');
+                if (!res.ok) return;
+                const rows = await res.json();
+                if (rows.length > 0) {
+                    const mapped = rows.map(r => {
+                        const extra = CHALLENGE_KEY_MAP[r.metric_key] || { key: `fixit-${r.metric_key}` };
+                        return { id: r.id, name: r.name, icon: r.icon, target: r.target, key: extra.key, ...(extra.isArray ? { isArray: true } : {}) };
+                    }).filter(c => c.key);
+                    if (mapped.length > 0) CHALLENGE_POOL = mapped;
+                }
+            } catch (e) {
+                console.warn('Could not load challenge pool from API:', e);
+            }
+        }
+
+        function awardXP(amount, source) {
+            const current = parseInt(localStorage.getItem(userKey('fixit-total-xp')) || '0');
+            localStorage.setItem(userKey('fixit-total-xp'), current + amount);
+        }
+
+        function getLevel(xp) {
+            for (let i = LEVEL_THRESHOLDS.length - 1; i >= 0; i--) {
+                if (xp >= LEVEL_THRESHOLDS[i]) return i + 1;
+            }
+            return 1;
+        }
+
+        function getLevelProgress(xp) {
+            const level = getLevel(xp);
+            if (level >= LEVEL_THRESHOLDS.length) return 100;
+            const currentThreshold = LEVEL_THRESHOLDS[level - 1];
+            const nextThreshold = LEVEL_THRESHOLDS[level] || currentThreshold + 1000;
+            return Math.min(100, ((xp - currentThreshold) / (nextThreshold - currentThreshold)) * 100);
+        }
+
+        function checkAchievements() {
+            let unlocked;
+            try { unlocked = JSON.parse(localStorage.getItem(userKey('fixit-achievements')) || '[]'); } catch { unlocked = []; }
+            let newUnlocks = false;
+            getAchievements().forEach(a => {
+                if (!unlocked.includes(a.id) && a.check()) {
+                    unlocked.push(a.id);
+                    awardXP(25, 'achievement');
+                    newUnlocks = true;
+                }
+            });
+            if (newUnlocks) {
+                localStorage.setItem(userKey('fixit-achievements'), JSON.stringify(unlocked));
+            }
+        }
+
+        function getWeekNumber() {
+            const now = new Date();
+            const start = new Date(now.getFullYear(), 0, 1);
+            const diff = now - start;
+            const oneWeek = 604800000;
+            return Math.floor(diff / oneWeek);
+        }
+
+        function getWeeklyChallenges() {
+            const weekNum = getWeekNumber();
+            const year = new Date().getFullYear();
+            const weekKey = `fixit-week-${year}-${String(weekNum).padStart(2, '0')}`;
+
+            // Get or create baseline for this week
+            let baseline;
+            try { baseline = JSON.parse(localStorage.getItem(weekKey)); } catch { baseline = null; }
+            if (!baseline) {
+                baseline = {};
+                CHALLENGE_POOL.forEach(c => {
+                    if (c.isArray) {
+                        try { baseline[c.key] = JSON.parse(localStorage.getItem(c.key) || '[]').length; } catch { baseline[c.key] = 0; }
+                    } else {
+                        baseline[c.key] = parseInt(localStorage.getItem(c.key) || '0');
+                    }
+                });
+                localStorage.setItem(weekKey, JSON.stringify(baseline));
+            }
+
+            // Seed-based selection: pick 3 challenges deterministically from pool
+            const seed = year * 100 + weekNum;
+            const indices = [];
+            let s = seed;
+            while (indices.length < 3) {
+                s = (s * 1103515245 + 12345) & 0x7fffffff;
+                const idx = s % CHALLENGE_POOL.length;
+                if (!indices.includes(idx)) indices.push(idx);
+            }
+
+            return indices.map(idx => {
+                const c = CHALLENGE_POOL[idx];
+                let current;
+                if (c.isArray) {
+                    try { current = JSON.parse(localStorage.getItem(c.key) || '[]').length; } catch { current = 0; }
+                } else {
+                    current = parseInt(localStorage.getItem(c.key) || '0');
+                }
+                const baseVal = baseline[c.key] || 0;
+                const progress = Math.max(0, current - baseVal);
+                return { ...c, progress: Math.min(progress, c.target), done: progress >= c.target };
+            });
+        }
+
+        function renderStreakTracker() {
+            const streak = parseInt(localStorage.getItem(userKey('fixit-workout-streak')) || '0');
+            const best = parseInt(localStorage.getItem(userKey('fixit-best-streak')) || '0');
+            const total = parseInt(localStorage.getItem(userKey('fixit-total-workouts')) || '0');
+
+            document.getElementById('progress-streak-count').textContent = streak;
+            document.getElementById('progress-best-streak').textContent = best;
+            document.getElementById('progress-total-workouts').textContent = total;
+
+            const flame = document.getElementById('progress-streak-flame');
+            if (flame) {
+                flame.classList.toggle('inactive', streak === 0);
+            }
+        }
+
+        function renderHeatmap() {
+            const container = document.getElementById('progress-heatmap');
+            if (!container) return;
+            container.innerHTML = '';
+
+            let dates;
+            try { dates = JSON.parse(localStorage.getItem(userKey('fixit-workout-dates')) || '[]'); } catch { dates = []; }
+
+            const today = new Date();
+            today.setHours(0, 0, 0, 0);
+
+            for (let i = 13; i >= 0; i--) {
+                const d = new Date(today);
+                d.setDate(d.getDate() - i);
+                const dateStr = d.toISOString().split('T')[0];
+                const cell = document.createElement('div');
+                cell.className = 'heatmap-cell';
+                if (dates.includes(dateStr)) cell.classList.add('active');
+                if (i === 0) cell.classList.add('today');
+                cell.title = dateStr;
+                container.appendChild(cell);
+            }
+        }
+
+        function renderBadges() {
+            const container = document.getElementById('progress-badges');
+            if (!container) return;
+            container.innerHTML = '';
+
+            let unlocked;
+            try { unlocked = JSON.parse(localStorage.getItem(userKey('fixit-achievements')) || '[]'); } catch { unlocked = []; }
+
+            const achievements = getAchievements();
+            document.getElementById('progress-badge-counter').textContent = `${unlocked.length} / ${achievements.length}`;
+
+            achievements.forEach(a => {
+                const isUnlocked = unlocked.includes(a.id);
+                const div = document.createElement('div');
+                div.className = `badge-item ${isUnlocked ? 'unlocked' : 'locked'}`;
+                div.innerHTML = `
+                    <div class="badge-icon">${a.icon}</div>
+                    <div class="badge-title">${escapeHtml(a.title)}</div>
+                    <div class="badge-condition">${escapeHtml(a.condition)}</div>
+                `;
+                container.appendChild(div);
+            });
+        }
+
+        function renderChallenges() {
+            const container = document.getElementById('progress-challenges');
+            if (!container) return;
+            container.innerHTML = '';
+
+            const challenges = getWeeklyChallenges();
+            challenges.forEach(c => {
+                const pct = Math.round((c.progress / c.target) * 100);
+                const div = document.createElement('div');
+                div.className = 'challenge-item' + (c.done ? ' completed' : '');
+                div.innerHTML = `
+                    <div class="challenge-icon">${c.icon}</div>
+                    <div class="challenge-info">
+                        <div class="challenge-name">${escapeHtml(c.name)}</div>
+                        <div class="challenge-bar"><div class="challenge-bar-fill" style="width:${pct}%"></div></div>
+                        <div class="challenge-progress">${c.progress} / ${c.target}</div>
+                    </div>
+                    <div class="challenge-check ${c.done ? 'done' : ''}">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round">
+                            <polyline points="20 6 9 17 4 12"/>
+                        </svg>
+                    </div>
+                `;
+                container.appendChild(div);
+            });
+
+            // Check and award XP for newly completed challenges
+            const doneCount = challenges.filter(c => c.done).length;
+            const prevDone = parseInt(localStorage.getItem(userKey('fixit-week-challenges-done')) || '0');
+            if (doneCount > prevDone) {
+                const newlyDone = doneCount - prevDone;
+                for (let i = 0; i < newlyDone; i++) awardXP(40, 'challenge');
+                localStorage.setItem(userKey('fixit-week-challenges-done'), doneCount);
+            }
+        }
+
+        function renderLevelXP() {
+            const xp = parseInt(localStorage.getItem(userKey('fixit-total-xp')) || '0');
+            const level = getLevel(xp);
+            const progress = getLevelProgress(xp);
+            const rank = RANK_NAMES[Math.min(level - 1, RANK_NAMES.length - 1)];
+
+            document.getElementById('progress-level-badge').textContent = level;
+            document.getElementById('progress-rank-name').textContent = rank;
+            document.getElementById('progress-level-num').textContent = level;
+            document.getElementById('progress-total-xp').textContent = xp;
+
+            const currentThreshold = LEVEL_THRESHOLDS[level - 1] || 0;
+            const nextThreshold = LEVEL_THRESHOLDS[level] || currentThreshold + 1000;
+            document.getElementById('progress-xp-current').textContent = xp - currentThreshold;
+            document.getElementById('progress-xp-next').textContent = nextThreshold - currentThreshold;
+            document.getElementById('progress-xp-fill').style.width = progress + '%';
+
+            // Animate SVG ring
+            const ring = document.getElementById('progress-ring-fill');
+            if (ring) {
+                const circumference = 2 * Math.PI * 62; // r=62
+                const offset = circumference - (circumference * progress / 100);
+                setTimeout(() => { ring.style.strokeDashoffset = offset; }, 100);
+            }
+        }
+
+        function refreshProgressScreen() {
+            // Chunk 1 — runs synchronously so the screen feels instantly populated
+            checkAchievements();
+            renderStreakTracker();
+            renderHeatmap();
+            renderLevelXP();
+            renderBadges();
+
+            // Chunk 2 — deferred so the click handler returns first and the
+            // browser can render the screen before doing heavier work
+            setTimeout(() => {
+                renderChallenges();
+                renderWeeklyReport();
+                renderGoalWeight();
+                renderWorkoutLog();
+                renderPersonalRecords();
+            }, 0);
+
+            // Chunk 3 — deferred again to keep the main thread free
+            setTimeout(() => {
+                renderMeasurementsTracker();
+                renderSleepTracker();
+                renderHabitTracker();
+                renderInsights();
+                renderScanHistory();
+                const activeTab = document.querySelector('.chart-tab.active');
+                renderProgressChart(activeTab?.dataset?.chart || 'weight');
+                spawnEmbers();
+            }, 50);
+        }
+
+        function spawnEmbers() {
+            const container = document.getElementById('progress-embers');
+            if (!container) return;
+            container.innerHTML = '';
+            const count = 12;
+            for (let i = 0; i < count; i++) {
+                const ember = document.createElement('div');
+                ember.className = 'ember';
+                ember.style.left = (Math.random() * 100) + '%';
+                ember.style.bottom = (-10 - Math.random() * 20) + 'px';
+                ember.style.animationDuration = (3 + Math.random() * 4) + 's';
+                ember.style.animationDelay = (Math.random() * 5) + 's';
+                ember.style.width = (2 + Math.random() * 2) + 'px';
+                ember.style.height = ember.style.width;
+                container.appendChild(ember);
+            }
+        }
+
+        function setupProgress() {
+            // Load data from backend (non-blocking)
+            loadAchievementsMeta();
+            loadChallengePool();
+
+            // Back button
+            document.getElementById('back-to-results-progress')?.addEventListener('click', () => goToScreen(3));
+
+            // Compare button
+            document.getElementById('compare-btn')?.addEventListener('click', () => {
+                if (_snapshotSelectedIds.length === 2) {
+                    openComparison(_snapshotSelectedIds[0], _snapshotSelectedIds[1]);
+                }
+            });
+
+            // Close comparison modal
+            document.getElementById('comparison-close')?.addEventListener('click', closeComparison);
+
+            // Close on Escape
+            document.addEventListener('keydown', (e) => {
+                if (e.key === 'Escape' && document.getElementById('comparison-modal')?.classList.contains('active')) {
+                    closeComparison();
+                }
+            });
+
+            // Close on click outside
+            document.getElementById('comparison-modal')?.addEventListener('click', (e) => {
+                if (e.target === document.getElementById('comparison-modal')) {
+                    closeComparison();
+                }
+            });
+        }
+
+        // ── Goal Weight Widget + Weight Log ────────────────────────────────
+        const WEIGHT_LOG_KEY = 'fixit-weight-log';
+        const WEIGHT_LOG_MAX = 365;
+
+        function getWeightLog() {
+            try { return JSON.parse(localStorage.getItem(userKey(WEIGHT_LOG_KEY)) || '[]'); } catch { return []; }
+        }
+
+        function appendWeightEntry(kg) {
+            const log = getWeightLog();
+            const today = new Date().toISOString().split('T')[0];
+            const idx = log.findIndex(e => e.date === today);
+            const entry = { date: today, weight: kg };
+            if (idx >= 0) log[idx] = entry; else log.unshift(entry);
+            log.sort((a, b) => b.date.localeCompare(a.date)); // newest first
+            if (log.length > WEIGHT_LOG_MAX) log.length = WEIGHT_LOG_MAX;
+            localStorage.setItem(userKey(WEIGHT_LOG_KEY), JSON.stringify(log));
+            _apiSave('/tracking/weight-log', { weight_kg: kg, log_date: today });
+        }
+
+        function buildWeightSparklineSVG(entries) {
+            // entries = [{date, weight}, ...] newest-first; we want oldest-first for the chart
+            const pts = entries.slice(0, 10).reverse();
+            if (pts.length < 2) return null;
+            const weights = pts.map(e => e.weight);
+            const lo = Math.min(...weights);
+            const hi = Math.max(...weights);
+            const pad = 4;
+            const W = 200, H = 40;
+            const range = hi - lo || 1;
+            const xStep = (W - pad * 2) / (pts.length - 1);
+            const toY = w => H - pad - ((w - lo) / range) * (H - pad * 2);
+            const polyPts = pts.map((e, i) => `${pad + i * xStep},${toY(e.weight)}`).join(' ');
+            const lastX = pad + (pts.length - 1) * xStep;
+            const lastY = toY(pts[pts.length - 1].weight);
+            return { svg: `<svg viewBox="0 0 ${W} ${H}" preserveAspectRatio="none" aria-hidden="true">
+  <polyline points="${polyPts}" fill="none" stroke="var(--accent-primary)" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" opacity="0.85"/>
+  <circle cx="${lastX}" cy="${lastY}" r="3.5" fill="var(--accent-primary)"/>
+</svg>`, lo, hi };
+        }
+
+        function setupGoalWeight() {
+            document.getElementById('goal-set-btn')?.addEventListener('click', openGoalEditor);
+            document.getElementById('goal-edit-btn')?.addEventListener('click', openGoalEditor);
+            document.getElementById('goal-editor-cancel')?.addEventListener('click', closeGoalEditor);
+            document.getElementById('goal-editor-save')?.addEventListener('click', () => {
+                const input = document.getElementById('goal-weight-input');
+                const val = parseFloat(input?.value);
+                if (!val || val < 30 || val > 300) {
+                    showToast('Enter a valid goal weight (30–300 kg)', 'error');
+                    return;
+                }
+                saveGoalWeight(val);
+                closeGoalEditor();
+            });
+            document.getElementById('goal-weight-input')?.addEventListener('keydown', (e) => {
+                if (e.key === 'Enter') document.getElementById('goal-editor-save')?.click();
+                if (e.key === 'Escape') closeGoalEditor();
+            });
+
+            // Weight log buttons (goal-content area and empty state)
+            const logHandler = (inputId) => () => {
+                const input = document.getElementById(inputId);
+                const val = parseFloat(input?.value);
+                if (!val || val < 30 || val > 300) {
+                    showToast('Enter a valid weight (30–300 kg)', 'error');
+                    return;
+                }
+                appendWeightEntry(val);
+                if (input) input.value = '';
+                renderGoalWeight();
+                showToast(`Weight logged: ${val} kg`, 'success');
+            };
+            document.getElementById('weight-log-btn')?.addEventListener('click', logHandler('weight-log-input'));
+            document.getElementById('weight-log-btn-empty')?.addEventListener('click', logHandler('weight-log-input-empty'));
+            document.getElementById('weight-log-input')?.addEventListener('keydown', e => {
+                if (e.key === 'Enter') document.getElementById('weight-log-btn')?.click();
+            });
+            document.getElementById('weight-log-input-empty')?.addEventListener('keydown', e => {
+                if (e.key === 'Enter') document.getElementById('weight-log-btn-empty')?.click();
+            });
+
+            renderGoalWeight();
+        }
+
+        function openGoalEditor() {
+            const currentGoal = loadGoalData()?.goal;
+            const input = document.getElementById('goal-weight-input');
+            if (input && currentGoal) input.value = currentGoal;
+            document.getElementById('goal-editor').style.display = '';
+            document.getElementById('goal-empty').style.display = 'none';
+            document.getElementById('goal-content').style.display = 'none';
+            input?.focus();
+        }
+
+        function closeGoalEditor() {
+            document.getElementById('goal-editor').style.display = 'none';
+            renderGoalWeight();
+        }
+
+        function loadGoalData() {
+            try {
+                const raw = localStorage.getItem(userKey('fixit-goal-weight'));
+                return raw ? JSON.parse(raw) : null;
+            } catch (_) { return null; }
+        }
+
+        function saveGoalWeight(goalKg) {
+            const existing = loadGoalData();
+            const currentKg = state.weight || existing?.start || null;
+            const data = {
+                goal: goalKg,
+                start: existing?.start || currentKg,
+                setAt: existing?.setAt || new Date().toISOString(),
+            };
+            localStorage.setItem(userKey('fixit-goal-weight'), JSON.stringify(data));
+            _apiSave('/tracking/goal-weight', { goal_kg: goalKg, start_kg: data.start || null }, 'PUT');
+            renderGoalWeight();
+            showToast('Goal weight saved!', 'success');
+        }
+
+        function renderGoalWeight() {
+            const data = loadGoalData();
+            const wLog = getWeightLog();
+            // Current weight: prefer most recent log entry, fall back to state
+            const currentKg = wLog[0]?.weight || state.weight;
+
+            const emptyEl = document.getElementById('goal-empty');
+            const contentEl = document.getElementById('goal-content');
+            const editorEl = document.getElementById('goal-editor');
+
+            if (!emptyEl || !contentEl || !editorEl) return;
+
+            editorEl.style.display = 'none';
+
+            // Render sparkline regardless of goal state (if we have log data)
+            _renderWeightSparkline(wLog);
+
+            // Update "last logged" label in the log row
+            const lastLogEl = document.getElementById('weight-log-last');
+            if (lastLogEl) {
+                if (wLog[0]) {
+                    const d = new Date(wLog[0].date);
+                    lastLogEl.textContent = `Last: ${wLog[0].weight.toFixed(1)} kg · ${d.toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}`;
+                } else if (currentKg) {
+                    lastLogEl.textContent = `Profile weight: ${currentKg} kg`;
+                } else {
+                    lastLogEl.textContent = 'Log your weight to track progress';
+                }
+            }
+
+            if (!data?.goal || !currentKg) {
+                emptyEl.style.display = '';
+                contentEl.style.display = 'none';
+                return;
+            }
+
+            emptyEl.style.display = 'none';
+            contentEl.style.display = '';
+
+            const goalKg = data.goal;
+            const startKg = data.start || currentKg;
+            const remaining = Math.abs(currentKg - goalKg);
+            const isLoss = goalKg < startKg;
+            const totalDelta = Math.abs(startKg - goalKg);
+
+            // Progress %: how much of the journey is complete
+            let progressPct = 0;
+            if (totalDelta > 0) {
+                const done = isLoss
+                    ? Math.max(0, startKg - currentKg)
+                    : Math.max(0, currentKg - startKg);
+                progressPct = Math.min(100, Math.round((done / totalDelta) * 100));
+            }
+
+            const markerPct = Math.min(100, Math.max(0, progressPct));
+            const { rate: weeklyRate, source: paceSource } = computeGoalWeeklyPace(wLog, goalKg, startKg);
+            const weeksEst = remaining < 0.1 ? 0 : Math.ceil(remaining / weeklyRate);
+            const isGoalDone = remaining < 0.5;
+
+            const fmt = v => `${parseFloat(v).toFixed(1)} kg`;
+            const currentDisplayEl = document.getElementById('goal-current-display');
+            if (currentDisplayEl) currentDisplayEl.textContent = fmt(currentKg);
+            const startValEl = document.getElementById('goal-start-val');
+            const targetValEl = document.getElementById('goal-target-val');
+            const barFillEl = document.getElementById('goal-bar-fill');
+            const barMarkerEl = document.getElementById('goal-bar-marker');
+            if (startValEl) startValEl.textContent = fmt(startKg);
+            if (targetValEl) targetValEl.textContent = fmt(goalKg);
+            if (barFillEl) barFillEl.style.width = `${progressPct}%`;
+            if (barMarkerEl) {
+                // clamp(8px, X%, calc(100%-8px)) keeps dot center inside track at all positions
+                barMarkerEl.style.left = `clamp(8px, ${markerPct}%, calc(100% - 8px))`;
+                barMarkerEl.style.transform = 'translate(-50%, -50%)';
+            }
+
+            const remVal = document.getElementById('goal-remaining-val');
+            const remLbl = document.getElementById('goal-remaining-lbl');
+            if (remVal && remLbl) {
+                if (isGoalDone) {
+                    remVal.textContent = '✓';
+                    remVal.classList.add('done');
+                    remLbl.textContent = 'Goal reached!';
+                } else {
+                    remVal.textContent = remaining.toFixed(1);
+                    remVal.classList.remove('done');
+                    remLbl.textContent = isLoss ? 'kg to lose' : 'kg to gain';
+                }
+            }
+
+            const weeksEl = document.getElementById('goal-weeks-val');
+            const paceEl = document.getElementById('goal-pace-val');
+            const paceSourceEl = document.getElementById('goal-pace-source');
+            if (weeksEl) weeksEl.textContent = isGoalDone ? '0' : weeksEst;
+            if (paceEl) paceEl.textContent = `${weeklyRate.toFixed(2)} kg/wk`;
+            if (paceSourceEl) paceSourceEl.textContent = paceSource;
+        }
+
+        function computeGoalWeeklyPace(wLog, goalKg, startKg) {
+            // Method 1: actual trend from weight log (3+ entries spanning 14+ days)
+            if (wLog.length >= 3) {
+                const oldest = wLog[wLog.length - 1];
+                const newest = wLog[0];
+                const daysDiff = (new Date(newest.date) - new Date(oldest.date)) / 86400000;
+                if (daysDiff >= 14) {
+                    const kgPerDay = (newest.weight - oldest.weight) / daysDiff;
+                    const weeklyRate = Math.abs(kgPerDay * 7);
+                    if (weeklyRate >= 0.05 && weeklyRate <= 2.5) {
+                        return { rate: weeklyRate, source: 'from weight trend' };
+                    }
+                }
+            }
+            // Method 2: estimate from recent calorie balance (last 7 days of calorie log)
+            const clog = getCalorieLog().filter(e => e.calories > 0).slice(0, 7);
+            const target = state.macroTargets?.calories;
+            if (clog.length >= 3 && target) {
+                const avgEaten = clog.reduce((s, e) => s + e.calories, 0) / clog.length;
+                const dailyBalance = avgEaten - target;
+                const weeklyKg = Math.abs(dailyBalance * 7) / 7700;
+                if (weeklyKg >= 0.05 && weeklyKg <= 3) {
+                    return { rate: weeklyKg, source: 'from calorie data' };
+                }
+            }
+            // Fallback
+            return { rate: 0.5, source: 'estimated' };
+        }
+
+        function _renderWeightSparkline(wLog) {
+            const wrap = document.getElementById('weight-sparkline-wrap');
+            const svgEl = document.getElementById('weight-sparkline-svg');
+            if (!wrap || !svgEl) return;
+
+            if (wLog.length < 2) {
+                wrap.style.display = 'none';
+                return;
+            }
+
+            const result = buildWeightSparklineSVG(wLog);
+            if (!result) { wrap.style.display = 'none'; return; }
+
+            wrap.style.display = '';
+            svgEl.innerHTML = result.svg;
+
+            const shown = Math.min(wLog.length, 10);
+            const loEl = document.getElementById('weight-sparkline-lo');
+            const hiEl = document.getElementById('weight-sparkline-hi');
+            const cntEl = document.getElementById('weight-sparkline-count');
+            if (loEl) loEl.textContent = `${result.lo.toFixed(1)} kg`;
+            if (hiEl) hiEl.textContent = `${result.hi.toFixed(1)} kg`;
+            if (cntEl) cntEl.textContent = shown;
+        }
+
+        // ── Workout Session Log ─────────────────────────────────────────────
+        const WORKOUT_LOG_KEY = 'fixit-workout-log';
+        const WORKOUT_LOG_MAX = 40;
+
+        function getWorkoutLog() {
+            try {
+                return JSON.parse(localStorage.getItem(userKey(WORKOUT_LOG_KEY)) || '[]');
+            } catch (_) { return []; }
+        }
+
+        function saveWorkoutSession(session) {
+            const log = getWorkoutLog();
+            log.unshift({
+                id: Date.now(),
+                date: new Date().toISOString(),
+                ...session
+            });
+            if (log.length > WORKOUT_LOG_MAX) log.length = WORKOUT_LOG_MAX;
+            localStorage.setItem(userKey(WORKOUT_LOG_KEY), JSON.stringify(log));
+            renderWorkoutLog();
+            // Persist to backend (fire-and-forget)
+            const _wsBody = {
+                workout_date: new Date().toISOString().split('T')[0],
+                workout_type: session.label || 'Custom',
+                exercises_completed: session.exercises ? session.exercises.length : 0,
+            };
+            const _durMins = session.durationSec ? Math.round(session.durationSec / 60) : 0;
+            if (_durMins > 0) _wsBody.duration_minutes = _durMins;
+            if (session.label) _wsBody.notes = session.label;
+            _apiSave('/workouts/sessions', _wsBody);
+        }
+
+        function setupWorkoutLog() {
+            renderWorkoutLog();
+        }
+
+        // ========== DAILY EXERCISE LOG ==========
+
+        let EXERCISE_PRESETS = [
+            // — Chest —
+            { emoji: '🏋️', name: 'Bench Press',              muscles: 'Chest, Triceps',          sets: 4, reps: 10 },
+            { emoji: '🏋️', name: 'Incline Bench Press',      muscles: 'Upper Chest, Shoulders',  sets: 4, reps: 10 },
+            { emoji: '🏋️', name: 'Decline Bench Press',      muscles: 'Lower Chest, Triceps',    sets: 3, reps: 10 },
+            { emoji: '🏋️', name: 'Incline Dumbbell Press',   muscles: 'Upper Chest, Shoulders',  sets: 3, reps: 12 },
+            { emoji: '🏋️', name: 'Dumbbell Flyes',           muscles: 'Chest',                   sets: 3, reps: 12 },
+            { emoji: '🏋️', name: 'Cable Flyes',              muscles: 'Chest',                   sets: 3, reps: 15 },
+            { emoji: '🏋️', name: 'Chest Press Machine',      muscles: 'Chest, Triceps',          sets: 3, reps: 12 },
+            { emoji: '💪', name: 'Push-Ups',                  muscles: 'Chest, Core',             sets: 3, reps: 20 },
+            { emoji: '💪', name: 'Wide Push-Ups',             muscles: 'Chest',                   sets: 3, reps: 15 },
+            { emoji: '💪', name: 'Diamond Push-Ups',          muscles: 'Chest, Triceps',          sets: 3, reps: 12 },
+            { emoji: '💪', name: 'Decline Push-Ups',          muscles: 'Upper Chest',             sets: 3, reps: 15 },
+            { emoji: '💪', name: 'Dips',                      muscles: 'Chest, Triceps',          sets: 3, reps: 10 },
+            // — Back —
+            { emoji: '🏋️', name: 'Deadlift',                 muscles: 'Full Back, Legs',         sets: 4, reps: 5  },
+            { emoji: '🏋️', name: 'Barbell Rows',             muscles: 'Back, Biceps',            sets: 4, reps: 10 },
+            { emoji: '🏋️', name: 'Dumbbell Rows',            muscles: 'Mid Back, Biceps',        sets: 3, reps: 12 },
+            { emoji: '🏋️', name: 'Lat Pulldown',             muscles: 'Lats',                    sets: 3, reps: 12 },
+            { emoji: '🏋️', name: 'Seated Cable Rows',        muscles: 'Mid Back',                sets: 3, reps: 12 },
+            { emoji: '🏋️', name: 'Face Pulls',               muscles: 'Rear Delts, Traps',       sets: 3, reps: 15 },
+            { emoji: '🏋️', name: 'T-Bar Rows',               muscles: 'Back, Biceps',            sets: 4, reps: 10 },
+            { emoji: '🏋️', name: 'Chest-Supported Rows',     muscles: 'Mid Back',                sets: 3, reps: 12 },
+            { emoji: '💪', name: 'Pull-Ups',                  muscles: 'Lats, Biceps',            sets: 4, reps: 8  },
+            { emoji: '💪', name: 'Chin-Ups',                  muscles: 'Lats, Biceps',            sets: 4, reps: 8  },
+            { emoji: '💪', name: 'Inverted Rows',             muscles: 'Back, Biceps',            sets: 3, reps: 12 },
+            // — Shoulders —
+            { emoji: '🏋️', name: 'Overhead Press',           muscles: 'Shoulders, Triceps',      sets: 4, reps: 8  },
+            { emoji: '🏋️', name: 'Dumbbell Shoulder Press',  muscles: 'Shoulders',               sets: 3, reps: 12 },
+            { emoji: '🏋️', name: 'Arnold Press',             muscles: 'Shoulders',               sets: 3, reps: 12 },
+            { emoji: '🏋️', name: 'Lateral Raises',           muscles: 'Side Delts',              sets: 3, reps: 15 },
+            { emoji: '🏋️', name: 'Front Raises',             muscles: 'Front Delts',             sets: 3, reps: 15 },
+            { emoji: '🏋️', name: 'Reverse Flyes',            muscles: 'Rear Delts',              sets: 3, reps: 15 },
+            { emoji: '🏋️', name: 'Upright Rows',             muscles: 'Traps, Side Delts',       sets: 3, reps: 12 },
+            { emoji: '🏋️', name: 'Shrugs',                   muscles: 'Traps',                   sets: 4, reps: 15 },
+            { emoji: '💪', name: 'Pike Push-Ups',             muscles: 'Shoulders',               sets: 3, reps: 12 },
+            { emoji: '💪', name: 'Handstand Push-Ups',        muscles: 'Shoulders, Triceps',      sets: 3, reps: 8  },
+            // — Legs —
+            { emoji: '🦵', name: 'Squats',                    muscles: 'Quads, Glutes',           sets: 4, reps: 10 },
+            { emoji: '🦵', name: 'Front Squats',              muscles: 'Quads, Core',             sets: 4, reps: 8  },
+            { emoji: '🦵', name: 'Romanian Deadlifts',        muscles: 'Hamstrings, Glutes',      sets: 4, reps: 10 },
+            { emoji: '🦵', name: 'Leg Press',                 muscles: 'Quads',                   sets: 3, reps: 12 },
+            { emoji: '🦵', name: 'Leg Curls',                 muscles: 'Hamstrings',              sets: 3, reps: 12 },
+            { emoji: '🦵', name: 'Leg Extensions',            muscles: 'Quads',                   sets: 3, reps: 15 },
+            { emoji: '🦵', name: 'Lunges',                    muscles: 'Quads, Glutes',           sets: 3, reps: 10 },
+            { emoji: '🦵', name: 'Walking Lunges',            muscles: 'Quads, Glutes',           sets: 3, reps: 12 },
+            { emoji: '🦵', name: 'Bulgarian Split Squats',    muscles: 'Quads, Glutes',           sets: 3, reps: 10 },
+            { emoji: '🦵', name: 'Hip Thrusts',               muscles: 'Glutes, Hamstrings',      sets: 4, reps: 12 },
+            { emoji: '🦵', name: 'Glute Bridges',             muscles: 'Glutes',                  sets: 3, reps: 15 },
+            { emoji: '🦵', name: 'Calf Raises',               muscles: 'Calves',                  sets: 4, reps: 20 },
+            { emoji: '🦵', name: 'Seated Calf Raises',        muscles: 'Calves',                  sets: 3, reps: 20 },
+            { emoji: '🦵', name: 'Step-Ups',                  muscles: 'Quads, Glutes',           sets: 3, reps: 12 },
+            { emoji: '🦵', name: 'Sumo Squats',               muscles: 'Inner Thighs, Glutes',    sets: 3, reps: 15 },
+            { emoji: '🏠', name: 'Bodyweight Squats',         muscles: 'Quads, Glutes',           sets: 4, reps: 20 },
+            { emoji: '🏠', name: 'Jump Squats',               muscles: 'Quads, Glutes, Cardio',   sets: 3, reps: 15 },
+            { emoji: '🏠', name: 'Wall Sit',                  muscles: 'Quads',                   sets: 3, reps: 45 },
+            // — Arms —
+            { emoji: '💪', name: 'Barbell Curls',             muscles: 'Biceps',                  sets: 3, reps: 12 },
+            { emoji: '💪', name: 'Dumbbell Curls',            muscles: 'Biceps',                  sets: 3, reps: 12 },
+            { emoji: '💪', name: 'Hammer Curls',              muscles: 'Biceps, Forearms',        sets: 3, reps: 12 },
+            { emoji: '💪', name: 'Concentration Curls',       muscles: 'Biceps',                  sets: 2, reps: 12 },
+            { emoji: '💪', name: 'Preacher Curls',            muscles: 'Biceps',                  sets: 3, reps: 10 },
+            { emoji: '💪', name: 'Cable Curls',               muscles: 'Biceps',                  sets: 3, reps: 15 },
+            { emoji: '💪', name: 'Tricep Pushdowns',          muscles: 'Triceps',                 sets: 3, reps: 15 },
+            { emoji: '💪', name: 'Overhead Tricep Extension', muscles: 'Triceps',                 sets: 3, reps: 12 },
+            { emoji: '💪', name: 'Skull Crushers',            muscles: 'Triceps',                 sets: 3, reps: 10 },
+            { emoji: '💪', name: 'Tricep Kickbacks',          muscles: 'Triceps',                 sets: 3, reps: 15 },
+            { emoji: '💪', name: 'Close-Grip Bench Press',    muscles: 'Triceps, Chest',          sets: 3, reps: 10 },
+            { emoji: '💪', name: 'Wrist Curls',               muscles: 'Forearms',                sets: 3, reps: 20 },
+            { emoji: '💪', name: 'Reverse Curls',             muscles: 'Forearms, Biceps',        sets: 3, reps: 15 },
+            // — Core —
+            { emoji: '🧘', name: 'Plank',                     muscles: 'Core',                    sets: 3, reps: 60 },
+            { emoji: '🧘', name: 'Side Plank',                muscles: 'Obliques, Core',          sets: 3, reps: 45 },
+            { emoji: '🧘', name: 'Crunches',                  muscles: 'Abs',                     sets: 3, reps: 20 },
+            { emoji: '🧘', name: 'Bicycle Crunches',          muscles: 'Abs, Obliques',           sets: 3, reps: 20 },
+            { emoji: '🧘', name: 'Leg Raises',                muscles: 'Lower Abs',               sets: 3, reps: 15 },
+            { emoji: '🧘', name: 'Hanging Leg Raises',        muscles: 'Abs',                     sets: 3, reps: 12 },
+            { emoji: '🧘', name: 'Russian Twists',            muscles: 'Obliques',                sets: 3, reps: 20 },
+            { emoji: '🧘', name: 'Dead Bug',                  muscles: 'Core',                    sets: 3, reps: 10 },
+            { emoji: '🧘', name: 'Ab Wheel Rollout',          muscles: 'Core',                    sets: 3, reps: 10 },
+            { emoji: '🧘', name: 'Cable Crunches',            muscles: 'Abs',                     sets: 3, reps: 15 },
+            { emoji: '🧘', name: 'V-Ups',                     muscles: 'Abs',                     sets: 3, reps: 15 },
+            { emoji: '🧘', name: 'Flutter Kicks',             muscles: 'Lower Abs',               sets: 3, reps: 30 },
+            { emoji: '🧘', name: 'Hollow Body Hold',          muscles: 'Core',                    sets: 3, reps: 30 },
+            // — Cardio —
+            { emoji: '🏃', name: 'Treadmill Run',             muscles: 'Cardio',                  sets: 1, reps: 30 },
+            { emoji: '🏃', name: 'Outdoor Run',               muscles: 'Cardio',                  sets: 1, reps: 30 },
+            { emoji: '🏃', name: 'HIIT Run',                  muscles: 'Cardio, Full Body',       sets: 6, reps: 30 },
+            { emoji: '🚴', name: 'Stationary Bike',           muscles: 'Cardio, Legs',            sets: 1, reps: 30 },
+            { emoji: '🚴', name: 'Cycling',                   muscles: 'Cardio, Legs',            sets: 1, reps: 45 },
+            { emoji: '🏃', name: 'Jump Rope',                 muscles: 'Cardio',                  sets: 3, reps: 60 },
+            { emoji: '🏃', name: 'Burpees',                   muscles: 'Full Body, Cardio',       sets: 3, reps: 10 },
+            { emoji: '🏃', name: 'Mountain Climbers',         muscles: 'Core, Cardio',            sets: 3, reps: 30 },
+            { emoji: '🏃', name: 'High Knees',                muscles: 'Cardio, Core',            sets: 3, reps: 30 },
+            { emoji: '🏃', name: 'Box Jumps',                 muscles: 'Legs, Cardio',            sets: 4, reps: 8  },
+            { emoji: '🏊', name: 'Swimming',                  muscles: 'Full Body, Cardio',       sets: 1, reps: 30 },
+            { emoji: '🧗', name: 'Rowing Machine',            muscles: 'Back, Legs, Cardio',      sets: 1, reps: 20 },
+            { emoji: '🏃', name: 'Stair Climber',             muscles: 'Legs, Cardio',            sets: 1, reps: 20 },
+            { emoji: '🏃', name: 'Elliptical',                muscles: 'Full Body, Cardio',       sets: 1, reps: 30 },
+            // — Flexibility & Recovery —
+            { emoji: '🧘', name: 'Yoga',                      muscles: 'Flexibility, Core',       sets: 1, reps: 30 },
+            { emoji: '🧘', name: 'Stretching',                muscles: 'Flexibility',             sets: 1, reps: 20 },
+            { emoji: '🧘', name: 'Foam Rolling',              muscles: 'Recovery',                sets: 1, reps: 15 },
+        ];
+
+        function getExerciseLogKey() {
+            const today = new Date().toISOString().split('T')[0];
+            return userKey('exlog-' + today);
+        }
+
+        function getExerciseLog() {
+            try { return JSON.parse(localStorage.getItem(getExerciseLogKey()) || '[]'); } catch (_) { return []; }
+        }
+
+        function getExerciseLogForDate(dateStr) {
+            try { return JSON.parse(localStorage.getItem(userKey('exlog-' + dateStr)) || '[]'); } catch (_) { return []; }
+        }
+
+        function saveExerciseLog(entries) {
+            localStorage.setItem(getExerciseLogKey(), JSON.stringify(entries));
+        }
+
+        function setupExerciseLog() {
+            const dateEl = document.getElementById('exercise-log-date');
+            if (dateEl) {
+                const d = new Date();
+                dateEl.textContent = d.toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
+            }
+
+            ['el-name', 'el-sets', 'el-reps', 'el-weight'].forEach(id => {
+                document.getElementById(id)?.addEventListener('keydown', e => {
+                    if (e.key === 'Enter') { e.preventDefault(); submitExerciseQuickAdd(); }
+                });
+            });
+
+            document.getElementById('el-add-btn')?.addEventListener('click', submitExerciseQuickAdd);
+
+            // Exercise name autocomplete dropdown
+            const elName = document.getElementById('el-name');
+            const elDrop = document.getElementById('el-name-dropdown');
+            if (elName && elDrop) {
+                let highlightIdx = -1;
+
+                function renderExDropdown(query) {
+                    const q = query.toLowerCase().trim();
+                    const matches = q.length === 0
+                        ? EXERCISE_PRESETS.map((p, i) => ({ p, i }))
+                        : EXERCISE_PRESETS.map((p, i) => ({ p, i })).filter(({ p }) => p.name.toLowerCase().includes(q));
+                    if (matches.length === 0) { elDrop.style.display = 'none'; return; }
+                    highlightIdx = -1;
+                    elDrop.innerHTML = matches.map(({ p, i }) =>
+                        `<div class="fl-dd-item" data-idx="${i}">
+                            <span class="fl-dd-emoji">${p.emoji}</span>
+                            <div class="fl-dd-info">
+                                <span class="fl-dd-name">${p.name}</span>
+                                <span class="fl-dd-detail">${p.muscles}</span>
+                            </div>
+                            <span class="fl-dd-cal">${p.sets}×${p.reps}</span>
+                        </div>`
+                    ).join('');
+                    elDrop.style.display = 'block';
+
+                    elDrop.querySelectorAll('.fl-dd-item').forEach(item => {
+                        item.addEventListener('mousedown', e => {
+                            e.preventDefault();
+                            const preset = EXERCISE_PRESETS[parseInt(item.dataset.idx)];
+                            document.getElementById('el-name').value  = preset.name;
+                            document.getElementById('el-sets').value  = preset.sets;
+                            document.getElementById('el-reps').value  = preset.reps;
+                            elDrop.style.display = 'none';
+                            document.getElementById('el-weight')?.focus();
+                        });
+                    });
+                }
+
+                function setExHighlight(idx) {
+                    const items = elDrop.querySelectorAll('.fl-dd-item');
+                    items.forEach(it => it.classList.remove('highlighted'));
+                    if (idx >= 0 && idx < items.length) {
+                        items[idx].classList.add('highlighted');
+                        items[idx].scrollIntoView({ block: 'nearest' });
+                    }
+                    highlightIdx = idx;
+                }
+
+                elName.addEventListener('input', () => renderExDropdown(elName.value));
+                elName.addEventListener('focus', () => renderExDropdown(elName.value));
+                elName.addEventListener('blur', () => setTimeout(() => { elDrop.style.display = 'none'; }, 150));
+                elName.addEventListener('keydown', e => {
+                    const items = elDrop.querySelectorAll('.fl-dd-item');
+                    if (!items.length || elDrop.style.display === 'none') return;
+                    if (e.key === 'ArrowDown') { e.preventDefault(); setExHighlight(Math.min(highlightIdx + 1, items.length - 1)); }
+                    else if (e.key === 'ArrowUp') { e.preventDefault(); setExHighlight(Math.max(highlightIdx - 1, 0)); }
+                    else if (e.key === 'Enter' && highlightIdx >= 0) {
+                        e.preventDefault();
+                        const preset = EXERCISE_PRESETS[parseInt(items[highlightIdx].dataset.idx)];
+                        document.getElementById('el-name').value  = preset.name;
+                        document.getElementById('el-sets').value  = preset.sets;
+                        document.getElementById('el-reps').value  = preset.reps;
+                        elDrop.style.display = 'none';
+                        document.getElementById('el-weight')?.focus();
+                    }
+                    else if (e.key === 'Escape') { elDrop.style.display = 'none'; }
+                });
+            }
+
+            document.addEventListener('screenChange', e => {
+                if (e.detail?.screen === 6) loadDailyExerciseLog();
+            });
+
+            loadDailyExerciseLog();
+        }
+
+        function loadDailyExerciseLog() {
+            const entries = getExerciseLog();
+            renderExerciseLogEntries(entries);
+            updateExerciseTotals(entries);
+            // Reflect in Daily Habits tracker
+            if (typeof renderHabitTracker === 'function') renderHabitTracker();
+            // Reflect in Calorie Balance card
+            if (typeof renderCalorieBalance === 'function') renderCalorieBalance();
+        }
+
+        function renderExerciseLogEntries(entries) {
+            const container = document.getElementById('exercise-log-entries');
+            if (!container) return;
+            if (entries.length === 0) {
+                container.innerHTML = '<div class="food-log-empty">Log your first exercise above.</div>';
+                return;
+            }
+            container.innerHTML = entries.map(e => {
+                const name = escapeHtml(e.name || 'Exercise');
+                const muscles = e.muscles ? `<span class="fle-meal-type">${escapeHtml(e.muscles)}</span>` : '';
+                const detail = [
+                    e.sets   ? `${e.sets} sets`  : '',
+                    e.reps   ? `${e.reps} reps`  : '',
+                    e.weight ? `${e.weight} kg`  : '',
+                ].filter(Boolean).join(' · ');
+                return `<div class="food-log-entry">
+                    <span class="fle-name" title="${name}">${name}</span>
+                    ${muscles}
+                    ${detail ? `<span class="fle-macros"><span class="fle-macro">${detail}</span></span>` : ''}
+                    <button class="fle-delete" onclick="deleteExerciseLogEntry('${e.id}')" aria-label="Delete" title="Remove">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+                            <line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/>
+                        </svg>
+                    </button>
+                </div>`;
+            }).join('');
+        }
+
+        function updateExerciseTotals(entries) {
+            const totalSets = entries.reduce((s, e) => s + (parseInt(e.sets) || 0), 0);
+            const totalReps = entries.reduce((s, e) => s + (parseInt(e.sets) || 0) * (parseInt(e.reps) || 0), 0);
+            const totalVol  = entries.reduce((s, e) => s + (parseInt(e.sets) || 0) * (parseInt(e.reps) || 0) * (parseFloat(e.weight) || 0), 0);
+
+            const hdrEl = document.getElementById('exercise-log-total-sets');
+            if (hdrEl) hdrEl.textContent = totalSets;
+            const sEl = document.getElementById('el-total-sets');
+            const rEl = document.getElementById('el-total-reps');
+            const vEl = document.getElementById('el-total-volume');
+            if (sEl) sEl.textContent = totalSets;
+            if (rEl) rEl.textContent = totalReps;
+            if (vEl) vEl.textContent = Math.round(totalVol).toLocaleString();
+        }
+
+        function submitExerciseQuickAdd() {
+            const nameEl   = document.getElementById('el-name');
+            const setsEl   = document.getElementById('el-sets');
+            const repsEl   = document.getElementById('el-reps');
+            const weightEl = document.getElementById('el-weight');
+
+            const name   = nameEl?.value.trim();
+            const sets   = parseInt(setsEl?.value) || 0;
+            const reps   = parseInt(repsEl?.value) || 0;
+            const weight = parseFloat(weightEl?.value) || 0;
+
+            if (!name) { nameEl?.focus(); showToast('Enter an exercise name.', 'error'); return; }
+            if (sets <= 0) { setsEl?.focus(); showToast('Enter number of sets.', 'error'); return; }
+
+            const preset  = EXERCISE_PRESETS.find(p => p.name.toLowerCase() === name.toLowerCase());
+            const muscles = preset?.muscles || '';
+
+            const entries = getExerciseLog();
+            entries.unshift({
+                id:        Date.now().toString(),
+                name,
+                muscles,
+                sets,
+                reps:      reps   || null,
+                weight:    weight || null,
+                logged_at: new Date().toISOString(),
+            });
+            saveExerciseLog(entries);
+
+            ['el-name', 'el-sets', 'el-reps', 'el-weight'].forEach(id => {
+                const el = document.getElementById(id);
+                if (el) el.value = '';
+            });
+            document.getElementById('el-name')?.focus();
+
+            loadDailyExerciseLog();
+            showToast(`${name} logged!`, 'success');
+        }
+
+        window.deleteExerciseLogEntry = function(id) {
+            if (!id) return;
+            const entries = getExerciseLog().filter(e => e.id !== id);
+            saveExerciseLog(entries);
+            loadDailyExerciseLog();
+        };
+
+        function renderWorkoutLog() {
+            const log = getWorkoutLog();
+            const container = document.getElementById('workout-log-list');
+            const emptyEl = document.getElementById('workout-log-empty');
+            const counterEl = document.getElementById('workout-log-counter');
+            if (!container) return;
+
+            if (counterEl) counterEl.textContent = `${log.length} session${log.length !== 1 ? 's' : ''}`;
+
+            if (log.length === 0) {
+                if (emptyEl) emptyEl.style.display = '';
+                container.style.display = 'none';
+                return;
+            }
+            if (emptyEl) emptyEl.style.display = 'none';
+            container.style.display = '';
+
+            const shown = log.slice(0, 10);
+            container.innerHTML = shown.map((s, i) => {
+                const d = new Date(s.date);
+                const dateStr = d.toLocaleDateString(undefined, { weekday: 'short', month: 'short', day: 'numeric' });
+                const mins = Math.floor((s.durationSec || 0) / 60);
+                const secs = (s.durationSec || 0) % 60;
+                const durStr = mins > 0 ? `${mins}m ${secs}s` : `${secs}s`;
+                const exCount = s.exercises?.length || 0;
+                const totalSets = s.exercises?.reduce((sum, e) => sum + (e.sets || 0), 0) || 0;
+                const exListHTML = (s.exercises || []).map(e =>
+                    `<li class="wl-ex-item">
+                        <span class="wl-ex-name">${e.name}</span>
+                        <span class="wl-ex-detail">${e.sets}×${e.reps}</span>
+                    </li>`
+                ).join('');
+
+                return `<div class="wl-session" id="wl-session-${i}">
+                    <button class="wl-session-header" onclick="toggleWorkoutSession(${i})" aria-expanded="false">
+                        <div class="wl-session-left">
+                            <span class="wl-session-date">${dateStr}</span>
+                            <span class="wl-session-label">${s.label || 'Workout'}</span>
+                        </div>
+                        <div class="wl-session-right">
+                            <span class="wl-session-stat">${exCount} ex</span>
+                            <span class="wl-session-stat">${totalSets} sets</span>
+                            <span class="wl-session-stat">${durStr}</span>
+                            <span class="wl-session-xp">+${s.xp || 50} XP</span>
+                            <svg class="wl-chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"/></svg>
+                        </div>
+                    </button>
+                    <div class="wl-session-body" id="wl-body-${i}" style="display:none">
+                        <ul class="wl-ex-list">${exListHTML}</ul>
+                    </div>
+                </div>`;
+            }).join('');
+
+            if (log.length > 10) {
+                container.insertAdjacentHTML('beforeend',
+                    `<p class="wl-more">Showing 10 of ${log.length} sessions</p>`);
+            }
+        }
+
+        // Exposed globally for inline onclick
+        window.toggleWorkoutSession = function(i) {
+            const header = document.querySelector(`#wl-session-${i} .wl-session-header`);
+            const body = document.getElementById(`wl-body-${i}`);
+            if (!body) return;
+            const open = body.style.display !== 'none';
+            body.style.display = open ? 'none' : '';
+            if (header) header.setAttribute('aria-expanded', String(!open));
+            const chevron = header?.querySelector('.wl-chevron');
+            if (chevron) chevron.style.transform = open ? '' : 'rotate(180deg)';
+        };
+
+        // ── Personal Record / Lift Tracker ─────────────────────────────────
+        const LIFT_LOG_KEY = 'fixit-lift-log';
+
+        function getLiftLog() {
+            try { return JSON.parse(localStorage.getItem(userKey(LIFT_LOG_KEY)) || '{}'); } catch { return {}; }
+        }
+
+        function saveLiftLog(log) {
+            localStorage.setItem(userKey(LIFT_LOG_KEY), JSON.stringify(log));
+        }
+
+        // Epley formula: estimated 1-rep max
+        function computeE1RM(weight, reps) {
+            if (reps <= 0 || weight <= 0) return 0;
+            if (reps === 1) return weight;
+            return Math.round(weight * (1 + reps / 30));
+        }
+
+        // Save a lift entry; returns true if it's a new PR (by e1RM)
+        function saveLiftEntry(exerciseName, weight, reps) {
+            const log = getLiftLog();
+            if (!log[exerciseName]) log[exerciseName] = [];
+            const e1rm = computeE1RM(weight, reps);
+            const prevBest = log[exerciseName][0]?.e1rm || 0;
+            const isNewPR = e1rm > prevBest;
+            const today = new Date().toISOString().split('T')[0];
+            log[exerciseName].unshift({ date: today, weight, reps, e1rm });
+            // Cap per exercise
+            if (log[exerciseName].length > 50) log[exerciseName].length = 50;
+            saveLiftLog(log);
+            _apiSave('/tracking/lifts', { exercise_name: exerciseName, weight_kg: weight, reps, e1rm, log_date: today });
+            return isNewPR;
+        }
+
+        function setupLiftTracker() {
+            const toggle = document.getElementById('log-lifts-toggle');
+            const form = document.getElementById('log-lifts-form');
+            const saveBtn = document.getElementById('log-lifts-save-btn');
+
+            toggle?.addEventListener('click', () => {
+                const isOpen = form.style.display !== 'none';
+                form.style.display = isOpen ? 'none' : '';
+                toggle.classList.toggle('open', !isOpen);
+                toggle.setAttribute('aria-expanded', String(!isOpen));
+                if (!isOpen) populateLiftForm();
+            });
+
+            saveBtn?.addEventListener('click', saveAllLifts);
+            renderPersonalRecords();
+        }
+
+        function populateLiftForm() {
+            const list = document.getElementById('log-lifts-list');
+            if (!list) return;
+            const exercises = workoutPlayerState.exercises || [];
+            const log = getLiftLog();
+
+            list.innerHTML = exercises.map((ex, i) => {
+                const prev = log[ex.name]?.[0];
+                const prevHint = prev
+                    ? `prev: ${prev.weight}kg × ${prev.reps}`
+                    : 'no data yet';
+                return `<div class="lift-entry-row" data-exercise="${ex.name.replace(/"/g, '&quot;')}">
+                    <span class="lift-entry-name" title="${ex.name}">${ex.name}</span>
+                    <span class="lift-entry-pr-hint">${prevHint}</span>
+                    <input type="number" class="lift-entry-input lift-weight" placeholder="kg" min="0" max="500" step="0.5" aria-label="Weight for ${ex.name}">
+                    <span class="lift-entry-unit">kg</span>
+                    <span class="lift-entry-unit" style="color:var(--text-secondary)">×</span>
+                    <input type="number" class="lift-entry-input lift-reps" placeholder="reps" min="1" max="100" step="1" value="${ex.reps || ''}" aria-label="Reps for ${ex.name}">
+                </div>`;
+            }).join('');
+        }
+
+        function saveAllLifts() {
+            const rows = document.querySelectorAll('#log-lifts-list .lift-entry-row');
+            let saved = 0;
+            let newPRs = 0;
+            rows.forEach(row => {
+                const name = row.dataset.exercise;
+                const weight = parseFloat(row.querySelector('.lift-weight')?.value);
+                const reps = parseInt(row.querySelector('.lift-reps')?.value);
+                if (!name || !weight || weight <= 0 || !reps || reps <= 0) return;
+                const isPR = saveLiftEntry(name, weight, reps);
+                saved++;
+                if (isPR) newPRs++;
+            });
+            if (saved === 0) {
+                showToast('Enter at least one weight to save', 'error');
+                return;
+            }
+            // Collapse form
+            document.getElementById('log-lifts-form').style.display = 'none';
+            document.getElementById('log-lifts-toggle')?.classList.remove('open');
+            renderPersonalRecords();
+            const msg = newPRs > 0
+                ? `${newPRs} new PR${newPRs > 1 ? 's' : ''}! 🏆 + ${saved - newPRs} lift${saved - newPRs !== 1 ? 's' : ''} saved`
+                : `${saved} lift${saved > 1 ? 's' : ''} logged`;
+            showToast(msg, 'success');
+        }
+
+        function renderPersonalRecords() {
+            const log = getLiftLog();
+            const exercises = Object.keys(log);
+            const emptyEl = document.getElementById('pr-empty');
+            const gridEl = document.getElementById('pr-grid');
+            const counterEl = document.getElementById('pr-counter');
+            if (!emptyEl || !gridEl) return;
+
+            if (counterEl) counterEl.textContent = `${exercises.length} exercise${exercises.length !== 1 ? 's' : ''}`;
+
+            if (exercises.length === 0) {
+                emptyEl.style.display = '';
+                gridEl.style.display = 'none';
+                return;
+            }
+            emptyEl.style.display = 'none';
+            gridEl.style.display = '';
+
+            // Sort: most recently logged first
+            exercises.sort((a, b) => {
+                const da = log[a][0]?.date || '';
+                const db = log[b][0]?.date || '';
+                return db.localeCompare(da);
+            });
+
+            gridEl.innerHTML = exercises.map(name => {
+                const entries = log[name];
+                const best = entries[0];
+                const prev = entries[1];
+                const d = new Date(best.date);
+                const dateStr = d.toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
+                const isNewPR = !prev || best.e1rm >= prev.e1rm;
+
+                let deltaHTML = '';
+                if (prev) {
+                    const diff = best.e1rm - prev.e1rm;
+                    if (diff > 0) {
+                        deltaHTML = `<span class="pr-card-delta up">↑ +${diff} kg e1RM</span>`;
+                    } else if (diff < 0) {
+                        deltaHTML = `<span class="pr-card-delta same">↓ ${diff} kg e1RM</span>`;
+                    } else {
+                        deltaHTML = `<span class="pr-card-delta same">= same as before</span>`;
+                    }
+                }
+
+                return `<div class="pr-card${isNewPR && prev ? ' is-new' : ''}">
+                    <div class="pr-card-name" title="${name}">${name}</div>
+                    <div class="pr-card-weight">${best.weight} kg</div>
+                    <div class="pr-card-reps">${best.reps} reps</div>
+                    <div class="pr-card-e1rm">e1RM: ~${best.e1rm} kg</div>
+                    ${deltaHTML}
+                    <div class="pr-card-date">${dateStr}</div>
+                </div>`;
+            }).join('');
+        }
+
+        // Data Management Setup (Export Data, Clear Data, API Key Settings)
+        function setupDataManagement() {
+            // Export PDF button (on Results screen)
+            document.getElementById('export-data-btn')?.addEventListener('click', async () => {
+                const btn = document.getElementById('export-data-btn');
+                if (!btn) return;
+                const originalHTML = btn.innerHTML;
+                btn.innerHTML = `<svg viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                    <circle cx="12" cy="12" r="10"/>
+                    <path d="M12 6v6l4 2"/>
+                </svg> Generating...`;
+                btn.style.pointerEvents = 'none';
+                btn.style.opacity = '0.7';
+                try {
+                    await exportUserData();
+                    btn.innerHTML = `<svg viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                        <path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/>
+                        <polyline points="22 4 12 14.01 9 11.01"/>
+                    </svg> Downloaded!`;
+                    setTimeout(() => {
+                        btn.innerHTML = originalHTML;
+                        btn.style.pointerEvents = '';
+                        btn.style.opacity = '';
+                    }, 2000);
+                } catch (e) {
+                    btn.innerHTML = `<svg viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                        <circle cx="12" cy="12" r="10"/>
+                        <line x1="15" y1="9" x2="9" y2="15"/>
+                        <line x1="9" y1="9" x2="15" y2="15"/>
+                    </svg> Failed`;
+                    setTimeout(() => {
+                        btn.innerHTML = originalHTML;
+                        btn.style.pointerEvents = '';
+                        btn.style.opacity = '';
+                    }, 2000);
+                }
+            });
+
+            // Clear All Data button
+            document.getElementById('clear-data-btn')?.addEventListener('click', () => {
+                const modal = document.getElementById('clear-data-modal');
+                if (modal) modal.classList.add('active');
+            });
+
+            // Confirm clear data
+            document.getElementById('confirm-clear-data')?.addEventListener('click', async () => {
+                const btn = document.getElementById('confirm-clear-data');
+                if (!btn) return;
+                btn.textContent = 'Clearing...';
+                btn.disabled = true;
+
+                const success = await clearAllData();
+
+                if (success) {
+                    // Close modal and reload page to reset state
+                    document.getElementById('clear-data-modal')?.classList.remove('active');
+                    showToast('All data cleared successfully!', 'success');
+                    setTimeout(() => location.reload(), 1000);
+                } else {
+                    btn.textContent = 'Confirm Delete';
+                    btn.disabled = false;
+                    showToast('Failed to clear some data. Please try again.', 'error');
+                }
+            });
+
+            // Cancel clear data
+            document.getElementById('cancel-clear-data')?.addEventListener('click', () => {
+                document.getElementById('clear-data-modal')?.classList.remove('active');
+            });
+
+            // Close modal on escape
+            document.addEventListener('keydown', (e) => {
+                if (e.key === 'Escape') {
+                    document.getElementById('clear-data-modal')?.classList.remove('active');
+                }
+            });
+
+            // Storage info display
+            updateStorageInfo();
+        }
+
+        // ========== ONBOARDING FLOW ==========
+        function showOnboardingIfNeeded() {
+            const seen = localStorage.getItem('fixit-onboarding-done');
+            if (seen) return;
+            const overlay = document.getElementById('onboarding-overlay');
+            if (!overlay) return;
+            overlay.classList.add('active');
+
+            let currentStep = 0;
+            const totalSteps = 3;
+            const steps = overlay.querySelectorAll('.onboarding-step');
+            const dots = overlay.querySelectorAll('.onboarding-dot');
+            const nextBtn = document.getElementById('onboarding-next');
+            const skipBtn = document.getElementById('onboarding-skip');
+
+            function goToStep(n) {
+                steps.forEach((s, i) => s.classList.toggle('active', i === n));
+                dots.forEach((d, i) => d.classList.toggle('active', i === n));
+                nextBtn.textContent = n === totalSteps - 1 ? 'Get Started' : 'Next';
+                currentStep = n;
+            }
+
+            function dismiss() {
+                overlay.classList.remove('active');
+                localStorage.setItem('fixit-onboarding-done', '1');
+            }
+
+            nextBtn.addEventListener('click', () => {
+                if (currentStep < totalSteps - 1) goToStep(currentStep + 1);
+                else dismiss();
+            });
+            skipBtn.addEventListener('click', dismiss);
+
+            // Allow clicking dots to navigate
+            dots.forEach((dot, i) => dot.addEventListener('click', () => goToStep(i)));
+        }
+
+        // ========== WATER INTAKE TRACKER ==========
+        function setupWaterTracker() {
+            const grid = document.getElementById('water-glasses-grid');
+            if (!grid) return;
+
+            // Calculate goal: 35ml per kg of bodyweight, min 1500ml, max 4000ml
+            function getWaterGoalMl() {
+                if (state.weight) return Math.min(4000, Math.max(1500, Math.round(state.weight * 35 / 250) * 250));
+                return 2000;
+            }
+            function getGlassMl() { return Math.round(getWaterGoalMl() / 8); }
+
+            function getWaterKey() { return userKey('fixit-water-' + new Date().toISOString().split('T')[0]); }
+
+            function getGlassesDrunk() {
+                return parseInt(localStorage.getItem(getWaterKey()) || '0');
+            }
+
+            function saveGlassesDrunk(n) {
+                const val = Math.max(0, n);
+                localStorage.setItem(getWaterKey(), String(val));
+                const today = new Date().toISOString().split('T')[0];
+                _apiSave('/tracking/hydration', { glasses_drunk: val, log_date: today });
+            }
+
+            function renderWater() {
+                const goalMl = getWaterGoalMl();
+                const glassMl = getGlassMl();
+                const numGlasses = 8;
+                const drunk = Math.min(getGlassesDrunk(), numGlasses);
+
+                document.getElementById('water-glasses-goal').textContent = numGlasses;
+                document.getElementById('water-glasses-count').textContent = drunk;
+                document.getElementById('water-ml-goal').textContent = goalMl;
+                document.getElementById('water-ml-current').textContent = drunk * glassMl;
+
+                grid.innerHTML = '';
+                for (let i = 0; i < numGlasses; i++) {
+                    const glass = document.createElement('button');
+                    glass.className = 'water-glass' + (i < drunk ? ' filled' : '');
+                    glass.title = i < drunk ? `Glass ${i+1} — ${glassMl}ml` : `Tap to log glass ${i+1}`;
+                    glass.innerHTML = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="18" height="18">
+                        <path d="M5 3h14l-2 14a2 2 0 0 1-2 2H9a2 2 0 0 1-2-2L5 3z"/>
+                    </svg>`;
+                    glass.addEventListener('click', () => {
+                        const current = getGlassesDrunk();
+                        if (i < current) return; // already filled, use undo
+                        saveGlassesDrunk(i + 1);
+                        renderWater();
+                        if (i + 1 === numGlasses) showToast('Great job! Daily hydration goal reached! 💧', 'success');
+                    });
+                    grid.appendChild(glass);
+                }
+            }
+
+            function getHistoryGlasses(dateStr) {
+                return parseInt(localStorage.getItem(userKey('fixit-water-' + dateStr)) || '0');
+            }
+
+            function renderWaterHistory() {
+                const heatmap  = document.getElementById('water-heatmap');
+                const avgEl    = document.getElementById('water-avg-val');
+                const streakEl = document.getElementById('water-streak-val');
+                const bestEl   = document.getElementById('water-best-val');
+                if (!heatmap) return;
+
+                const now = new Date();
+                const days = [];
+                for (let i = 13; i >= 0; i--) {
+                    const d = new Date(now);
+                    d.setDate(d.getDate() - i);
+                    const dateStr = d.toISOString().split('T')[0];
+                    const glasses = getHistoryGlasses(dateStr);
+                    days.push({ dateStr, glasses, isToday: i === 0 });
+                }
+
+                // Heatmap cells
+                heatmap.innerHTML = days.map(({ dateStr, glasses, isToday }) => {
+                    let cls = 'water-heatmap-cell';
+                    if (glasses >= 8)      cls += ' full';
+                    else if (glasses >= 5) cls += ' half';
+                    else if (glasses >= 2) cls += ' partial';
+                    if (isToday)           cls += ' today';
+                    return `<div class="${cls}" title="${dateStr}: ${glasses}/8 glasses"></div>`;
+                }).join('');
+
+                // 7-day average (last 7 days including today)
+                const last7  = days.slice(-7);
+                const avg7   = (last7.reduce((s, d) => s + d.glasses, 0) / 7).toFixed(1);
+                if (avgEl) avgEl.textContent = avg7 === '0.0' ? '—' : `${avg7}`;
+
+                // Current goal streak (consecutive days from today back hitting 8 glasses)
+                let streak = 0;
+                for (let i = days.length - 1; i >= 0; i--) {
+                    if (days[i].glasses >= 8) streak++;
+                    else break;
+                }
+
+                // Best streak over 30-day window
+                let best = 0, run = 0;
+                for (let i = 29; i >= 0; i--) {
+                    const d = new Date(now); d.setDate(now.getDate() - i);
+                    const g = getHistoryGlasses(d.toISOString().split('T')[0]);
+                    if (g >= 8) { run++; best = Math.max(best, run); }
+                    else run = 0;
+                }
+
+                if (streakEl) streakEl.textContent = streak > 0 ? `${streak}d` : '—';
+                if (bestEl)   bestEl.textContent   = best   > 0 ? `${best}d`   : '—';
+            }
+
+            // Patch renderWater to also update history
+            const _origRenderWater = renderWater;
+            function renderWaterWithHistory() {
+                _origRenderWater();
+                renderWaterHistory();
+            }
+
+            // Re-wire glass clicks and undo to use the patched version
+            // (renderWater is called internally in glass clicks — we need to re-register)
+            // Instead, just call renderWaterHistory() after renderWater() throughout
+            renderWaterHistory();
+
+            document.getElementById('water-undo-btn')?.addEventListener('click', () => {
+                const current = getGlassesDrunk();
+                if (current > 0) { saveGlassesDrunk(current - 1); renderWater(); renderWaterHistory(); }
+            });
+
+            // Patch glass click handlers to also call history after save
+            // We do this by wrapping the grid click via event delegation
+            grid.addEventListener('click', () => {
+                // renderWater already called in individual glass handlers — just update history after
+                setTimeout(renderWaterHistory, 0);
+            });
+
+            renderWater();
+
+            // Re-render when navigating to nutrition screen (goal may have updated)
+            document.getElementById('back-to-results-nutrition')?.addEventListener('click', () => {}, { passive: true });
+            document.addEventListener('screenChange', () => {
+                if (state.currentScreen === 7) { renderWater(); renderWaterHistory(); }
+            });
+        }
+
+        // ========== BODY MEASUREMENTS ==========
+        function setupMeasurements() {
+            const section = document.querySelector('.measurements-section');
+            const toggle = document.getElementById('measurements-toggle');
+            if (!toggle || !section) return;
+
+            // Restore saved measurements
+            const saved = (() => { try { return JSON.parse(localStorage.getItem(userKey('fixit-measurements')) || '{}'); } catch { return {}; } })();
+            ['chest','waist','hips','arms'].forEach(k => {
+                const el = document.getElementById('meas-' + k);
+                if (el && saved[k]) el.value = saved[k];
+            });
+            if (Object.keys(saved).length) section.classList.add('open');
+
+            toggle.addEventListener('click', () => section.classList.toggle('open'));
+
+            ['chest','waist','hips','arms'].forEach(k => {
+                document.getElementById('meas-' + k)?.addEventListener('input', saveMeasurements);
+            });
+        }
+
+        function saveMeasurements() {
+            const data = {};
+            ['chest','waist','hips','arms'].forEach(k => {
+                const v = document.getElementById('meas-' + k)?.value;
+                if (v) data[k] = parseFloat(v);
+            });
+            localStorage.setItem(userKey('fixit-measurements'), JSON.stringify(data));
+            state.measurements = data;
+        }
+
+        function getMeasurements() {
+            try { return JSON.parse(localStorage.getItem(userKey('fixit-measurements')) || '{}'); } catch { return {}; }
+        }
+
+        // ========== BODY MEASUREMENTS TRACKER ==========
+        const MEAS_LOG_KEY = 'fixit-measurement-log';
+        const MEAS_LOG_MAX = 60;
+
+        function getMeasurementLog() {
+            try { return JSON.parse(localStorage.getItem(userKey(MEAS_LOG_KEY)) || '[]'); } catch { return []; }
+        }
+
+        function appendMeasurementEntry(data) {
+            // data = { chest?, waist?, hips?, arms? }
+            const nonEmpty = ['chest','waist','hips','arms'].filter(k => data[k]);
+            if (nonEmpty.length === 0) return;
+
+            const log = getMeasurementLog();
+            const today = new Date().toISOString().split('T')[0];
+            // Deduplicate: if an entry already exists for today, overwrite it
+            const idx = log.findIndex(e => e.date === today);
+            const entry = { date: today, ...data };
+            if (idx >= 0) {
+                log[idx] = entry;
+            } else {
+                log.unshift(entry);
+            }
+            if (log.length > MEAS_LOG_MAX) log.length = MEAS_LOG_MAX;
+            localStorage.setItem(userKey(MEAS_LOG_KEY), JSON.stringify(log));
+            _apiSave('/tracking/measurements', { log_date: today, ...data });
+        }
+
+        function setupMeasurementsTracker() {
+            document.getElementById('meas-log-btn')?.addEventListener('click', openMeasForm);
+            document.getElementById('meas-cancel-btn')?.addEventListener('click', closeMeasForm);
+            document.getElementById('meas-save-btn')?.addEventListener('click', submitMeasEntry);
+            renderMeasurementsTracker();
+        }
+
+        function openMeasForm() {
+            // Pre-fill from the latest log entry or saved measurements
+            const log = getMeasurementLog();
+            const latest = log[0] || getMeasurements();
+            ['chest','waist','hips','arms'].forEach(k => {
+                const el = document.getElementById('mf-' + k);
+                if (el) el.value = latest[k] || '';
+            });
+            document.getElementById('meas-log-form').style.display = '';
+            document.getElementById('meas-log-btn').style.display = 'none';
+            document.getElementById('mf-chest')?.focus();
+        }
+
+        function closeMeasForm() {
+            document.getElementById('meas-log-form').style.display = 'none';
+            document.getElementById('meas-log-btn').style.display = '';
+        }
+
+        function submitMeasEntry() {
+            const data = {};
+            ['chest','waist','hips','arms'].forEach(k => {
+                const v = parseFloat(document.getElementById('mf-' + k)?.value);
+                if (v && v > 0) data[k] = v;
+            });
+            if (Object.keys(data).length === 0) {
+                showToast('Enter at least one measurement to save', 'error');
+                return;
+            }
+            appendMeasurementEntry(data);
+            // Also sync to the single-snapshot key for share card
+            localStorage.setItem(userKey('fixit-measurements'), JSON.stringify({ ...getMeasurements(), ...data }));
+            closeMeasForm();
+            renderMeasurementsTracker();
+            showToast('Measurements logged!', 'success');
+        }
+
+        function renderMeasurementsTracker() {
+            const log = getMeasurementLog();
+            const counterEl = document.getElementById('meas-log-counter');
+            const emptyHint = document.getElementById('meas-empty-hint');
+            const footer = document.getElementById('meas-footer');
+
+            if (counterEl) counterEl.textContent = `${log.length} entr${log.length !== 1 ? 'ies' : 'y'}`;
+
+            const latest = log[0];
+            const prev = log[1];
+
+            // Show empty hint if no entries
+            if (emptyHint) emptyHint.style.display = log.length === 0 ? '' : 'none';
+
+            // Update tiles
+            ['chest','waist','hips','arms'].forEach(k => {
+                const valEl = document.getElementById(`mt-${k}-val`);
+                const deltaEl = document.getElementById(`mt-${k}-delta`);
+                if (!valEl) return;
+
+                const cur = latest?.[k];
+                const old = prev?.[k];
+
+                valEl.textContent = cur != null ? cur.toFixed(1) : '—';
+
+                if (deltaEl) {
+                    if (cur != null && old != null && cur !== old) {
+                        const diff = (cur - old).toFixed(1);
+                        const sign = diff > 0 ? '+' : '';
+                        const isDown = cur < old;
+                        // For waist: down = good (green). For chest/arms: up = good (gold).
+                        // We'll use: down = green always for simplicity
+                        deltaEl.textContent = `${sign}${diff} cm`;
+                        deltaEl.className = 'meas-tile-delta ' + (isDown ? 'down' : 'up');
+                    } else {
+                        deltaEl.textContent = '';
+                        deltaEl.className = 'meas-tile-delta';
+                    }
+                }
+            });
+
+            // Footer: last logged date
+            const lastLoggedEl = document.getElementById('meas-last-logged');
+            if (lastLoggedEl && latest) {
+                const d = new Date(latest.date);
+                lastLoggedEl.textContent = `Last logged: ${d.toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' })}`;
+            } else if (lastLoggedEl) {
+                lastLoggedEl.textContent = '';
+            }
+        }
+
+        // ========== DAILY HABITS TRACKER ==========
+        const HABIT_CHECKIN_KEY = 'fixit-habit-checkins';
+
+        const HABIT_CONFIG = [
+            {
+                id: 'workout',
+                icon: '💪',
+                name: 'Workout',
+                auto: true,
+                goalDesc: 'Log a workout session'
+            },
+            {
+                id: 'hydration',
+                icon: '💧',
+                name: 'Hydration',
+                auto: true,
+                goalDesc: 'Reach 8 glasses of water'
+            },
+            {
+                id: 'sleep',
+                icon: '😴',
+                name: 'Sleep',
+                auto: true,
+                goalDesc: 'Log 7+ hours last night'
+            },
+            {
+                id: 'nutrition',
+                icon: '🥗',
+                name: 'Nutrition',
+                auto: true,
+                goalDesc: 'Log your meals today'
+            },
+            {
+                id: 'checkin',
+                icon: '🎯',
+                name: 'Check-In',
+                auto: false,
+                goalDesc: 'Tap to mark done'
+            }
+        ];
+
+        function getHabitCheckins() {
+            try { return JSON.parse(localStorage.getItem(userKey(HABIT_CHECKIN_KEY)) || '[]'); } catch { return []; }
+        }
+
+        function saveHabitCheckins(dates) {
+            // Keep last 90 days only
+            const cutoff = new Date();
+            cutoff.setDate(cutoff.getDate() - 90);
+            const cut = cutoff.toISOString().split('T')[0];
+            const trimmed = dates.filter(d => d >= cut);
+            localStorage.setItem(userKey(HABIT_CHECKIN_KEY), JSON.stringify(trimmed));
+        }
+
+        function toggleCheckin(today) {
+            const dates = getHabitCheckins();
+            const idx = dates.indexOf(today);
+            if (idx >= 0) {
+                dates.splice(idx, 1);
+            } else {
+                dates.unshift(today);
+            }
+            saveHabitCheckins(dates);
+        }
+
+        // Compute streak going backward from today (or yesterday for auto habits not yet done)
+        function computeHabitStreak(doneDates) {
+            if (!doneDates.length) return 0;
+            const set = new Set(doneDates);
+            const today = new Date().toISOString().split('T')[0];
+            let streak = 0;
+            let cursor = new Date();
+            // Start from today; if today isn't in set start from yesterday
+            if (!set.has(today)) cursor.setDate(cursor.getDate() - 1);
+            while (true) {
+                const d = cursor.toISOString().split('T')[0];
+                if (!set.has(d)) break;
+                streak++;
+                cursor.setDate(cursor.getDate() - 1);
+                if (streak > 365) break;
+            }
+            return streak;
+        }
+
+        function detectHabitStatus(id, today, yesterday) {
+            switch (id) {
+                case 'workout': {
+                    const sessionDone = getWorkoutLog().some(e => (e.date || '').startsWith(today));
+                    const exLogDone   = getExerciseLogForDate(today).length > 0;
+                    return sessionDone || exLogDone;
+                }
+                case 'hydration': {
+                    const glasses = parseInt(localStorage.getItem(userKey('fixit-water-' + today)) || '0');
+                    return glasses >= 8;
+                }
+                case 'sleep': {
+                    // Sleep is logged for the night that just ended → check yesterday's or today's entry
+                    const log = getSleepLog();
+                    const entry = log.find(e => e.date === yesterday || e.date === today);
+                    return entry ? entry.hours >= 7 : false;
+                }
+                case 'nutrition': {
+                    const log = getCalorieLog();
+                    const entry = log.find(e => e.date === today);
+                    return entry ? entry.calories > 0 : false;
+                }
+                case 'checkin': {
+                    return getHabitCheckins().includes(today);
+                }
+                default:
+                    return false;
+            }
+        }
+
+        // Build an array of dates where a given auto-habit was done (from existing logs)
+        function getHabitDoneDates(id) {
+            switch (id) {
+                case 'workout': {
+                    const sessionDates = getWorkoutLog().map(e => (e.date || '').split('T')[0]).filter(Boolean);
+                    const exDates = [];
+                    const cur = new Date();
+                    for (let i = 0; i < 60; i++) {
+                        const d = cur.toISOString().split('T')[0];
+                        if (getExerciseLogForDate(d).length > 0) exDates.push(d);
+                        cur.setDate(cur.getDate() - 1);
+                    }
+                    return [...new Set([...sessionDates, ...exDates])];
+                }
+                case 'hydration': {
+                    // Scan last 60 days from localStorage keys
+                    const dates = [];
+                    const cursor = new Date();
+                    for (let i = 0; i < 60; i++) {
+                        const d = cursor.toISOString().split('T')[0];
+                        if (parseInt(localStorage.getItem(userKey('fixit-water-' + d)) || '0') >= 8) {
+                            dates.push(d);
+                        }
+                        cursor.setDate(cursor.getDate() - 1);
+                    }
+                    return dates;
+                }
+                case 'sleep':
+                    return getSleepLog().filter(e => e.hours >= 7).map(e => e.date).filter(Boolean);
+                case 'nutrition':
+                    return getCalorieLog().filter(e => e.calories > 0).map(e => e.date).filter(Boolean);
+                case 'checkin':
+                    return getHabitCheckins();
+                default:
+                    return [];
+            }
+        }
+
+        const SCORE_MSGS = [
+            'Start logging to track your daily habits.',
+            'Good start! Keep going — every habit counts.',
+            'Making progress! You\'re building momentum.',
+            'Solid day! You\'re more than halfway there.',
+            'Almost perfect — one more habit to go!',
+            'Perfect day! Every habit complete. Keep it up!'
+        ];
+
+        function renderHabitTracker() {
+            const grid = document.getElementById('habits-grid');
+            if (!grid) return;
+
+            const now = new Date();
+            const today = now.toISOString().split('T')[0];
+            const yd = new Date(now);
+            yd.setDate(yd.getDate() - 1);
+            const yesterday = yd.toISOString().split('T')[0];
+
+            let doneCount = 0;
+            const tiles = HABIT_CONFIG.map(h => {
+                const done = detectHabitStatus(h.id, today, yesterday);
+                if (done) doneCount++;
+                const streak = computeHabitStreak(getHabitDoneDates(h.id));
+                return { ...h, done, streak };
+            });
+
+            // Render tiles
+            grid.innerHTML = tiles.map(h => {
+                const doneClass = h.done ? ' done' : '';
+                const manualClass = !h.auto ? ' manual' : '';
+                const statusText = h.done
+                    ? (h.id === 'checkin' ? 'Marked done' : 'Completed!')
+                    : h.goalDesc;
+                const streakHtml = h.streak > 0
+                    ? `<span class="habit-streak"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M8.5 14.5A2.5 2.5 0 0011 12c0-1.38-.5-2-1-3-1.072-2.143-.224-4.054 2-6 .5 2.5 2 4.9 4 6.5 2 1.6 3 3.5 3 5.5a7 7 0 11-14 0c0-1.153.433-2.294 1-3a2.5 2.5 0 002.5 3z"/></svg>${h.streak}d</span>`
+                    : `<span class="habit-streak" style="color:var(--text-muted);font-weight:500">—</span>`;
+                return `
+                    <div class="habit-tile${doneClass}${manualClass}" data-habit="${h.id}">
+                        <div class="habit-check">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>
+                        </div>
+                        <div class="habit-icon">${h.icon}</div>
+                        <div class="habit-name">${h.name}</div>
+                        <div class="habit-status">${statusText}</div>
+                        ${streakHtml}
+                    </div>`;
+            }).join('');
+
+            // Manual habit tap
+            grid.querySelectorAll('.habit-tile.manual').forEach(tile => {
+                tile.addEventListener('click', () => {
+                    toggleCheckin(today);
+                    renderHabitTracker();
+                });
+            });
+
+            // Update score ring
+            const CIRCUMFERENCE = 163.4; // 2π × r(26)
+            const fill = document.getElementById('habits-ring-fill');
+            const num = document.getElementById('habits-ring-num');
+            const badge = document.getElementById('habits-score-badge');
+            const msg = document.getElementById('habits-score-msg');
+
+            if (fill) {
+                const offset = CIRCUMFERENCE - (doneCount / 5) * CIRCUMFERENCE;
+                fill.style.strokeDashoffset = offset;
+                fill.classList.toggle('full', doneCount === 5);
+            }
+            if (num) num.textContent = doneCount;
+            if (badge) badge.textContent = `${doneCount} / 5`;
+            if (msg) msg.textContent = SCORE_MSGS[doneCount] || SCORE_MSGS[0];
+        }
+
+        function setupHabitTracker() {
+            // Initial render happens via refreshProgressScreen
+        }
+
+        // ========== WEEKLY REPORT CARD ==========
+        function renderWeeklyReport() {
+            const workoutsEl = document.getElementById('wr-workouts');
+            const sleepEl    = document.getElementById('wr-sleep');
+            const weightEl   = document.getElementById('wr-weight');
+            const streakEl   = document.getElementById('wr-streak');
+            const messageEl  = document.getElementById('wr-message');
+            const rangeEl    = document.getElementById('wr-week-range');
+
+            // Current week bounds (Sun–Sat)
+            const now = new Date();
+            const startOfWeek = new Date(now);
+            startOfWeek.setDate(now.getDate() - now.getDay());
+            startOfWeek.setHours(0, 0, 0, 0);
+            const endOfWeek = new Date(startOfWeek);
+            endOfWeek.setDate(startOfWeek.getDate() + 6);
+
+            const fmt = { month: 'short', day: 'numeric' };
+            if (rangeEl) rangeEl.textContent =
+                `${startOfWeek.toLocaleDateString('en-US', fmt)} – ${endOfWeek.toLocaleDateString('en-US', fmt)}`;
+
+            const weekStartStr = startOfWeek.toISOString().split('T')[0];
+
+            // --- Workouts this week ---
+            const workoutLog = getWorkoutLog();
+            const workoutsThisWeek = workoutLog.filter(s => s.date && s.date >= weekStartStr).length;
+            if (workoutsEl) workoutsEl.textContent = workoutsThisWeek;
+
+            // --- Avg sleep this week ---
+            const sleepLog = getSleepLog();
+            const sleepThisWeek = sleepLog.filter(e => e.date >= weekStartStr);
+            const avgSleep = sleepThisWeek.length
+                ? sleepThisWeek.reduce((s, e) => s + e.hours, 0) / sleepThisWeek.length
+                : null;
+            if (sleepEl) sleepEl.textContent = avgSleep !== null ? `${avgSleep.toFixed(1)}h` : '—';
+
+            // --- Weight change this week (or last 7 days) ---
+            const weightLog = getWeightLog();
+            let weightChange = null;
+            const weightsThisWeek = weightLog.filter(e => e.date >= weekStartStr);
+            if (weightsThisWeek.length >= 2) {
+                weightChange = weightsThisWeek[0].weight - weightsThisWeek[weightsThisWeek.length - 1].weight;
+            } else {
+                const sevenAgo = new Date(now);
+                sevenAgo.setDate(now.getDate() - 7);
+                const sevenStr = sevenAgo.toISOString().split('T')[0];
+                const recent = weightLog.filter(e => e.date >= sevenStr);
+                if (recent.length >= 2) weightChange = recent[0].weight - recent[recent.length - 1].weight;
+            }
+            if (weightEl) {
+                if (weightChange !== null) {
+                    const sign = weightChange > 0 ? '+' : '';
+                    weightEl.textContent = `${sign}${weightChange.toFixed(1)}kg`;
+                    weightEl.style.color = weightChange <= 0 ? '#4ade80' : 'var(--accent-warm)';
+                } else {
+                    weightEl.textContent = '—';
+                    weightEl.style.color = '';
+                }
+            }
+
+            // --- Current streak ---
+            const streak = parseInt(localStorage.getItem(userKey('fixit-workout-streak')) || '0');
+            if (streakEl) streakEl.textContent = streak > 0 ? streak : '0';
+
+            // --- Score computation ---
+            const scoreParts = [];
+
+            // Workouts: 4+ = 100, 3 = 92, 2 = 72, 1 = 45, 0 = 12
+            const workoutScore = workoutsThisWeek >= 4 ? 100 : workoutsThisWeek === 3 ? 92
+                : workoutsThisWeek === 2 ? 72 : workoutsThisWeek === 1 ? 45 : 12;
+            scoreParts.push(workoutScore);
+
+            // Sleep: 8h = 100, 7h = 82, 6h = 60, <5h = 30
+            if (avgSleep !== null) {
+                const sleepScore = avgSleep >= 8 ? 100 : avgSleep >= 7 ? 82 : avgSleep >= 6 ? 60
+                    : avgSleep >= 5 ? 42 : 25;
+                scoreParts.push(sleepScore);
+            }
+
+            // Recovery score (blends sleep quality + workout balance)
+            const recov = computeRecoveryScore(sleepLog);
+            if (recov !== null) scoreParts.push(recov);
+
+            // Streak bonus: contribute a modest boost
+            const streakScore = streak >= 14 ? 100 : streak >= 7 ? 88 : streak >= 3 ? 72
+                : streak >= 1 ? 55 : 20;
+            scoreParts.push(streakScore);
+
+            const finalScore = Math.round(scoreParts.reduce((a, b) => a + b, 0) / scoreParts.length);
+
+            // Only show a message if there's meaningful data
+            const hasData = workoutsThisWeek > 0 || sleepThisWeek.length > 0 || weightLog.length > 0;
+
+            let weekMessage = '';
+            if (!hasData) {
+                weekMessage = "Start logging workouts and sleep to see your weekly report.";
+            } else if (finalScore >= 93) weekMessage = "Outstanding week — elite-level consistency!";
+            else if (finalScore >= 85) weekMessage = "Excellent week. Keep this momentum going.";
+            else if (finalScore >= 77) weekMessage = "Solid week — you're building great habits.";
+            else if (finalScore >= 69) weekMessage = "Good effort this week. Small gains compound.";
+            else if (finalScore >= 61) weekMessage = "Decent week — try adding one more workout.";
+            else if (finalScore >= 53) weekMessage = "Room to grow — focus on sleep and consistency.";
+            else weekMessage = "Tough week — every step forward still counts.";
+            // Append calorie context if nutrition data is available for this week
+            const calLogThisWeek = getCalorieLog().filter(e => e.date >= weekStartStr);
+            let calSuffix = '';
+            if (calLogThisWeek.length > 0) {
+                const avgCal = Math.round(calLogThisWeek.reduce((s, e) => s + e.calories, 0) / calLogThisWeek.length);
+                const goalCal = state.macroTargets?.calories;
+                if (goalCal) {
+                    const diff = avgCal - goalCal;
+                    const sign = diff > 0 ? '+' : '';
+                    calSuffix = `  ·  Avg ${avgCal} kcal/day (${sign}${diff} vs goal).`;
+                } else {
+                    calSuffix = `  ·  Avg ${avgCal} kcal/day this week.`;
+                }
+            }
+            if (messageEl) messageEl.textContent = weekMessage + calSuffix;
+        }
+
+        // ========== SLEEP & RECOVERY TRACKER ==========
+        // ========== CALORIE HISTORY CACHE ==========
+        const CALORIE_LOG_KEY = 'fixit-calorie-log';
+        const CALORIE_LOG_MAX = 365;
+
+        function getCalorieLog() {
+            try { return JSON.parse(localStorage.getItem(userKey(CALORIE_LOG_KEY))) || []; }
+            catch(e) { return []; }
+        }
+
+        function saveCalorieLogEntry(date, calories, protein, carbs, fats) {
+            if (!calories && !protein && !carbs && !fats) return; // skip empty days
+            const log = getCalorieLog().filter(e => e.date !== date);
+            log.unshift({ date, calories: Math.round(calories), protein: Math.round(protein), carbs: Math.round(carbs), fats: Math.round(fats) });
+            if (log.length > CALORIE_LOG_MAX) log.length = CALORIE_LOG_MAX;
+            localStorage.setItem(userKey(CALORIE_LOG_KEY), JSON.stringify(log));
+        }
+
+        const SLEEP_LOG_KEY = 'fixit-sleep-log';
+        const SLEEP_LOG_MAX = 365;
+
+        function getSleepLog() {
+            try { return JSON.parse(localStorage.getItem(userKey(SLEEP_LOG_KEY))) || []; }
+            catch(e) { return []; }
+        }
+
+        function appendSleepEntry(hours, quality) {
+            const today = new Date().toISOString().split('T')[0];
+            const log = getSleepLog().filter(e => e.date !== today);
+            log.unshift({ date: today, hours, quality });
+            if (log.length > SLEEP_LOG_MAX) log.length = SLEEP_LOG_MAX;
+            localStorage.setItem(userKey(SLEEP_LOG_KEY), JSON.stringify(log));
+            _apiSave('/tracking/sleep', { hours, quality, sleep_date: today });
+        }
+
+        function computeRecoveryScore(sleepLog) {
+            if (!sleepLog || sleepLog.length === 0) return null;
+            const now = new Date();
+            const last7 = [];
+            for (let i = 0; i < 7; i++) {
+                const d = new Date(now);
+                d.setDate(d.getDate() - i);
+                const dateStr = d.toISOString().split('T')[0];
+                const entry = sleepLog.find(e => e.date === dateStr) || null;
+                last7.push(entry);
+            }
+            const withData = last7.filter(Boolean);
+            if (withData.length === 0) return null;
+
+            // Hours score: 8h = 100, 6h = 60, 4h = 30
+            const avgHrs = withData.reduce((s, e) => s + e.hours, 0) / withData.length;
+            const hoursScore = avgHrs >= 8 ? 100
+                : avgHrs >= 6 ? 60 + (avgHrs - 6) * 20
+                : avgHrs >= 4 ? 30 + (avgHrs - 4) * 15
+                : avgHrs * 7.5;
+
+            // Quality score
+            const qualityMap = { good: 100, fair: 65, poor: 30 };
+            const qualityScore = withData.reduce((s, e) => s + (qualityMap[e.quality] || 50), 0) / withData.length;
+
+            // Workout balance: 3–4/week ideal
+            const wlog = getWorkoutLog();
+            const workoutsThisWeek = wlog.filter(s => {
+                if (!s.date) return false;
+                return (Date.now() - new Date(s.date).getTime()) / 86400000 <= 7;
+            }).length;
+            const workoutScore = workoutsThisWeek === 0 ? 50
+                : workoutsThisWeek <= 2 ? 70 + workoutsThisWeek * 5
+                : workoutsThisWeek <= 4 ? 90 + (workoutsThisWeek - 3) * 5
+                : workoutsThisWeek === 5 ? 90 : 78;
+
+            const overall = Math.round(hoursScore * 0.5 + qualityScore * 0.3 + workoutScore * 0.2);
+            return Math.max(0, Math.min(100, overall));
+        }
+
+        function setupSleepTracker() {
+            const logBtn    = document.getElementById('sleep-log-btn');
+            const cancelBtn = document.getElementById('sleep-cancel-btn');
+            const saveBtn   = document.getElementById('sleep-save-btn');
+            const form      = document.getElementById('sleep-log-form');
+            const footer    = document.getElementById('sleep-footer');
+
+            // Quality button selection
+            document.querySelectorAll('.sq-btn').forEach(btn => {
+                btn.addEventListener('click', () => {
+                    document.querySelectorAll('.sq-btn').forEach(b => b.classList.remove('active'));
+                    btn.classList.add('active');
+                });
+            });
+
+            if (logBtn) logBtn.addEventListener('click', () => {
+                if (form) form.style.display = '';
+                if (footer) footer.style.display = 'none';
+                document.getElementById('sleep-hours-input')?.focus();
+            });
+
+            if (cancelBtn) cancelBtn.addEventListener('click', () => {
+                if (form) form.style.display = 'none';
+                if (footer) footer.style.display = '';
+            });
+
+            if (saveBtn) saveBtn.addEventListener('click', () => {
+                const hoursInput = document.getElementById('sleep-hours-input');
+                const hours = parseFloat(hoursInput?.value);
+                if (!hours || hours <= 0 || hours > 24) {
+                    if (hoursInput) {
+                        hoursInput.style.borderColor = 'var(--accent-warm)';
+                        setTimeout(() => { if (hoursInput) hoursInput.style.borderColor = ''; }, 1500);
+                    }
+                    return;
+                }
+                const activeQ = document.querySelector('.sq-btn.active');
+                const quality = activeQ?.dataset?.q || 'good';
+                appendSleepEntry(hours, quality);
+                if (hoursInput) hoursInput.value = '';
+                if (form) form.style.display = 'none';
+                if (footer) footer.style.display = '';
+                renderSleepTracker();
+                showToast('Sleep logged!', 'success');
+            });
+
+            renderSleepTracker();
+        }
+
+        function renderSleepTracker() {
+            const chart      = document.getElementById('sleep-chart');
+            const avgBadge   = document.getElementById('sleep-avg-badge');
+            const scoreVal   = document.getElementById('sleep-score-val');
+            const streakVal  = document.getElementById('sleep-streak-val');
+            const lastLogged = document.getElementById('sleep-last-logged');
+            const log = getSleepLog();
+            const now = new Date();
+
+            // Build last-7-days data oldest→newest
+            const days7 = [];
+            for (let i = 6; i >= 0; i--) {
+                const d = new Date(now);
+                d.setDate(d.getDate() - i);
+                const dateStr = d.toISOString().split('T')[0];
+                const entry = log.find(e => e.date === dateStr) || null;
+                const dayName = d.toLocaleDateString('en-US', { weekday: 'short' }).slice(0, 2);
+                days7.push({ dateStr, entry, dayName, isToday: i === 0 });
+            }
+
+            // Scale bars
+            const maxHrs = Math.max(9, ...days7.map(d => d.entry?.hours || 0));
+            const chartMaxPx = 52;
+
+            if (chart) {
+                chart.innerHTML = days7.map(({ entry, dayName, isToday }) => {
+                    const hrs = entry?.hours || 0;
+                    const quality = entry?.quality || 'none';
+                    const barH = hrs > 0 ? Math.max(4, Math.round((hrs / maxHrs) * chartMaxPx)) : 3;
+                    const hrsLabel = hrs > 0 ? `${hrs}h` : '';
+                    return `<div class="sleep-bar-col">
+                        <span class="sleep-bar-hrs">${hrsLabel}</span>
+                        <div class="sleep-bar-wrap">
+                            <div class="sleep-bar quality-${quality}" style="height:${barH}px"></div>
+                        </div>
+                        <span class="sleep-bar-day${isToday ? ' today' : ''}">${dayName}</span>
+                    </div>`;
+                }).join('');
+            }
+
+            // Average hours badge
+            const withData = days7.filter(d => d.entry);
+            const avgHrs = withData.length
+                ? (withData.reduce((s, d) => s + d.entry.hours, 0) / withData.length).toFixed(1)
+                : null;
+            if (avgBadge) avgBadge.textContent = avgHrs ? `${avgHrs}h avg` : '— hrs avg';
+
+            // Recovery score
+            const score = computeRecoveryScore(log);
+            if (scoreVal) {
+                if (score === null) {
+                    scoreVal.textContent = '—';
+                    scoreVal.className = 'sleep-score-val';
+                } else {
+                    scoreVal.textContent = score;
+                    const cls = score >= 85 ? 'score-great'
+                        : score >= 65 ? 'score-good'
+                        : score >= 45 ? 'score-fair' : 'score-poor';
+                    scoreVal.className = `sleep-score-val ${cls}`;
+                }
+            }
+
+            // Good-nights streak (consecutive days from today back: ≥7h & quality !== 'poor')
+            let streak = 0;
+            for (let i = 0; i < log.length; i++) {
+                const e = log[i];
+                if (e.hours >= 7 && e.quality !== 'poor') streak++;
+                else break;
+            }
+            if (streakVal) streakVal.textContent = streak > 0 ? streak : '—';
+
+            // Last logged
+            if (lastLogged) {
+                const latest = log[0];
+                if (latest) {
+                    const d = new Date(latest.date + 'T12:00:00');
+                    const ago = Math.round((Date.now() - d.getTime()) / 86400000);
+                    lastLogged.textContent = ago === 0 ? 'Logged today'
+                        : ago === 1 ? 'Last logged yesterday'
+                        : `Last logged ${ago} days ago`;
+                } else {
+                    lastLogged.textContent = 'No entries yet';
+                }
+            }
+        }
+
+        // ========== SMART INSIGHTS ==========
+
+        // SVG icons keyed by category
+        const INSIGHT_ICONS = {
+            calendar:  `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>`,
+            sleep:     `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>`,
+            weight:    `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round"><polyline points="23 6 13.5 15.5 8.5 10.5 1 18"/><polyline points="17 6 23 6 23 12"/></svg>`,
+            weight_up: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round"><polyline points="23 18 13.5 8.5 8.5 13.5 1 6"/><polyline points="17 18 23 18 23 12"/></svg>`,
+            food:      `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round"><path d="M18 8h1a4 4 0 0 1 0 8h-1"/><path d="M2 8h16v9a4 4 0 0 1-4 4H6a4 4 0 0 1-4-4V8z"/><line x1="6" y1="1" x2="6" y2="4"/><line x1="10" y1="1" x2="10" y2="4"/><line x1="14" y1="1" x2="14" y2="4"/></svg>`,
+            measure:   `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round"><path d="M2 12h20M2 12l4-4m-4 4 4 4"/></svg>`,
+            streak:    `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2c1 3 4 6 4 10a6 6 0 0 1-12 0c0-4 3-7 4-10 1 2 2 3 4 3s3-1 4-3z"/></svg>`,
+            recovery:  `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round"><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></svg>`,
+            check:     `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>`,
+        };
+
+        function generateInsights() {
+            const insights = [];
+            const wlog  = getWorkoutLog();
+            const slog  = getSleepLog();
+            const wgtLog = getWeightLog();
+            const clog  = getCalorieLog();
+            const measLog = getMeasurementLog();
+            const goalCal = state.macroTargets?.calories;
+            const streak  = parseInt(localStorage.getItem(userKey('fixit-workout-streak')) || '0');
+
+            // ── Streak ──────────────────────────────────────────────
+            if (streak >= 7) {
+                insights.push({ type: 'positive', icon: 'streak',
+                    text: `<strong>${streak}-day workout streak.</strong> Exceptional consistency — you're building a lasting habit.` });
+            }
+
+            // ── Workout day pattern ──────────────────────────────────
+            if (wlog.length >= 4) {
+                const dayCounts = {};
+                wlog.forEach(s => {
+                    if (!s.date) return;
+                    const dow = new Date(s.date + 'T12:00:00').getDay();
+                    const name = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'][dow];
+                    dayCounts[name] = (dayCounts[name] || 0) + 1;
+                });
+                const top = Object.entries(dayCounts).sort((a,b) => b[1]-a[1]).slice(0,2).map(([d]) => d);
+                if (top.length >= 1) {
+                    insights.push({ type: 'neutral', icon: 'calendar',
+                        text: `Your most consistent workout days are <strong>${top.join(' & ')}</strong>. Scheduling around these helps sustain momentum.` });
+                }
+            }
+
+            // ── Sleep on workout vs rest days ────────────────────────
+            if (slog.length >= 5 && wlog.length >= 3) {
+                const workoutDates = new Set(wlog.map(s => s.date).filter(Boolean));
+                const wdSleep  = slog.filter(e => workoutDates.has(e.date));
+                const rdSleep  = slog.filter(e => !workoutDates.has(e.date));
+                if (wdSleep.length >= 2 && rdSleep.length >= 2) {
+                    const avgW = wdSleep.reduce((s,e) => s+e.hours, 0) / wdSleep.length;
+                    const avgR = rdSleep.reduce((s,e) => s+e.hours, 0) / rdSleep.length;
+                    const diff = parseFloat((avgW - avgR).toFixed(1));
+                    if (Math.abs(diff) >= 0.3) {
+                        const more = diff > 0 ? 'more' : 'less';
+                        const type = diff > 0 ? 'positive' : 'warning';
+                        const icon = diff > 0 ? 'sleep' : 'recovery';
+                        insights.push({ type, icon,
+                            text: `You sleep <strong>${Math.abs(diff)}h ${more}</strong> on workout days than rest days. ${diff > 0 ? 'Exercise is improving your sleep quality.' : 'Try finishing workouts at least 3 hours before bed.'}` });
+                    }
+                }
+            }
+
+            // ── Weight trend ─────────────────────────────────────────
+            if (wgtLog.length >= 3) {
+                const now = new Date();
+                const cutoff2w = new Date(now); cutoff2w.setDate(now.getDate()-14);
+                const cutoff4w = new Date(now); cutoff4w.setDate(now.getDate()-28);
+                const str2w = cutoff2w.toISOString().split('T')[0];
+                const str4w = cutoff4w.toISOString().split('T')[0];
+                const recent = wgtLog.filter(e => e.date >= str2w);
+                const older  = wgtLog.filter(e => e.date >= str4w && e.date < str2w);
+                if (recent.length >= 1 && older.length >= 1) {
+                    const rAvg = recent.reduce((s,e) => s+e.weight, 0) / recent.length;
+                    const oAvg = older.reduce((s,e)  => s+e.weight, 0) / older.length;
+                    const delta = parseFloat((rAvg - oAvg).toFixed(1));
+                    if (Math.abs(delta) >= 0.2) {
+                        const dir = delta < 0 ? 'down' : 'up';
+                        const type = delta <= 0 ? 'positive' : 'neutral';
+                        const icon = delta < 0 ? 'weight' : 'weight_up';
+                        const rate = (Math.abs(delta) / 2).toFixed(2); // per week approx
+                        insights.push({ type, icon,
+                            text: `Weight is trending <strong>${dir} ${Math.abs(delta)} kg</strong> over the last 2 weeks (~${rate} kg/week). ${delta < 0 ? 'Solid fat-loss pace.' : 'Check if this aligns with your goal.'}` });
+                    }
+                }
+            }
+
+            // ── Calorie intake vs goal ───────────────────────────────
+            if (clog.length >= 3 && goalCal) {
+                const slice = clog.slice(0, Math.min(7, clog.length));
+                const avgCal = Math.round(slice.reduce((s,e) => s+e.calories, 0) / slice.length);
+                const diff   = avgCal - goalCal;
+                const pct    = Math.abs(diff) / goalCal * 100;
+                if (pct <= 8) {
+                    insights.push({ type: 'positive', icon: 'check',
+                        text: `Calorie tracking on point — averaging <strong>${avgCal} kcal/day</strong>, just ${Math.abs(diff)} kcal from your ${goalCal} goal.` });
+                } else if (diff < 0) {
+                    insights.push({ type: 'warning', icon: 'food',
+                        text: `Averaging <strong>${avgCal} kcal/day — ${Math.abs(diff)} below your ${goalCal} goal.</strong> A consistent deficit this large can slow metabolism.` });
+                } else {
+                    insights.push({ type: 'neutral', icon: 'food',
+                        text: `Averaging <strong>${avgCal} kcal/day — ${diff} above goal.</strong> ${diff > 300 ? 'Consider reviewing portion sizes.' : 'Moderate surplus — fine for muscle-building.'}` });
+                }
+            }
+
+            // ── Sleep quality streak ─────────────────────────────────
+            if (slog.length >= 5) {
+                const last5 = slog.slice(0, 5);
+                const avgH  = last5.reduce((s,e) => s+e.hours, 0) / 5;
+                const poorN = last5.filter(e => e.quality === 'poor').length;
+                if (poorN >= 3) {
+                    insights.push({ type: 'warning', icon: 'sleep',
+                        text: `<strong>${poorN} of your last 5 nights</strong> were rated poor quality. Consistent poor sleep raises cortisol and slows recovery.` });
+                } else if (avgH >= 7.5 && poorN === 0) {
+                    insights.push({ type: 'positive', icon: 'sleep',
+                        text: `5-night sleep average of <strong>${avgH.toFixed(1)}h</strong> with no poor nights — excellent recovery foundation.` });
+                }
+            }
+
+            // ── Measurement trend (waist) ────────────────────────────
+            if (measLog.length >= 2) {
+                const latest = measLog[0];
+                const ref    = measLog.find(e => {
+                    const ms = new Date(latest.date + 'T12:00:00') - new Date(e.date + 'T12:00:00');
+                    return ms >= 12 * 86400000; // at least 12 days apart
+                });
+                if (ref) {
+                    ['waist','chest','arms'].forEach(k => {
+                        if (latest[k] != null && ref[k] != null) {
+                            const d = parseFloat((latest[k] - ref[k]).toFixed(1));
+                            if (Math.abs(d) >= 0.5) {
+                                const weeks = Math.max(1, Math.round((new Date(latest.date + 'T12:00:00') - new Date(ref.date + 'T12:00:00')) / (7 * 86400000)));
+                                const positive = k === 'waist' ? d < 0 : d > 0;
+                                insights.push({ type: positive ? 'positive' : 'neutral', icon: 'measure',
+                                    text: `${k.charAt(0).toUpperCase()+k.slice(1)} changed <strong>${d > 0 ? '+':''}${d} cm</strong> over ${weeks} week${weeks>1?'s':''}.` });
+                                return false; // only report first interesting measurement
+                            }
+                        }
+                    });
+                }
+            }
+
+            // ── Recovery score ───────────────────────────────────────
+            const recov = computeRecoveryScore(slog);
+            if (recov !== null && recov < 50 && slog.length >= 3) {
+                insights.push({ type: 'warning', icon: 'recovery',
+                    text: `Recovery score is <strong>${recov}/100.</strong> Consider a rest day and prioritise sleep tonight.` });
+            }
+
+            return insights.slice(0, 6); // cap at 6
+        }
+
+        function renderInsights() {
+            const container = document.getElementById('insights-list');
+            const badge     = document.getElementById('insights-badge');
+            if (!container) return;
+
+            const insights = generateInsights();
+
+            if (badge) {
+                badge.textContent = insights.length > 0 ? `${insights.length} insight${insights.length !== 1 ? 's' : ''}` : '';
+                badge.style.display = insights.length > 0 ? '' : 'none';
+            }
+
+            if (insights.length === 0) {
+                container.innerHTML = '<p class="insights-empty">Keep logging workouts, sleep, weight, and food to unlock personalized insights.</p>';
+                return;
+            }
+
+            container.innerHTML = insights.map(({ type, icon, text }) => `
+                <div class="insight-item ${type}">
+                    <span class="insight-icon">${INSIGHT_ICONS[icon] || INSIGHT_ICONS.check}</span>
+                    <span class="insight-text">${text}</span>
+                </div>`).join('');
+        }
+
+        // ========== SHAREABLE PROGRESS CARD ==========
+        function setupShareCard() {
+            document.getElementById('share-card-btn')?.addEventListener('click', generateShareCard);
+        }
+
+        function generateShareCard() {
+            if (!state.analysisResult) { showToast('Complete an analysis first to generate a share card.', 'error'); return; }
+
+            const canvas = document.createElement('canvas');
+            const W = 800, H = 420;
+            canvas.width = W; canvas.height = H;
+            const ctx = canvas.getContext('2d');
+
+            // Background
+            const bg = ctx.createLinearGradient(0, 0, W, H);
+            bg.addColorStop(0, '#1a1714');
+            bg.addColorStop(1, '#0f0e0d');
+            ctx.fillStyle = bg;
+            ctx.fillRect(0, 0, W, H);
+
+            // Gold accent bar
+            const bar = ctx.createLinearGradient(0, 0, W, 0);
+            bar.addColorStop(0, '#c9a962');
+            bar.addColorStop(1, '#b87351');
+            ctx.fillStyle = bar;
+            ctx.fillRect(0, 0, W, 5);
+
+            // Logo / app name
+            ctx.fillStyle = '#c9a962';
+            ctx.font = 'bold 28px sans-serif';
+            ctx.fillText('FiX-it', 40, 54);
+            ctx.fillStyle = '#666';
+            ctx.font = '14px sans-serif';
+            ctx.fillText('AI Body Analysis', 40, 74);
+
+            // Date
+            ctx.fillStyle = '#555';
+            ctx.font = '13px sans-serif';
+            ctx.textAlign = 'right';
+            ctx.fillText(new Date().toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' }), W - 40, 54);
+            ctx.textAlign = 'left';
+
+            const r = state.analysisResult;
+            const score = r.bodyComposition?.score || 0;
+            const bmi = r.bmi?.toFixed(1) || 'N/A';
+            const category = r.bodyComposition?.category || 'Unknown';
+            const bodyType = r.bodyComposition?.bodyType || '';
+            const fitnessIdx = r.overview?.fitnessIndex || '0';
+            const muscle = r.muscleTone?.score || 0;
+            const posture = r.posture?.score || 0;
+            const goal = { 'lose-weight': 'Lose Weight', 'build-muscle': 'Build Muscle', 'maintain': 'Maintain', 'recomp': 'Recomposition' }[state.fitnessGoal] || '';
+            const m = getMeasurements();
+
+            // Body score — large centre piece
+            ctx.fillStyle = '#c9a962';
+            ctx.font = 'bold 72px sans-serif';
+            ctx.textAlign = 'center';
+            ctx.fillText(score, W / 2, 185);
+            ctx.fillStyle = '#888';
+            ctx.font = '15px sans-serif';
+            ctx.fillText('Body Score / 100', W / 2, 210);
+            ctx.fillStyle = '#c9a962';
+            ctx.font = 'bold 18px sans-serif';
+            ctx.fillText(category + (bodyType ? ' · ' + bodyType : ''), W / 2, 238);
+            ctx.textAlign = 'left';
+
+            // Stat columns
+            function statCol(x, y, pairs) {
+                pairs.forEach(([label, val], i) => {
+                    ctx.fillStyle = '#555';
+                    ctx.font = '12px sans-serif';
+                    ctx.fillText(label, x, y + i * 46);
+                    ctx.fillStyle = '#e0d5c0';
+                    ctx.font = 'bold 20px sans-serif';
+                    ctx.fillText(val, x, y + i * 46 + 22);
+                });
+            }
+
+            statCol(40, 138, [['BMI', bmi], ['Fitness Index', fitnessIdx]]);
+            statCol(W - 160, 138, [['Muscle', muscle + '%'], ['Posture', posture + '%']]);
+
+            // Measurements strip if available
+            const hasMeas = Object.keys(m).length > 0;
+            const measY = 278;
+            if (hasMeas) {
+                ctx.fillStyle = '#1e1c18';
+                roundRect(ctx, 40, measY, W - 80, 52, 10);
+                ctx.fill();
+                const items = [['Chest', m.chest], ['Waist', m.waist], ['Hips', m.hips], ['Arms', m.arms]].filter(([, v]) => v);
+                const colW = (W - 80) / items.length;
+                items.forEach(([label, val], i) => {
+                    const cx = 40 + colW * i + colW / 2;
+                    ctx.fillStyle = '#666';
+                    ctx.font = '11px sans-serif';
+                    ctx.textAlign = 'center';
+                    ctx.fillText(label, cx, measY + 18);
+                    ctx.fillStyle = '#c9a962';
+                    ctx.font = 'bold 16px sans-serif';
+                    ctx.fillText(val + ' cm', cx, measY + 38);
+                });
+                ctx.textAlign = 'left';
+            }
+
+            // Goal badge
+            if (goal) {
+                const badgeY = hasMeas ? measY + 66 : measY;
+                ctx.fillStyle = '#2a2318';
+                roundRect(ctx, 40, badgeY, 160, 32, 8);
+                ctx.fill();
+                ctx.fillStyle = '#c9a962';
+                ctx.font = 'bold 13px sans-serif';
+                ctx.textAlign = 'center';
+                ctx.fillText('Goal: ' + goal, 120, badgeY + 21);
+                ctx.textAlign = 'left';
+            }
+
+            // Divider
+            ctx.strokeStyle = '#2a2620';
+            ctx.lineWidth = 1;
+            ctx.beginPath(); ctx.moveTo(W / 2, 100); ctx.lineTo(W / 2, 260); ctx.stroke();
+
+            // Watermark
+            ctx.fillStyle = '#333';
+            ctx.font = '11px sans-serif';
+            ctx.textAlign = 'right';
+            ctx.fillText('Generated by FiX-it · Educational estimate only', W - 40, H - 16);
+
+            // Download
+            const link = document.createElement('a');
+            link.download = 'fixit-progress-card.png';
+            link.href = canvas.toDataURL('image/png');
+            link.click();
+            showToast('Progress card downloaded!', 'success');
+        }
+
+        function roundRect(ctx, x, y, w, h, r) {
+            ctx.beginPath();
+            ctx.moveTo(x + r, y);
+            ctx.lineTo(x + w - r, y);
+            ctx.quadraticCurveTo(x + w, y, x + w, y + r);
+            ctx.lineTo(x + w, y + h - r);
+            ctx.quadraticCurveTo(x + w, y + h, x + w - r, y + h);
+            ctx.lineTo(x + r, y + h);
+            ctx.quadraticCurveTo(x, y + h, x, y + h - r);
+            ctx.lineTo(x, y + r);
+            ctx.quadraticCurveTo(x, y, x + r, y);
+            ctx.closePath();
+        }
+
+        // ========== PROGRESS CHARTS ==========
+        let progressChartInstance = null;
+
+        function setupProgressCharts() {
+            document.querySelectorAll('.chart-tab').forEach(tab => {
+                tab.addEventListener('click', () => {
+                    document.querySelectorAll('.chart-tab').forEach(t => t.classList.remove('active'));
+                    tab.classList.add('active');
+                    renderProgressChart(tab.dataset.chart);
+                });
+            });
+        }
+
+        async function renderProgressChart(metric = 'weight') {
+            const container  = document.getElementById('charts-container');
+            const canvasEl   = document.getElementById('progress-chart');
+            const emptyTabEl = document.getElementById('chart-empty-tab');
+            if (!container || !canvasEl) return;
+
+            const showEmpty = (msg) => {
+                canvasEl.style.display = 'none';
+                if (emptyTabEl) { emptyTabEl.style.display = 'flex'; emptyTabEl.textContent = msg; }
+                if (progressChartInstance) { progressChartInstance.destroy(); progressChartInstance = null; }
+            };
+            const showCanvas = () => {
+                canvasEl.style.display = '';
+                if (emptyTabEl) emptyTabEl.style.display = 'none';
+            };
+
+            // ---- WEIGHT tab ----
+            if (metric === 'weight') {
+                const log = getWeightLog().slice(0, 30).reverse(); // oldest→newest
+                if (log.length < 2) { showEmpty('Log your weight on 2+ days to see the trend here.'); return; }
+                showCanvas();
+                const labels = log.map(e => new Date(e.date + 'T12:00:00').toLocaleDateString('en-US', { month: 'short', day: 'numeric' }));
+                const data   = log.map(e => e.weight);
+                _drawLineChart(canvasEl, labels, data, { label: 'Weight (kg)', color: '#c9a962', yUnit: 'kg', beginAtZero: false });
+                return;
+            }
+
+            // ---- SLEEP tab ----
+            if (metric === 'sleep') {
+                const log = getSleepLog().slice(0, 30).reverse();
+                if (log.length < 2) { showEmpty('Log sleep on 2+ nights to see your trend here.'); return; }
+                showCanvas();
+                const labels = log.map(e => new Date(e.date + 'T12:00:00').toLocaleDateString('en-US', { month: 'short', day: 'numeric' }));
+                const data   = log.map(e => e.hours);
+                _drawLineChart(canvasEl, labels, data, { label: 'Sleep (hrs)', color: '#7d9a78', yUnit: 'h', beginAtZero: true, suggestedMax: 10 });
+                return;
+            }
+
+            // ---- ACTIVITY tab (workouts per week, last 8 weeks) ----
+            if (metric === 'activity') {
+                const wlog = getWorkoutLog();
+                if (wlog.length === 0) { showEmpty('Complete your first workout to start tracking activity.'); return; }
+                showCanvas();
+                const now = new Date();
+                const labels = [], data = [];
+                for (let w = 7; w >= 0; w--) {
+                    const wEnd   = new Date(now); wEnd.setDate(now.getDate() - w * 7);
+                    const wStart = new Date(wEnd); wStart.setDate(wEnd.getDate() - 6); wStart.setHours(0,0,0,0);
+                    const wEndStr   = wEnd.toISOString().split('T')[0];
+                    const wStartStr = wStart.toISOString().split('T')[0];
+                    const count = wlog.filter(s => s.date && s.date >= wStartStr && s.date <= wEndStr).length;
+                    labels.push(wStart.toLocaleDateString('en-US', { month: 'short', day: 'numeric' }));
+                    data.push(count);
+                }
+                _drawBarChart(canvasEl, labels, data, { label: 'Workouts', color: '#60a5fa' });
+                return;
+            }
+
+            // ---- CALORIES tab ----
+            if (metric === 'calories') {
+                const clog = getCalorieLog().slice(0, 30).reverse(); // oldest→newest
+                if (clog.length < 2) { showEmpty('Log food on 2+ days to see your calorie trend here.'); return; }
+                showCanvas();
+                const labels = clog.map(e => new Date(e.date + 'T12:00:00').toLocaleDateString('en-US', { month: 'short', day: 'numeric' }));
+                const calData = clog.map(e => e.calories);
+                const goalCal = state.macroTargets?.calories || null;
+                _drawCalorieChart(canvasEl, labels, calData, goalCal);
+                return;
+            }
+
+            // ---- MEASUREMENTS tab ----
+            if (metric === 'measurements') {
+                const log = getMeasurementLog().slice(0, 30).reverse(); // oldest→newest
+                const validEntries = log.filter(e => e.chest || e.waist || e.hips || e.arms);
+                if (validEntries.length < 2) { showEmpty('Log measurements on 2+ days to see your trend here.'); return; }
+                showCanvas();
+                const labels = validEntries.map(e => new Date(e.date + 'T12:00:00').toLocaleDateString('en-US', { month: 'short', day: 'numeric' }));
+                _drawMeasurementsChart(canvasEl, labels, validEntries);
+                return;
+            }
+
+            // ---- Analysis-based tabs (score / bmi / muscle) ----
+            const snapshots = await getMergedSnapshots();
+            const valid = snapshots.filter(s => s.analysisResult).reverse();
+            if (valid.length < 2) { showEmpty('Complete 2+ body analyses to see this trend.'); return; }
+            showCanvas();
+
+            const labels = valid.map(s => new Date(s.date).toLocaleDateString('en-US', { month: 'short', day: 'numeric' }));
+            const getData = m => valid.map(s => {
+                if (m === 'score')  return s.analysisResult?.bodyComposition?.score  || null;
+                if (m === 'bmi')    return s.analysisResult?.bmi                     || null;
+                if (m === 'muscle') return s.analysisResult?.muscleTone?.score       || null;
+                return null;
+            });
+            const metaMap = {
+                score:  { label: 'Body Score', color: '#c9a962' },
+                bmi:    { label: 'BMI',        color: '#60a5fa' },
+                muscle: { label: 'Muscle %',   color: '#7d9a78' },
+            };
+            const { label, color } = metaMap[metric] || metaMap.score;
+            _drawLineChart(canvasEl, labels, getData(metric), { label, color, beginAtZero: false });
+        }
+
+        function _drawLineChart(canvasEl, labels, data, { label, color, beginAtZero = false, suggestedMax } = {}) {
+            if (progressChartInstance) { progressChartInstance.destroy(); progressChartInstance = null; }
+            progressChartInstance = new Chart(canvasEl, {
+                type: 'line',
+                data: {
+                    labels,
+                    datasets: [{
+                        label,
+                        data,
+                        borderColor: color,
+                        backgroundColor: color + '22',
+                        borderWidth: 2.5,
+                        pointBackgroundColor: color,
+                        pointRadius: 4,
+                        pointHoverRadius: 6,
+                        fill: true,
+                        tension: 0.35,
+                        spanGaps: true,
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    resizeDelay: 200,
+                    interaction: { mode: 'index', intersect: false },
+                    plugins: {
+                        legend: { display: false },
+                        tooltip: {
+                            backgroundColor: '#1e1c18',
+                            titleColor: color,
+                            bodyColor: '#ccc',
+                            borderColor: '#333',
+                            borderWidth: 1,
+                        }
+                    },
+                    scales: {
+                        x: { ticks: { color: '#666', font: { size: 11 } }, grid: { color: '#1e1c18' } },
+                        y: {
+                            ticks: { color: '#666', font: { size: 11 } },
+                            grid: { color: '#1e1c18' },
+                            beginAtZero,
+                            ...(suggestedMax ? { suggestedMax } : {}),
+                        }
+                    }
+                }
+            });
+        }
+
+        function _drawBarChart(canvasEl, labels, data, { label, color } = {}) {
+            if (progressChartInstance) { progressChartInstance.destroy(); progressChartInstance = null; }
+            progressChartInstance = new Chart(canvasEl, {
+                type: 'bar',
+                data: {
+                    labels,
+                    datasets: [{
+                        label,
+                        data,
+                        backgroundColor: color + 'aa',
+                        borderColor: color,
+                        borderWidth: 1.5,
+                        borderRadius: 5,
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    resizeDelay: 200,
+                    interaction: { mode: 'index', intersect: false },
+                    plugins: {
+                        legend: { display: false },
+                        tooltip: {
+                            backgroundColor: '#1e1c18',
+                            titleColor: color,
+                            bodyColor: '#ccc',
+                            borderColor: '#333',
+                            borderWidth: 1,
+                        }
+                    },
+                    scales: {
+                        x: { ticks: { color: '#666', font: { size: 11 } }, grid: { color: '#1e1c18' } },
+                        y: {
+                            ticks: { color: '#666', font: { size: 11 }, stepSize: 1 },
+                            grid: { color: '#1e1c18' },
+                            beginAtZero: true,
+                            suggestedMax: 7,
+                        }
+                    }
+                }
+            });
+        }
+
+        function _drawMeasurementsChart(canvasEl, labels, entries) {
+            if (progressChartInstance) { progressChartInstance.destroy(); progressChartInstance = null; }
+            const palette = { chest: '#c9a962', waist: '#b87351', hips: '#7d9a78', arms: '#60a5fa' };
+            const datasets = ['chest', 'waist', 'hips', 'arms']
+                .filter(k => entries.some(e => e[k] != null))
+                .map(k => ({
+                    label: k.charAt(0).toUpperCase() + k.slice(1),
+                    data: entries.map(e => e[k] ?? null),
+                    borderColor: palette[k],
+                    backgroundColor: palette[k] + '18',
+                    borderWidth: 2.5,
+                    pointBackgroundColor: palette[k],
+                    pointRadius: 4,
+                    pointHoverRadius: 6,
+                    fill: false,
+                    tension: 0.35,
+                    spanGaps: true,
+                }));
+            progressChartInstance = new Chart(canvasEl, {
+                type: 'line',
+                data: { labels, datasets },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    resizeDelay: 200,
+                    interaction: { mode: 'index', intersect: false },
+                    plugins: {
+                        legend: {
+                            display: true,
+                            position: 'top',
+                            labels: { color: '#888', boxWidth: 10, padding: 10, font: { size: 11 } }
+                        },
+                        tooltip: {
+                            backgroundColor: '#1e1c18',
+                            titleColor: '#c9a962',
+                            bodyColor: '#ccc',
+                            borderColor: '#333',
+                            borderWidth: 1,
+                            callbacks: { label: ctx => `${ctx.dataset.label}: ${ctx.parsed.y?.toFixed(1)} cm` }
+                        }
+                    },
+                    scales: {
+                        x: { ticks: { color: '#666', font: { size: 11 } }, grid: { color: '#1e1c18' } },
+                        y: {
+                            ticks: { color: '#666', font: { size: 11 }, callback: v => v + ' cm' },
+                            grid: { color: '#222' },
+                            beginAtZero: false,
+                        }
+                    }
+                }
+            });
+        }
+
+        function _drawCalorieChart(canvasEl, labels, calData, goalCal) {
+            if (progressChartInstance) { progressChartInstance.destroy(); progressChartInstance = null; }
+            const color = '#b87351'; // terracotta
+            const datasets = [{
+                label: 'Calories Eaten',
+                data: calData,
+                borderColor: color,
+                backgroundColor: color + '28',
+                borderWidth: 2.5,
+                pointBackgroundColor: color,
+                pointRadius: 3.5,
+                pointHoverRadius: 6,
+                fill: true,
+                tension: 0.35,
+                spanGaps: true,
+                order: 2,
+            }];
+            if (goalCal) {
+                datasets.push({
+                    label: 'Goal',
+                    data: labels.map(() => goalCal),
+                    borderColor: '#555',
+                    backgroundColor: 'transparent',
+                    borderWidth: 1.5,
+                    borderDash: [6, 4],
+                    pointRadius: 0,
+                    fill: false,
+                    tension: 0,
+                    order: 1,
+                });
+            }
+            progressChartInstance = new Chart(canvasEl, {
+                type: 'line',
+                data: { labels, datasets },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    resizeDelay: 200,
+                    interaction: { mode: 'index', intersect: false },
+                    plugins: {
+                        legend: {
+                            display: !!goalCal,
+                            labels: { color: '#888', font: { size: 11 }, boxWidth: 18, padding: 12 },
+                        },
+                        tooltip: {
+                            backgroundColor: '#1e1c18',
+                            titleColor: color,
+                            bodyColor: '#ccc',
+                            borderColor: '#333',
+                            borderWidth: 1,
+                        },
+                    },
+                    scales: {
+                        x: { ticks: { color: '#666', font: { size: 11 } }, grid: { color: '#1e1c18' } },
+                        y: {
+                            ticks: { color: '#666', font: { size: 11 } },
+                            grid: { color: '#1e1c18' },
+                            beginAtZero: false,
+                            ...(goalCal ? { suggestedMin: Math.max(0, goalCal - 600), suggestedMax: goalCal + 400 } : {}),
+                        },
+                    },
+                },
+            });
+        }
+
+        // ========== CALORIE BALANCE ==========
+
+        function getTodayCaloriesBurned() {
+            const today = new Date().toISOString().split('T')[0];
+
+            // 1. Completed workout sessions (via the workout player — already have caloriesBurned)
+            const sessionBurned = getWorkoutLog()
+                .filter(s => s.date && s.date.startsWith(today))
+                .reduce((sum, s) => sum + (s.caloriesBurned || 0), 0);
+
+            // 2. Manual exercise log entries — estimate via MET
+            const weightKg = parseFloat(
+                state.user?.weight || state.measurements?.weight || 70
+            );
+            const CARDIO_KEYWORDS = ['run', 'treadmill', 'cycl', 'bike', 'swim', 'row', 'rope',
+                                     'elliptical', 'stair', 'burpee', 'climber', 'high knee', 'hiit'];
+
+            const exLogBurned = getExerciseLogForDate(today).reduce((sum, e) => {
+                const sets = parseInt(e.sets) || 0;
+                const reps = parseInt(e.reps) || 0;
+                if (!sets) return sum;
+
+                const nameLow    = (e.name    || '').toLowerCase();
+                const musclesLow = (e.muscles || '').toLowerCase();
+                const isCardio   = musclesLow.includes('cardio') ||
+                                   CARDIO_KEYWORDS.some(k => nameLow.includes(k));
+
+                let kcal;
+                if (isCardio) {
+                    // For cardio, reps ≈ minutes of activity; MET ~7 for moderate cardio
+                    const totalMin = sets * Math.max(reps, 1);
+                    kcal = Math.round(7 * weightKg * (totalMin / 60));
+                } else {
+                    // Strength: MET ~5.5, ~1.5 min effective work per set
+                    kcal = Math.round(sets * (weightKg / 70) * 5);
+                }
+                return sum + kcal;
+            }, 0);
+
+            return sessionBurned + exLogBurned;
+        }
+
+        function renderCalorieBalance() {
+            const eaten = (() => {
+                // Read from the food log calorie display if available, else state
+                const el = document.getElementById('food-log-cal-eaten');
+                const v = parseInt(el?.textContent);
+                return isNaN(v) ? 0 : v;
+            })();
+            const burned = getTodayCaloriesBurned();
+            const target = state.macroTargets?.calories || 0;
+            const net = eaten - burned;
+
+            const eatenEl = document.getElementById('cb-eaten');
+            const burnedEl = document.getElementById('cb-burned');
+            const netEl = document.getElementById('cb-net');
+            const netLblEl = document.getElementById('cb-net-lbl');
+            const barWrap = document.getElementById('cb-bar-wrap');
+            const barFill = document.getElementById('cb-bar-fill');
+            const barGoal = document.getElementById('cb-bar-goal');
+            const barTargetLbl = document.getElementById('cb-target-label');
+            const hintEl = document.getElementById('cb-workout-hint');
+            const hintText = document.getElementById('cb-workout-hint-text');
+
+            if (eatenEl) eatenEl.textContent = eaten || '—';
+            if (burnedEl) burnedEl.textContent = burned;
+
+            if (netEl) {
+                netEl.textContent = eaten ? net : '—';
+                netEl.className = 'cb-net-val';
+                if (eaten && target) {
+                    netEl.classList.add(net > target ? 'surplus' : net < target * 0.9 ? 'deficit' : '');
+                }
+            }
+            if (netLblEl) netLblEl.textContent = target ? `of ${target.toLocaleString()} kcal target` : 'net kcal';
+
+            // Progress bar (eaten vs target)
+            if (target && eaten && barWrap && barFill && barGoal) {
+                barWrap.style.display = '';
+                const pct = Math.min(120, Math.round((eaten / target) * 100));
+                barFill.style.width = `${Math.min(100, pct)}%`;
+                barFill.className = 'cb-bar-fill' + (pct > 100 ? ' over' : '');
+                barGoal.style.left = '100%';
+                if (barTargetLbl) barTargetLbl.textContent = `${target.toLocaleString()} kcal`;
+            } else if (barWrap) {
+                barWrap.style.display = 'none';
+            }
+
+            // Workout hint row
+            if (hintEl && hintText) {
+                if (burned > 0) {
+                    hintEl.style.display = '';
+                    hintText.textContent = `${burned} kcal burned in today's workout — keep it up!`;
+                } else {
+                    hintEl.style.display = 'none';
+                }
+            }
+        }
+
+        // ========== PRESET LOADER (replaces hardcoded arrays with DB data) ==========
+
+        async function loadPresetsFromDB() {
+            const MUSCLE_EMOJI = {
+                chest: '🏋️', back: '🏋️', shoulders: '🏋️',
+                legs: '🦵', arms: '💪', core: '🧘',
+                cardio: '🏃', flexibility: '🧘',
+            };
+
+            try {
+                const [foodsRes, exRes] = await Promise.all([
+                    fetch(API_BASE + '/nutrition/foods'),
+                    fetch(API_BASE + '/workouts/exercises'),
+                ]);
+
+                if (foodsRes.ok) {
+                    const foods = await foodsRes.json();
+                    if (Array.isArray(foods) && foods.length) {
+                        FOOD_PRESETS = foods.map(f => ({
+                            emoji:   f.icon   || '🍽️',
+                            name:    f.name,
+                            detail:  f.portion || '',
+                            cal:     Math.round(Number(f.calories) || 0),
+                            protein: Math.round(Number(f.protein)  || 0),
+                            carbs:   Math.round(Number(f.carbs)    || 0),
+                            fats:    Math.round(Number(f.fats)     || 0),
+                        }));
+                    }
+                }
+
+                if (exRes.ok) {
+                    const exercises = await exRes.json();
+                    if (Array.isArray(exercises) && exercises.length) {
+                        EXERCISE_PRESETS = exercises.map(e => ({
+                            emoji:   MUSCLE_EMOJI[e.muscle_group] || '💪',
+                            name:    e.name,
+                            muscles: Array.isArray(e.target_muscles)
+                                ? e.target_muscles.join(', ')
+                                : (e.muscle_group || ''),
+                            sets:    e.default_sets   || 3,
+                            reps:    e.default_reps   || 10,
+                        }));
+                    }
+                }
+            } catch (_) {
+                // Backend unavailable — hardcoded fallbacks remain in place
+            }
+        }
+
+        // ========== DAILY FOOD LOG ==========
+
+        let FOOD_PRESETS = [
+            // — Protein Sources —
+            { emoji: '🍗', name: 'Chicken Breast',       detail: '150g',    cal: 247, protein: 46, carbs: 0,  fats: 5  },
+            { emoji: '🍗', name: 'Chicken Thigh',        detail: '150g',    cal: 295, protein: 30, carbs: 0,  fats: 19 },
+            { emoji: '🥩', name: 'Ground Beef (lean)',   detail: '150g',    cal: 280, protein: 35, carbs: 0,  fats: 15 },
+            { emoji: '🥩', name: 'Sirloin Steak',        detail: '150g',    cal: 271, protein: 38, carbs: 0,  fats: 13 },
+            { emoji: '🥩', name: 'Pork Tenderloin',      detail: '150g',    cal: 196, protein: 35, carbs: 0,  fats: 5  },
+            { emoji: '🐟', name: 'Tuna (canned)',        detail: '85g tin', cal: 100, protein: 22, carbs: 0,  fats: 0  },
+            { emoji: '🐟', name: 'Salmon Fillet',        detail: '150g',    cal: 280, protein: 39, carbs: 0,  fats: 13 },
+            { emoji: '🐟', name: 'Tilapia',              detail: '150g',    cal: 193, protein: 39, carbs: 0,  fats: 4  },
+            { emoji: '🐟', name: 'Shrimp',               detail: '150g',    cal: 151, protein: 29, carbs: 2,  fats: 2  },
+            { emoji: '🥚', name: 'Eggs (2 large)',       detail: '2 pcs',   cal: 143, protein: 13, carbs: 1,  fats: 10 },
+            { emoji: '🥚', name: 'Egg Whites (4)',       detail: '4 whites',cal:  68, protein: 14, carbs: 1,  fats: 0  },
+            { emoji: '🍳', name: 'Greek Yogurt',         detail: '170g',    cal: 100, protein: 17, carbs: 6,  fats: 0  },
+            { emoji: '🧀', name: 'Cottage Cheese',       detail: '113g',    cal:  98, protein: 11, carbs: 4,  fats: 4  },
+            { emoji: '🧀', name: 'Mozzarella',           detail: '50g',     cal: 149, protein: 11, carbs: 1,  fats: 11 },
+            { emoji: '🧀', name: 'Cheddar Cheese',       detail: '30g',     cal: 120, protein: 7,  carbs: 0,  fats: 10 },
+            { emoji: '🥛', name: 'Protein Shake',        detail: '1 scoop', cal: 150, protein: 25, carbs: 8,  fats: 3  },
+            { emoji: '🥛', name: 'Whole Milk',           detail: '240ml',   cal: 149, protein: 8,  carbs: 12, fats: 8  },
+            { emoji: '🥛', name: 'Skimmed Milk',         detail: '240ml',   cal:  83, protein: 8,  carbs: 12, fats: 0  },
+            { emoji: '🌱', name: 'Tofu (firm)',          detail: '150g',    cal: 117, protein: 13, carbs: 3,  fats: 6  },
+            { emoji: '🌱', name: 'Tempeh',               detail: '100g',    cal: 193, protein: 19, carbs: 8,  fats: 11 },
+            { emoji: '🥜', name: 'Peanut Butter',        detail: '2 tbsp',  cal: 190, protein: 8,  carbs: 7,  fats: 16 },
+            // — Carbs & Grains —
+            { emoji: '🍚', name: 'White Rice',           detail: '1 cup',   cal: 206, protein: 4,  carbs: 45, fats: 0  },
+            { emoji: '🍚', name: 'Brown Rice',           detail: '1 cup',   cal: 216, protein: 5,  carbs: 45, fats: 2  },
+            { emoji: '🥣', name: 'Oatmeal',              detail: '1 cup',   cal: 166, protein: 6,  carbs: 28, fats: 4  },
+            { emoji: '🥣', name: 'Overnight Oats',       detail: '1 cup',   cal: 230, protein: 9,  carbs: 35, fats: 5  },
+            { emoji: '🍞', name: 'Wheat Bread',          detail: '2 slices',cal: 138, protein: 7,  carbs: 24, fats: 2  },
+            { emoji: '🥖', name: 'Bagel',                detail: '1 whole', cal: 270, protein: 10, carbs: 53, fats: 2  },
+            { emoji: '🌾', name: 'Quinoa',               detail: '1 cup',   cal: 222, protein: 8,  carbs: 39, fats: 4  },
+            { emoji: '🍝', name: 'Pasta',                detail: '100g dry',cal: 371, protein: 13, carbs: 74, fats: 2  },
+            { emoji: '🥔', name: 'White Potato',         detail: '1 med',   cal: 161, protein: 4,  carbs: 37, fats: 0  },
+            { emoji: '🍠', name: 'Sweet Potato',         detail: '1 med',   cal: 103, protein: 2,  carbs: 24, fats: 0  },
+            { emoji: '🌽', name: 'Corn',                 detail: '1 cup',   cal: 132, protein: 5,  carbs: 29, fats: 2  },
+            { emoji: '🫘', name: 'Black Beans',          detail: '1 cup',   cal: 227, protein: 15, carbs: 41, fats: 1  },
+            { emoji: '🫘', name: 'Lentils',              detail: '1 cup',   cal: 230, protein: 18, carbs: 40, fats: 1  },
+            { emoji: '🫘', name: 'Chickpeas',            detail: '1 cup',   cal: 269, protein: 15, carbs: 45, fats: 4  },
+            // — Fruits —
+            { emoji: '🍌', name: 'Banana',               detail: '1 med',   cal: 105, protein: 1,  carbs: 27, fats: 0  },
+            { emoji: '🍎', name: 'Apple',                detail: '1 med',   cal:  95, protein: 0,  carbs: 25, fats: 0  },
+            { emoji: '🍊', name: 'Orange',               detail: '1 med',   cal:  62, protein: 1,  carbs: 15, fats: 0  },
+            { emoji: '🍇', name: 'Grapes',               detail: '1 cup',   cal: 104, protein: 1,  carbs: 27, fats: 0  },
+            { emoji: '🫐', name: 'Blueberries',          detail: '1 cup',   cal:  84, protein: 1,  carbs: 21, fats: 0  },
+            { emoji: '🍓', name: 'Strawberries',         detail: '1 cup',   cal:  49, protein: 1,  carbs: 12, fats: 0  },
+            { emoji: '🍑', name: 'Mango',                detail: '1 cup',   cal: 107, protein: 1,  carbs: 28, fats: 0  },
+            { emoji: '🍍', name: 'Pineapple',            detail: '1 cup',   cal:  82, protein: 1,  carbs: 22, fats: 0  },
+            { emoji: '🫒', name: 'Watermelon',           detail: '2 cups',  cal:  85, protein: 2,  carbs: 21, fats: 0  },
+            // — Vegetables —
+            { emoji: '🥦', name: 'Broccoli',             detail: '1 cup',   cal:  55, protein: 4,  carbs: 11, fats: 1  },
+            { emoji: '🥬', name: 'Spinach',              detail: '2 cups',  cal:  14, protein: 2,  carbs: 2,  fats: 0  },
+            { emoji: '🥕', name: 'Carrots',              detail: '1 cup',   cal:  52, protein: 1,  carbs: 12, fats: 0  },
+            { emoji: '🥒', name: 'Cucumber',             detail: '1 cup',   cal:  16, protein: 1,  carbs: 4,  fats: 0  },
+            { emoji: '🍅', name: 'Tomato',               detail: '1 med',   cal:  22, protein: 1,  carbs: 5,  fats: 0  },
+            { emoji: '🫑', name: 'Bell Pepper',          detail: '1 med',   cal:  31, protein: 1,  carbs: 7,  fats: 0  },
+            // — Healthy Fats & Snacks —
+            { emoji: '🥑', name: 'Avocado',              detail: '½ fruit', cal: 120, protein: 2,  carbs: 6,  fats: 10 },
+            { emoji: '🥜', name: 'Almonds',              detail: '28g',     cal: 164, protein: 6,  carbs: 6,  fats: 14 },
+            { emoji: '🥜', name: 'Walnuts',              detail: '28g',     cal: 185, protein: 4,  carbs: 4,  fats: 18 },
+            { emoji: '🥜', name: 'Cashews',              detail: '28g',     cal: 157, protein: 5,  carbs: 9,  fats: 12 },
+            { emoji: '🫒', name: 'Olive Oil',            detail: '1 tbsp',  cal: 119, protein: 0,  carbs: 0,  fats: 14 },
+            { emoji: '🧈', name: 'Butter',               detail: '1 tbsp',  cal: 102, protein: 0,  carbs: 0,  fats: 12 },
+            { emoji: '🍫', name: 'Dark Chocolate',       detail: '30g',     cal: 170, protein: 2,  carbs: 13, fats: 12 },
+            { emoji: '🥄', name: 'Peanut Butter',        detail: '1 tbsp',  cal:  95, protein: 4,  carbs: 3,  fats: 8  },
+            // — Meals —
+            { emoji: '🥗', name: 'Chicken Salad',        detail: '1 bowl',  cal: 350, protein: 40, carbs: 15, fats: 12 },
+            { emoji: '🌯', name: 'Chicken Wrap',         detail: '1 wrap',  cal: 420, protein: 35, carbs: 38, fats: 12 },
+            { emoji: '🥗', name: 'Tuna Salad',           detail: '1 bowl',  cal: 220, protein: 28, carbs: 8,  fats: 8  },
+            { emoji: '🍱', name: 'Rice & Chicken Bowl',  detail: '1 bowl',  cal: 480, protein: 48, carbs: 48, fats: 8  },
+            { emoji: '🍝', name: 'Pasta w/ Meat Sauce',  detail: '1 plate', cal: 520, protein: 28, carbs: 65, fats: 14 },
+            { emoji: '🥙', name: 'Burrito Bowl',         detail: '1 bowl',  cal: 550, protein: 35, carbs: 60, fats: 14 },
+            { emoji: '🍳', name: 'Omelette (3 eggs)',    detail: '1 serve', cal: 280, protein: 20, carbs: 2,  fats: 21 },
+            { emoji: '🥞', name: 'Protein Pancakes',     detail: '3 pcs',   cal: 310, protein: 24, carbs: 38, fats: 6  },
+            { emoji: '🥙', name: 'Grilled Chicken Pita', detail: '1 pita',  cal: 380, protein: 32, carbs: 36, fats: 9  },
+            // — Drinks —
+            { emoji: '🥤', name: 'Mass Gainer Shake',    detail: '1 serve', cal: 600, protein: 40, carbs: 90, fats: 8  },
+            { emoji: '☕', name: 'Latte (whole milk)',   detail: '240ml',   cal: 190, protein: 7,  carbs: 15, fats: 11 },
+            { emoji: '🍹', name: 'Orange Juice',         detail: '240ml',   cal: 112, protein: 2,  carbs: 26, fats: 0  },
+        ];
+
+        function renderFoodPresets() {
+            const container = document.getElementById('fl-preset-chips');
+            if (!container) return;
+            container.innerHTML = FOOD_PRESETS.map((p, i) =>
+                `<button class="fl-preset-chip" onclick="fillFoodPreset(${i})" title="${p.name} (${p.detail})">
+                    <span class="fl-chip-emoji">${p.emoji}</span>
+                    <span class="fl-chip-name">${p.name}</span>
+                    <span class="fl-chip-cal">${p.cal}</span>
+                </button>`
+            ).join('');
+        }
+
+        window.fillFoodPreset = function(i) {
+            const p = FOOD_PRESETS[i];
+            if (!p) return;
+            const set = (id, val) => { const el = document.getElementById(id); if (el) el.value = val; };
+            set('fl-name',    p.name + ' (' + p.detail + ')');
+            set('fl-cal',     p.cal);
+            set('fl-protein', p.protein);
+            set('fl-carbs',   p.carbs);
+            set('fl-fats',    p.fats);
+            // Briefly highlight the active chip
+            document.querySelectorAll('.fl-preset-chip').forEach((c, idx) => c.classList.toggle('active', idx === i));
+            document.getElementById('fl-cal')?.focus();
+        };
+
+        function setupFoodLog() {
+            // Date label
+            const dateEl = document.getElementById('food-log-date');
+            if (dateEl) {
+                const d = new Date();
+                dateEl.textContent = d.toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
+            }
+
+            // Meal type dropdown — no default, user must choose
+            const mealSelect = document.getElementById('fl-meal-select');
+            if (mealSelect) {
+                mealSelect.addEventListener('change', () => {
+                    mealSelect.classList.toggle('has-value', !!mealSelect.value);
+                });
+            }
+
+            // Quick-add: Enter key on any field submits
+            ['fl-name','fl-cal','fl-protein','fl-carbs','fl-fats'].forEach(id => {
+                document.getElementById(id)?.addEventListener('keydown', e => {
+                    if (e.key === 'Enter') { e.preventDefault(); submitQuickAdd(); }
+                });
+            });
+
+            document.getElementById('fl-add-btn')?.addEventListener('click', submitQuickAdd);
+
+            // Food name autocomplete dropdown
+            const flName = document.getElementById('fl-name');
+            const flDrop = document.getElementById('fl-name-dropdown');
+            if (flName && flDrop) {
+                let highlightIdx = -1;
+
+                function renderDropdown(query) {
+                    const q = query.toLowerCase().trim();
+                    const matches = q.length === 0
+                        ? FOOD_PRESETS.map((p, i) => ({ p, i }))
+                        : FOOD_PRESETS.map((p, i) => ({ p, i })).filter(({ p }) => p.name.toLowerCase().includes(q));
+                    if (matches.length === 0) { flDrop.style.display = 'none'; return; }
+                    highlightIdx = -1;
+                    flDrop.innerHTML = matches.map(({ p, i }) =>
+                        `<div class="fl-dd-item" data-idx="${i}">
+                            <span class="fl-dd-emoji">${p.emoji}</span>
+                            <div class="fl-dd-info">
+                                <span class="fl-dd-name">${p.name}</span>
+                                <span class="fl-dd-detail">${p.detail}</span>
+                            </div>
+                            <span class="fl-dd-cal">${p.cal} kcal</span>
+                        </div>`
+                    ).join('');
+                    flDrop.style.display = 'block';
+
+                    flDrop.querySelectorAll('.fl-dd-item').forEach(item => {
+                        item.addEventListener('mousedown', e => {
+                            e.preventDefault(); // prevent blur firing first
+                            fillFoodPreset(parseInt(item.dataset.idx));
+                            flDrop.style.display = 'none';
+                        });
+                    });
+                }
+
+                function setHighlight(idx) {
+                    const items = flDrop.querySelectorAll('.fl-dd-item');
+                    items.forEach(it => it.classList.remove('highlighted'));
+                    if (idx >= 0 && idx < items.length) {
+                        items[idx].classList.add('highlighted');
+                        items[idx].scrollIntoView({ block: 'nearest' });
+                    }
+                    highlightIdx = idx;
+                }
+
+                flName.addEventListener('input', () => renderDropdown(flName.value));
+                flName.addEventListener('focus', () => renderDropdown(flName.value));
+                flName.addEventListener('blur', () => setTimeout(() => { flDrop.style.display = 'none'; }, 150));
+                flName.addEventListener('keydown', e => {
+                    const items = flDrop.querySelectorAll('.fl-dd-item');
+                    if (!items.length || flDrop.style.display === 'none') return;
+                    if (e.key === 'ArrowDown') { e.preventDefault(); setHighlight(Math.min(highlightIdx + 1, items.length - 1)); }
+                    else if (e.key === 'ArrowUp') { e.preventDefault(); setHighlight(Math.max(highlightIdx - 1, 0)); }
+                    else if (e.key === 'Enter' && highlightIdx >= 0) { e.preventDefault(); fillFoodPreset(parseInt(items[highlightIdx].dataset.idx)); flDrop.style.display = 'none'; }
+                    else if (e.key === 'Escape') { flDrop.style.display = 'none'; }
+                });
+            }
+
+            // Re-load food log and calorie balance whenever nutrition screen is opened
+            document.addEventListener('screenChange', e => {
+                if (e.detail?.screen === 7) {
+                    loadDailyFoodLog();
+                    renderCalorieBalance();
+                }
+            });
+
+            // Load saved macro targets from localStorage
+            if (!state.macroTargets) {
+                const saved = localStorage.getItem(userKey('fixit-macro-targets'));
+                if (saved) {
+                    try { state.macroTargets = JSON.parse(saved); } catch (_) {}
+                }
+            }
+        }
+
+        async function loadDailyFoodLog() {
+            const targetEl = document.getElementById('food-log-cal-target');
+            const targets = state.macroTargets;
+            if (targetEl) targetEl.textContent = targets ? targets.calories.toLocaleString() : '--';
+
+            if (!state.accessToken) {
+                renderFoodLogEntries(null); // show sign-in prompt
+                return;
+            }
+
+            try {
+                const today = new Date().toISOString().split('T')[0];
+                const res = await apiFetch('/nutrition/food-log/daily?date=' + today);
+                if (!res.ok) throw new Error('Failed to load');
+                const data = await res.json();
+                const entries = data.entries || [];
+                const totals  = data.totals  || {};
+
+                renderFoodLogEntries(entries);
+
+                // Use server-computed totals (more accurate with quantity)
+                const tCal = parseFloat(totals.total_calories) || 0;
+                const tP   = parseFloat(totals.total_protein)  || 0;
+                const tC   = parseFloat(totals.total_carbs)    || 0;
+                const tF   = parseFloat(totals.total_fats)     || 0;
+
+                updateFoodLogCalBar(tCal);
+                updateMacroEatenDisplay(tP, tC, tF);
+                saveCalorieLogEntry(today, tCal, tP, tC, tF);
+
+                // Update macro bar fills in the targets card
+                if (targets) {
+                    const pctP = targets.protein > 0 ? Math.min(110, Math.round(tP / targets.protein * 100)) : 0;
+                    const pctC = targets.carbs   > 0 ? Math.min(110, Math.round(tC / targets.carbs   * 100)) : 0;
+                    const pctF = targets.fats    > 0 ? Math.min(110, Math.round(tF / targets.fats    * 100)) : 0;
+                    const barMap = {
+                        '.macro-bar-fill.protein': pctP,
+                        '.macro-bar-fill.carbs':   pctC,
+                        '.macro-bar-fill.fats':    pctF,
+                    };
+                    Object.entries(barMap).forEach(([sel, val]) => {
+                        const el = document.querySelector(sel);
+                        if (el) el.style.width = val + '%';
+                    });
+                }
+                renderCalorieBalance();
+            } catch (err) {
+                dbg.warn('Food log load failed:', err);
+                renderFoodLogEntries([]);
+                renderCalorieBalance();
+            }
+        }
+
+        function renderFoodLogEntries(entries) {
+            const container = document.getElementById('food-log-entries');
+            if (!container) return;
+
+            if (entries === null) {
+                container.innerHTML = `<div class="food-log-empty">Sign in to track your daily food intake.</div>`;
+                updateFoodLogCalBar(0);
+                updateMacroEatenDisplay(0, 0, 0);
+                return;
+            }
+
+            if (entries.length === 0) {
+                container.innerHTML = `<div class="food-log-empty">No entries yet — add your first meal above!</div>`;
+                updateFoodLogCalBar(0);
+                updateMacroEatenDisplay(0, 0, 0);
+                document.getElementById('food-log-cal-eaten').textContent = '0';
+                return;
+            }
+
+            container.innerHTML = entries.map(e => {
+                const name = escapeHtml(e.food_name || 'Unknown');
+                const cal = Math.round(e.calories || 0);
+                const p = e.protein ? `${Math.round(e.protein)}g P` : '';
+                const c = e.carbs ? `${Math.round(e.carbs)}g C` : '';
+                const f = e.fats ? `${Math.round(e.fats)}g F` : '';
+                const macroStr = [p, c, f].filter(Boolean).join(' · ');
+                const meal = e.meal_type || '';
+                return `<div class="food-log-entry">
+                    <span class="fle-name" title="${name}">${name}</span>
+                    ${meal ? `<span class="fle-meal-type">${meal}</span>` : ''}
+                    ${macroStr ? `<span class="fle-macros"><span class="fle-macro">${macroStr}</span></span>` : ''}
+                    <span class="fle-cal">${cal} kcal</span>
+                    <button class="fle-delete" onclick="deleteFoodLogEntry('${e.id}')" aria-label="Delete entry" title="Remove">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+                            <line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/>
+                        </svg>
+                    </button>
+                </div>`;
+            }).join('');
+        }
+
+        function updateFoodLogCalBar(eaten) {
+            const calEl = document.getElementById('food-log-cal-eaten');
+            const fill = document.getElementById('food-log-cal-fill');
+            const targets = state.macroTargets;
+            const target = targets?.calories || 0;
+
+            if (calEl) calEl.textContent = Math.round(eaten).toLocaleString();
+
+            if (fill) {
+                const pct = target > 0 ? Math.min(100, (eaten / target) * 100) : 0;
+                fill.style.width = pct + '%';
+                fill.classList.toggle('over', eaten > target && target > 0);
+            }
+        }
+
+        function updateMacroEatenDisplay(p, c, f) {
+            const pEl = document.getElementById('macro-eaten-protein');
+            const cEl = document.getElementById('macro-eaten-carbs');
+            const fEl = document.getElementById('macro-eaten-fats');
+            if (pEl) pEl.textContent = Math.round(p) + 'g';
+            if (cEl) cEl.textContent = Math.round(c) + 'g';
+            if (fEl) fEl.textContent = Math.round(f) + 'g';
+
+            // Update food log totals strip
+            const flP = document.getElementById('fl-total-protein');
+            const flC = document.getElementById('fl-total-carbs');
+            const flF = document.getElementById('fl-total-fats');
+            if (flP) flP.textContent = Math.round(p) + 'g';
+            if (flC) flC.textContent = Math.round(c) + 'g';
+            if (flF) flF.textContent = Math.round(f) + 'g';
+        }
+
+        function getActiveMealType() {
+            return document.getElementById('fl-meal-select')?.value ?? '';
+        }
+
+        async function submitQuickAdd() {
+            if (!state.accessToken) {
+                showToast('Sign in to log food.', 'error');
+                return;
+            }
+
+            const nameEl = document.getElementById('fl-name');
+            const calEl  = document.getElementById('fl-cal');
+            const name   = nameEl?.value.trim();
+            const cal    = parseFloat(calEl?.value) || 0;
+
+            if (!getActiveMealType()) { document.getElementById('fl-meal-select')?.focus(); showToast('Select a meal type.', 'error'); return; }
+            if (!name) { nameEl?.focus(); showToast('Enter a food name.', 'error'); return; }
+            if (cal <= 0) { calEl?.focus(); showToast('Enter calories greater than 0.', 'error'); return; }
+
+            const protein = parseFloat(document.getElementById('fl-protein')?.value) || 0;
+            const carbs   = parseFloat(document.getElementById('fl-carbs')?.value) || 0;
+            const fats    = parseFloat(document.getElementById('fl-fats')?.value) || 0;
+
+            const btn = document.getElementById('fl-add-btn');
+            if (btn) btn.disabled = true;
+
+            try {
+                const today = new Date().toISOString().split('T')[0];
+                const res = await apiFetch('/nutrition/food-log', {
+                    method: 'POST',
+                    body: JSON.stringify({
+                        food_id: null,
+                        log_date: today,
+                        meal_type: getActiveMealType(),
+                        food_name: name,
+                        calories: cal,
+                        protein,
+                        carbs,
+                        fats,
+                        portion: '1 serving',
+                        quantity: 1,
+                        is_scanned: false,
+                    })
+                });
+
+                if (!res.ok) {
+                    const d = await res.json().catch(() => ({}));
+                    throw new Error(d.error?.message || d.message || 'Failed to log');
+                }
+
+                // Clear inputs and reset meal selector
+                ['fl-name','fl-cal','fl-protein','fl-carbs','fl-fats'].forEach(id => {
+                    const el = document.getElementById(id);
+                    if (el) el.value = '';
+                });
+                const mealSel = document.getElementById('fl-meal-select');
+                if (mealSel) { mealSel.value = ''; mealSel.classList.remove('has-value'); }
+                document.querySelectorAll('.fl-preset-chip').forEach(c => c.classList.remove('active'));
+                document.getElementById('fl-name')?.focus();
+
+                await loadDailyFoodLog();
+                showToast(`${name} added to log!`, 'success');
+            } catch (err) {
+                showToast(err.message || 'Failed to add food.', 'error');
+            } finally {
+                if (btn) btn.disabled = false;
+            }
+        }
+
+        async function deleteFoodLogEntry(id) {
+            if (!id || !state.accessToken) return;
+            try {
+                const res = await apiFetch('/nutrition/food-log/' + id, { method: 'DELETE' });
+                if (!res.ok) throw new Error('Delete failed');
+                await loadDailyFoodLog();
+            } catch (err) {
+                showToast('Could not remove entry.', 'error');
+            }
+        }
+
+        // ========== SERVICE WORKER (PWA) ==========
+        function registerServiceWorker() {
+            if ('serviceWorker' in navigator) {
+                // Unregister all service workers so stale caches never block code updates
+                navigator.serviceWorker.getRegistrations().then(regs => {
+                    regs.forEach(reg => reg.unregister());
+                });
+            }
+        }
+
+        async function updateStorageInfo() {
+            const infoEl = document.getElementById('storage-info');
+            if (!infoEl) return;
+
+            const storage = await checkStorageQuota();
+            if (storage.quotaMB > 0) {
+                infoEl.innerHTML = `
+                    <div class="storage-bar">
+                        <div class="storage-bar-fill ${storage.warning ? 'warning' : ''}" style="width: ${Math.min(storage.percentUsed, 100)}%"></div>
+                    </div>
+                    <span class="storage-text">${storage.usedMB} MB / ${storage.quotaMB} MB used (${storage.percentUsed}%)</span>
+                `;
+            } else {
+                infoEl.innerHTML = '<span class="storage-text">Storage info unavailable</span>';
+            }
+        }
+
+        // ========== USER MENU & ACCOUNT SETTINGS ==========
+
+        let _userMenuSetup = false;
+        function setupUserMenu() {
+            if (_userMenuSetup) return;
+            _userMenuSetup = true;
+            const wrapper = document.getElementById('user-menu-wrapper');
+            const trigger = document.getElementById('user-menu-trigger');
+
+            // Toggle dropdown
+            trigger.addEventListener('click', (e) => {
+                e.stopPropagation();
+                wrapper.classList.toggle('open');
+            });
+
+            // Close on outside click
+            document.addEventListener('click', (e) => {
+                if (!e.target.closest('.user-menu-wrapper')) {
+                    wrapper.classList.remove('open');
+                }
+            });
+
+            // Menu items
+            document.getElementById('user-menu-account').addEventListener('click', () => {
+                wrapper.classList.remove('open');
+                openAccountModal();
+            });
+
+            document.getElementById('user-menu-preferences').addEventListener('click', () => {
+                wrapper.classList.remove('open');
+                openPreferencesModal();
+            });
+
+            document.getElementById('user-menu-admin').addEventListener('click', () => {
+                wrapper.classList.remove('open');
+                goToAdmin();
+            });
+
+            document.getElementById('user-menu-logout').addEventListener('click', () => {
+                wrapper.classList.remove('open');
+                handleLogout();
+            });
+
+            // Account modal
+            document.getElementById('account-modal-close').addEventListener('click', closeAccountModal);
+            document.getElementById('account-modal').addEventListener('click', (e) => {
+                if (e.target === e.currentTarget) closeAccountModal();
+            });
+
+            document.getElementById('account-save-profile').addEventListener('click', saveProfile);
+            document.getElementById('account-save-fitness').addEventListener('click', saveFitnessProfile);
+            document.getElementById('account-change-password').addEventListener('click', changePassword);
+            document.getElementById('account-delete-btn').addEventListener('click', deleteAccount);
+
+            // Fitness goal toggle in account modal
+            document.querySelectorAll('#fp-goal-grid .fp-goal-btn').forEach(btn => {
+                btn.addEventListener('click', () => {
+                    document.querySelectorAll('#fp-goal-grid .fp-goal-btn').forEach(b => b.classList.remove('active'));
+                    btn.classList.add('active');
+                });
+            });
+
+            // Avatar upload
+            document.getElementById('account-avatar-edit-btn').addEventListener('click', () => {
+                document.getElementById('account-avatar-input').click();
+            });
+            document.getElementById('account-avatar-input').addEventListener('change', handleAvatarUpload);
+            document.getElementById('account-avatar-remove-btn').addEventListener('click', handleAvatarRemove);
+
+            // Preferences modal
+            document.getElementById('preferences-modal-close').addEventListener('click', closePreferencesModal);
+            document.getElementById('preferences-modal').addEventListener('click', (e) => {
+                if (e.target === e.currentTarget) closePreferencesModal();
+            });
+
+            // Preference toggle groups
+            document.querySelectorAll('.pref-toggle-group').forEach(group => {
+                group.querySelectorAll('.pref-toggle-btn').forEach(btn => {
+                    btn.addEventListener('click', () => {
+                        group.querySelectorAll('.pref-toggle-btn').forEach(b => b.classList.remove('active'));
+                        btn.classList.add('active');
+                        savePrefToLocal(group.id, btn.dataset.value);
+                    });
+                });
+            });
+
+            // Preference switches
+            document.querySelectorAll('.pref-switch input').forEach(input => {
+                input.addEventListener('change', () => {
+                    savePrefToLocal(input.id, input.checked);
+                });
+            });
+
+            // Theme cards in preferences
+            document.querySelectorAll('.pref-theme-card').forEach(card => {
+                card.addEventListener('click', () => {
+                    const theme = card.dataset.theme;
+                    applyTheme(theme);
+                    document.querySelectorAll('.pref-theme-card').forEach(c => c.classList.toggle('active', c.dataset.theme === theme));
+                });
+            });
+
+            // Load saved preferences
+            loadPreferences();
+        }
+
+        function openAccountModal() {
+            const user = state.user || {};
+            const rawName = user.name || user.display_name || user.displayName || '';
+            const displayName = rawName || (user.email ? user.email.split('@')[0] : 'User');
+            document.getElementById('account-name-input').value = rawName;
+            document.getElementById('account-email-input').value = user.email || '';
+            document.getElementById('account-display-name').textContent = displayName;
+            document.getElementById('account-role-badge').textContent = user.role || 'user';
+
+            // Avatar
+            const initials = getInitials(displayName);
+            const avatarUrl = user.avatar_url || null;
+            setAvatarContent('account-avatar-large', initials, avatarUrl);
+
+            // Show/hide remove button
+            document.getElementById('account-avatar-remove-btn').style.display = avatarUrl ? 'inline' : 'none';
+
+            // Clear password fields
+            document.getElementById('account-current-password').value = '';
+            document.getElementById('account-new-password').value = '';
+            document.getElementById('account-confirm-password').value = '';
+
+            // Populate fitness profile fields from state
+            document.getElementById('fp-height-input').value = state.height || '';
+            document.getElementById('fp-weight-input').value = state.weight || '';
+            document.getElementById('fp-gender-select').value = state.gender || '';
+            document.getElementById('fp-age-range').value = state.age || '';
+            document.getElementById('fp-activity-level').value = state.activityLevel || '';
+
+            // Fitness goal button selector
+            document.querySelectorAll('#fp-goal-grid .fp-goal-btn').forEach(btn => {
+                btn.classList.toggle('active', btn.dataset.goal === (state.fitnessGoal || ''));
+            });
+
+            document.getElementById('account-modal').style.display = 'flex';
+        }
+
+        function closeAccountModal() {
+            document.getElementById('account-modal').style.display = 'none';
+        }
+
+        function setBtnLoading(btn, loading) {
+            if (!btn) return;
+            btn.disabled = loading;
+            if (loading) {
+                btn.dataset.origText = btn.textContent;
+                btn.textContent = 'Saving...';
+            } else {
+                btn.textContent = btn.dataset.origText || btn.textContent;
+            }
+        }
+
+        async function saveProfile() {
+            const name = document.getElementById('account-name-input').value.trim();
+            const email = document.getElementById('account-email-input').value.trim();
+            if (!name) return showToast('Display name cannot be empty.', 'error');
+            if (!email) return showToast('Email cannot be empty.', 'error');
+            if (!isValidEmail(email)) return showToast('Please enter a valid email address.', 'error');
+
+            const body = {};
+            // Only send changed fields
+            if (name !== (state.user?.display_name || '')) body.display_name = name;
+            if (email !== (state.user?.email || '')) body.email = email;
+
+            if (Object.keys(body).length === 0) {
+                showToast('No changes to save.', 'info');
+                return;
+            }
+
+            const btn = document.getElementById('account-save-profile');
+            setBtnLoading(btn, true);
+            try {
+                const res = await apiFetch('/users/me', {
+                    method: 'PUT',
+                    body: JSON.stringify(body)
+                });
+                if (!res.ok) {
+                    const data = await res.json().catch(() => ({}));
+                    throw new Error((data.error && data.error.message) || data.message || 'Failed to update profile');
+                }
+                const data = await res.json().catch(() => ({}));
+                // Update local state
+                if (state.user) {
+                    if (body.display_name) {
+                        state.user.name = name;
+                        state.user.display_name = name;
+                        state.user.displayName = name;
+                    }
+                    if (body.email) {
+                        state.user.email = email;
+                    }
+                }
+                updateUserMenu();
+                showToast('Profile updated successfully!', 'success');
+            } catch (err) {
+                showToast(err.message, 'error');
+            } finally {
+                setBtnLoading(btn, false);
+            }
+        }
+
+        async function saveFitnessProfile() {
+            const height = parseFloat(document.getElementById('fp-height-input').value) || null;
+            const weight = parseFloat(document.getElementById('fp-weight-input').value) || null;
+            const gender = document.getElementById('fp-gender-select').value;
+            const age_range = document.getElementById('fp-age-range').value;
+            const activity_level = document.getElementById('fp-activity-level').value;
+            const activeGoalBtn = document.querySelector('#fp-goal-grid .fp-goal-btn.active');
+            const fitness_goal = activeGoalBtn ? activeGoalBtn.dataset.goal : '';
+
+            const body = {};
+            if (height) body.height = height;
+            if (weight) body.weight = weight;
+            if (gender) body.gender = gender;
+            if (age_range) body.age_range = age_range;
+            if (activity_level) body.activity_level = activity_level;
+            if (fitness_goal) body.fitness_goal = fitness_goal;
+
+            if (Object.keys(body).length === 0) {
+                showToast('No changes to save.', 'info');
+                return;
+            }
+
+            const btn = document.getElementById('account-save-fitness');
+            setBtnLoading(btn, true);
+            try {
+                const res = await apiFetch('/users/me', {
+                    method: 'PUT',
+                    body: JSON.stringify(body)
+                });
+                if (!res.ok) {
+                    const data = await res.json().catch(() => ({}));
+                    throw new Error((data.error && data.error.message) || data.message || 'Failed to update fitness profile');
+                }
+                // Update local state
+                if (body.height) state.height = body.height;
+                if (body.weight) state.weight = body.weight;
+                if (body.gender) state.gender = body.gender;
+                if (body.age_range) state.age = body.age_range;
+                if (body.activity_level) state.activityLevel = body.activity_level;
+                if (body.fitness_goal) state.fitnessGoal = body.fitness_goal;
+                saveSessionState();
+                // Sync upload screen fields if visible
+                if (document.getElementById('height-input')) document.getElementById('height-input').value = state.height || '';
+                if (document.getElementById('weight-input')) document.getElementById('weight-input').value = state.weight || '';
+                if (document.getElementById('gender-select')) document.getElementById('gender-select').value = state.gender || '';
+                if (document.getElementById('age-range')) document.getElementById('age-range').value = state.age || '';
+                if (document.getElementById('activity-level')) document.getElementById('activity-level').value = state.activityLevel || '';
+                document.querySelectorAll('#goal-selector .goal-option').forEach(btn => {
+                    btn.classList.toggle('active', btn.dataset.goal === state.fitnessGoal);
+                });
+                showToast('Fitness profile updated!', 'success');
+            } catch (err) {
+                showToast(err.message, 'error');
+            } finally {
+                setBtnLoading(btn, false);
+            }
+        }
+
+        async function handleAvatarUpload(e) {
+            const file = e.target.files[0];
+            if (!file) return;
+
+            // Validate file
+            if (!file.type.startsWith('image/')) {
+                showToast('Please select an image file.', 'error');
+                return;
+            }
+            if (file.size > 2 * 1024 * 1024) {
+                showToast('Image must be under 2MB.', 'error');
+                return;
+            }
+
+            try {
+                // Resize and convert to base64
+                const dataUrl = await resizeImage(file, 256);
+
+                const res = await apiFetch('/users/me', {
+                    method: 'PUT',
+                    body: JSON.stringify({ avatar_url: dataUrl })
+                });
+                if (!res.ok) {
+                    const data = await res.json().catch(() => ({}));
+                    throw new Error((data.error && data.error.message) || data.message || 'Failed to upload avatar');
+                }
+
+                // Update local state
+                if (state.user) state.user.avatar_url = dataUrl;
+                updateUserMenu();
+                openAccountModal(); // Refresh modal
+            } catch (err) {
+                showToast(err.message, 'error');
+            }
+
+            // Reset input so same file can be re-selected
+            e.target.value = '';
+        }
+
+        async function handleAvatarRemove() {
+            if (!(await showConfirmModal('Remove your profile picture?', { okLabel: 'Remove' }))) return;
+            try {
+                const res = await apiFetch('/users/me', {
+                    method: 'PUT',
+                    body: JSON.stringify({ avatar_url: null })
+                });
+                if (!res.ok) {
+                    const data = await res.json().catch(() => ({}));
+                    throw new Error((data.error && data.error.message) || data.message || 'Failed to remove avatar');
+                }
+
+                if (state.user) state.user.avatar_url = null;
+                updateUserMenu();
+                openAccountModal(); // Refresh modal
+            } catch (err) {
+                showToast(err.message, 'error');
+            }
+        }
+
+        function resizeImage(file, maxSize) {
+            return new Promise((resolve, reject) => {
+                const reader = new FileReader();
+                reader.onload = (e) => {
+                    const img = new Image();
+                    img.onload = () => {
+                        const canvas = document.createElement('canvas');
+                        let w = img.width, h = img.height;
+                        if (w > h) { if (w > maxSize) { h = h * maxSize / w; w = maxSize; } }
+                        else { if (h > maxSize) { w = w * maxSize / h; h = maxSize; } }
+                        canvas.width = w;
+                        canvas.height = h;
+                        canvas.getContext('2d').drawImage(img, 0, 0, w, h);
+                        resolve(canvas.toDataURL('image/jpeg', 0.85));
+                    };
+                    img.onerror = reject;
+                    img.src = e.target.result;
+                };
+                reader.onerror = reject;
+                reader.readAsDataURL(file);
+            });
+        }
+
+        async function changePassword() {
+            const current = document.getElementById('account-current-password').value;
+            const newPw = document.getElementById('account-new-password').value;
+            const confirmPw = document.getElementById('account-confirm-password').value;
+
+            if (!current || !newPw || !confirmPw) return showToast('Please fill in all password fields.', 'error');
+            if (newPw.length < 8) return showToast('New password must be at least 8 characters.', 'error');
+            if (newPw !== confirmPw) return showToast('New passwords do not match.', 'error');
+
+            const btn = document.getElementById('account-change-password');
+            setBtnLoading(btn, true);
+            try {
+                const res = await apiFetch('/auth/change-password', {
+                    method: 'POST',
+                    body: JSON.stringify({ currentPassword: current, newPassword: newPw })
+                });
+                if (!res.ok) {
+                    const data = await res.json().catch(() => ({}));
+                    throw new Error((data.error && data.error.message) || data.message || 'Failed to change password');
+                }
+                showToast('Password changed successfully!', 'success');
+                document.getElementById('account-current-password').value = '';
+                document.getElementById('account-new-password').value = '';
+                document.getElementById('account-confirm-password').value = '';
+            } catch (err) {
+                showToast(err.message, 'error');
+            } finally {
+                setBtnLoading(btn, false);
+            }
+        }
+
+        async function deleteAccount() {
+            if (!(await showConfirmModal('Are you sure you want to permanently delete your account? This cannot be undone.', { okLabel: 'Delete Account' }))) return;
+            if (!(await showConfirmModal('This will delete ALL your data. This action is irreversible.', { okLabel: 'Delete Forever' }))) return;
+
+            try {
+                const res = await apiFetch('/users/me', { method: 'DELETE' });
+                if (!res.ok) {
+                    const data = await res.json().catch(() => ({}));
+                    throw new Error((data.error && data.error.message) || data.message || 'Failed to delete account');
+                }
+                closeAccountModal();
+                handleLogout();
+                showToast('Your account has been deleted.', 'success');
+            } catch (err) {
+                showToast(err.message, 'error');
+            }
+        }
+
+        function openPreferencesModal() {
+            // Sync theme cards with current theme
+            const currentTheme = document.documentElement.getAttribute('data-theme') || 'dark';
+            document.querySelectorAll('.pref-theme-card').forEach(card => {
+                card.classList.toggle('active', card.dataset.theme === currentTheme);
+            });
+            document.getElementById('preferences-modal').style.display = 'flex';
+        }
+
+        function closePreferencesModal() {
+            document.getElementById('preferences-modal').style.display = 'none';
+        }
+
+        function savePrefToLocal(key, value) {
+            const prefs = JSON.parse(localStorage.getItem(userKey('fixit-preferences')) || '{}');
+            prefs[key] = value;
+            localStorage.setItem(userKey('fixit-preferences'), JSON.stringify(prefs));
+        }
+
+        function loadPreferences() {
+            const prefs = JSON.parse(localStorage.getItem(userKey('fixit-preferences')) || '{}');
+
+            // Toggle groups
+            Object.entries(prefs).forEach(([key, value]) => {
+                const group = document.getElementById(key);
+                if (group && group.classList.contains('pref-toggle-group')) {
+                    group.querySelectorAll('.pref-toggle-btn').forEach(btn => {
+                        btn.classList.toggle('active', btn.dataset.value === value);
+                    });
+                }
+                // Switches
+                const input = document.getElementById(key);
+                if (input && input.type === 'checkbox') {
+                    input.checked = value;
+                }
+            });
+        }
+
+        // ========== ADMIN DASHBOARD ==========
+
+        // Admin state
+        const adminState = {
+            currentPage: 1,
+            totalPages: 1,
+            searchQuery: '',
+            searchTimeout: null
+        };
+
+        function setupAdmin() {
+            // Back button
+            document.getElementById('admin-back-btn').addEventListener('click', () => goToScreen(1));
+
+            // Search with debounce
+            const searchInput = document.getElementById('admin-search');
+            searchInput.addEventListener('input', () => {
+                clearTimeout(adminState.searchTimeout);
+                adminState.searchTimeout = setTimeout(() => {
+                    adminState.searchQuery = searchInput.value.trim();
+                    adminState.currentPage = 1;
+                    loadAdminUsers();
+                }, 350);
+            });
+
+            // Pagination
+            document.getElementById('admin-prev-btn').addEventListener('click', () => {
+                if (adminState.currentPage > 1) {
+                    adminState.currentPage--;
+                    loadAdminUsers();
+                }
+            });
+
+            document.getElementById('admin-next-btn').addEventListener('click', () => {
+                if (adminState.currentPage < adminState.totalPages) {
+                    adminState.currentPage++;
+                    loadAdminUsers();
+                }
+            });
+
+            // Modal close
+            document.getElementById('admin-modal-close').addEventListener('click', () => {
+                document.getElementById('admin-user-modal').style.display = 'none';
+            });
+
+            // Close modal on overlay click
+            document.getElementById('admin-user-modal').addEventListener('click', (e) => {
+                if (e.target === e.currentTarget) {
+                    e.currentTarget.style.display = 'none';
+                }
+            });
+
+            // Create User modal
+            document.getElementById('admin-create-user-btn').addEventListener('click', openCreateUserModal);
+            document.getElementById('admin-create-modal-close').addEventListener('click', closeCreateUserModal);
+            document.getElementById('admin-create-cancel').addEventListener('click', closeCreateUserModal);
+            document.getElementById('admin-create-modal').addEventListener('click', (e) => {
+                if (e.target === e.currentTarget) closeCreateUserModal();
+            });
+
+            // Role selector in create modal
+            document.querySelectorAll('.admin-role-option').forEach(btn => {
+                btn.addEventListener('click', () => {
+                    document.querySelectorAll('.admin-role-option').forEach(b => b.classList.remove('active'));
+                    btn.classList.add('active');
+                });
+            });
+
+            // Create form submit
+            document.getElementById('admin-create-form').addEventListener('submit', handleCreateUser);
+
+            // Content tabs
+            setupAdminTabs();
+        }
+
+        function goToAdmin() {
+            goToScreen(10);
+            // Hide nav steps for admin (it's outside normal flow)
+            document.querySelector('.nav-steps').style.display = 'none';
+            loadAdminStats();
+            switchAdminTab('users');
+            loadAdminUsers();
+        }
+
+        async function loadAdminStats() {
+            try {
+                const res = await apiFetch('/admin/stats');
+                if (!res.ok) throw new Error('Failed to load stats');
+                const data = await res.json();
+                document.getElementById('stat-total-users').textContent = data.total_users ?? '--';
+                document.getElementById('stat-total-scans').textContent = data.total_scans ?? '--';
+                document.getElementById('stat-total-workouts').textContent = data.total_workouts ?? '--';
+                document.getElementById('stat-new-signups').textContent = data.new_signups_this_week ?? '--';
+            } catch (err) {
+                dbg.error('Admin stats error:', err);
+            }
+        }
+
+        async function loadAdminUsers() {
+            const tbody = document.getElementById('admin-users-tbody');
+            tbody.innerHTML = '<tr><td colspan="5" class="admin-table-empty">Loading users...</td></tr>';
+
+            try {
+                const params = new URLSearchParams({
+                    page: adminState.currentPage,
+                    limit: 15
+                });
+                if (adminState.searchQuery) params.set('search', adminState.searchQuery);
+
+                const res = await apiFetch('/admin/users?' + params.toString());
+                if (!res.ok) throw new Error('Failed to load users');
+                const data = await res.json();
+
+                const users = data.users || data.data || [];
+                adminState.totalPages = data.totalPages || data.total_pages || Math.ceil((data.total || users.length) / 15) || 1;
+
+                if (users.length === 0) {
+                    tbody.innerHTML = '<tr><td colspan="5" class="admin-table-empty">No users found.</td></tr>';
+                } else {
+                    tbody.innerHTML = users.map(u => {
+                        const lastLogin = u.last_login_at ? new Date(u.last_login_at).toLocaleDateString() : 'Never';
+                        const verified = u.email_verified;
+                        const isLocked = u.locked_until && new Date(u.locked_until) > new Date();
+                        const uName = u.name || u.display_name || u.displayName || '';
+                        const uInitials = getInitials(uName) || escapeHtml(u.email)[0].toUpperCase();
+                        return `<tr data-user-id="${u.id}" onclick="loadUserDetail('${u.id}')">
+                            <td>
+                                <div class="admin-user-cell">
+                                    <div class="admin-user-avatar">${uInitials}</div>
+                                    <div class="admin-user-info">
+                                        <span class="admin-user-name">${escapeHtml(uName || u.email.split('@')[0])}</span>
+                                        <span class="admin-user-email">${escapeHtml(u.email)}</span>
+                                    </div>
+                                </div>
+                            </td>
+                            <td><span class="admin-badge admin-badge--${u.role}">${u.role}</span></td>
+                            <td>
+                                <span class="admin-badge admin-badge--${verified ? 'yes' : 'no'}">${verified ? 'Verified' : 'Unverified'}</span>
+                                ${isLocked ? '<span class="admin-badge admin-badge--locked">Locked</span>' : ''}
+                            </td>
+                            <td style="color:var(--text-muted);font-size:0.82rem">${lastLogin}</td>
+                            <td class="admin-actions-cell" onclick="event.stopPropagation()">
+                                <div class="admin-actions">
+                                    <button class="admin-action-btn admin-btn-edit" onclick="loadUserDetail('${u.id}')" title="Edit user">
+                                        Edit
+                                    </button>
+                                </div>
+                            </td>
+                        </tr>`;
+                    }).join('');
+                }
+
+                // Update pagination
+                document.getElementById('admin-page-info').textContent = `Page ${adminState.currentPage} of ${adminState.totalPages}`;
+                document.getElementById('admin-prev-btn').disabled = adminState.currentPage <= 1;
+                document.getElementById('admin-next-btn').disabled = adminState.currentPage >= adminState.totalPages;
+
+            } catch (err) {
+                dbg.error('Admin users error:', err);
+                tbody.innerHTML = '<tr><td colspan="5" class="admin-table-empty">Failed to load users.</td></tr>';
+            }
+        }
+
+        async function loadUserDetail(id) {
+            const modal = document.getElementById('admin-user-modal');
+            const body = document.getElementById('admin-modal-body');
+            const actions = document.getElementById('admin-modal-actions');
+
+            body.innerHTML = '<p style="color:var(--text-muted)">Loading...</p>';
+            actions.innerHTML = '';
+            modal.style.display = 'flex';
+
+            try {
+                const res = await apiFetch('/admin/users/' + id);
+                if (!res.ok) throw new Error('Failed to load user');
+                const data = await res.json();
+                const u = data.user || data;
+                const g = data.gamification || u.gamification || {};
+
+                const lastLogin = u.last_login_at ? new Date(u.last_login_at).toLocaleString() : 'Never';
+                const createdAt = u.created_at ? new Date(u.created_at).toLocaleString() : '--';
+                const isLocked = u.locked_until && new Date(u.locked_until) > new Date();
+                const isSelf = u.id === state.user?.id;
+
+                const uName = u.name || u.display_name || '';
+                const uEmail = u.email || '';
+
+                body.innerHTML = `
+                    <div class="admin-detail-row"><span class="admin-detail-label">ID</span><span class="admin-detail-value" style="font-size:0.75rem;opacity:0.7">${u.id}</span></div>
+                    <div class="admin-detail-row"><span class="admin-detail-label">Created</span><span class="admin-detail-value">${createdAt}</span></div>
+                    <div class="admin-detail-row"><span class="admin-detail-label">Last Login</span><span class="admin-detail-value">${lastLogin}</span></div>
+                    ${g.xp !== undefined ? `
+                    <div class="admin-gamification-section">
+                        <div class="admin-gamification-title">Gamification</div>
+                        <div class="admin-detail-row"><span class="admin-detail-label">XP</span><span class="admin-detail-value">${g.xp ?? 0}</span></div>
+                        <div class="admin-detail-row"><span class="admin-detail-label">Level</span><span class="admin-detail-value">${g.level ?? 1}</span></div>
+                        <div class="admin-detail-row"><span class="admin-detail-label">Streak</span><span class="admin-detail-value">${g.streak ?? 0} days</span></div>
+                    </div>` : ''}
+
+                    <div class="admin-edit-section">
+                        <div class="admin-edit-title">User Details</div>
+
+                        <div class="admin-edit-row">
+                            <label class="admin-edit-label" for="admin-edit-name">Name</label>
+                            <input type="text" id="admin-edit-name" class="admin-edit-input" value="${escapeHtml(uName)}" placeholder="Display name">
+                        </div>
+
+                        <div class="admin-edit-row">
+                            <label class="admin-edit-label" for="admin-edit-email">Email</label>
+                            <input type="email" id="admin-edit-email" class="admin-edit-input" value="${escapeHtml(uEmail)}" placeholder="Email address">
+                        </div>
+                    </div>
+
+                    <div class="admin-edit-section">
+                        <div class="admin-edit-title">Account Settings</div>
+
+                        <div class="admin-edit-row">
+                            <label class="admin-edit-label">Role</label>
+                            <select id="admin-edit-role" class="admin-edit-select" ${isSelf ? 'disabled' : ''}>
+                                <option value="user" ${u.role === 'user' ? 'selected' : ''}>User</option>
+                                <option value="admin" ${u.role === 'admin' ? 'selected' : ''}>Admin</option>
+                            </select>
+                        </div>
+
+                        <div class="admin-edit-row">
+                            <label class="admin-edit-label">Email Verified</label>
+                            <label class="admin-toggle">
+                                <input type="checkbox" id="admin-edit-verified" ${u.email_verified ? 'checked' : ''}>
+                                <span class="admin-toggle-slider"></span>
+                            </label>
+                        </div>
+
+                        <div class="admin-edit-row">
+                            <label class="admin-edit-label">Account Status</label>
+                            <span class="admin-badge admin-badge--${isLocked ? 'locked' : 'yes'}" style="margin-right:8px">${isLocked ? 'Locked' : 'Active'}</span>
+                            ${isLocked
+                                ? `<button class="admin-action-btn admin-btn-unlock" onclick="adminUnlockUser('${u.id}')" style="font-size:0.78rem">Unlock</button>`
+                                : (!isSelf ? `<button class="admin-action-btn admin-btn-lock" onclick="adminLockUser('${u.id}')" style="font-size:0.78rem">Lock</button>` : '')
+                            }
+                        </div>
+                    </div>
+
+                    <div class="admin-edit-section">
+                        <div class="admin-edit-title">Change Password</div>
+                        <div class="admin-edit-row">
+                            <input type="password" id="admin-edit-password" class="admin-edit-input" placeholder="New password (min 8 chars)" autocomplete="new-password">
+                        </div>
+                        <div class="admin-edit-row">
+                            <input type="password" id="admin-edit-password-confirm" class="admin-edit-input" placeholder="Confirm new password" autocomplete="new-password">
+                        </div>
+                    </div>
+                `;
+
+                // Store original values for diff comparison
+                modal._origUser = { email_verified: u.email_verified, role: u.role, display_name: uName, email: uEmail };
+
+                actions.innerHTML = `
+                    <button class="admin-action-btn admin-btn-save" onclick="adminSaveUser('${u.id}')">Save Changes</button>
+                    ${!isSelf ? `<button class="admin-action-btn admin-btn-delete" onclick="adminDeleteUser('${u.id}')">Delete User</button>` : ''}
+                `;
+
+            } catch (err) {
+                dbg.error('User detail error:', err);
+                body.innerHTML = '<p style="color:var(--accent-danger)">Failed to load user details.</p>';
+            }
+        }
+
+        async function adminSaveUser(id) {
+            const orig = document.getElementById('admin-user-modal')._origUser || {};
+            const newName = document.getElementById('admin-edit-name').value.trim();
+            const newEmail = document.getElementById('admin-edit-email').value.trim();
+            const newRole = document.getElementById('admin-edit-role').value;
+            const newVerified = document.getElementById('admin-edit-verified').checked;
+            const newPassword = document.getElementById('admin-edit-password').value;
+            const confirmPassword = document.getElementById('admin-edit-password-confirm').value;
+
+            if (!newEmail) {
+                showToast('Email is required.', 'error');
+                return;
+            }
+
+            let changed = false;
+
+            // Build update payload with only changed fields
+            const updateBody = {};
+            if (newRole !== orig.role) updateBody.role = newRole;
+            if (newVerified !== orig.email_verified) updateBody.email_verified = newVerified;
+            if (newName !== orig.display_name) updateBody.display_name = newName;
+            if (newEmail !== orig.email) updateBody.email = newEmail;
+
+            if (Object.keys(updateBody).length > 0) {
+                try {
+                    const res = await apiFetch('/admin/users/' + id, {
+                        method: 'PUT',
+                        body: JSON.stringify(updateBody)
+                    });
+                    if (!res.ok) {
+                        const data = await res.json().catch(() => ({}));
+                        throw new Error((data.error && data.error.message) || 'Failed to update user');
+                    }
+                    changed = true;
+                } catch (err) {
+                    showToast(err.message, 'error');
+                    return;
+                }
+            }
+
+            // Change password if provided
+            if (newPassword) {
+                if (newPassword.length < 8) {
+                    showToast('Password must be at least 8 characters.', 'error');
+                    return;
+                }
+                if (newPassword !== confirmPassword) {
+                    showToast('Passwords do not match.', 'error');
+                    return;
+                }
+                try {
+                    const res = await apiFetch('/admin/users/' + id + '/reset-password', {
+                        method: 'POST',
+                        body: JSON.stringify({ password: newPassword })
+                    });
+                    if (!res.ok) {
+                        const data = await res.json().catch(() => ({}));
+                        throw new Error((data.error && data.error.message) || 'Failed to change password');
+                    }
+                    changed = true;
+                } catch (err) {
+                    showToast(err.message, 'error');
+                    return;
+                }
+            }
+
+            if (changed) {
+                showToast('User updated successfully.', 'success');
+                loadAdminUsers();
+                loadUserDetail(id);
+            } else {
+                showToast('No changes to save.', 'info');
+            }
+        }
+
+        async function adminToggleVerify(id, currentVerified) {
+            try {
+                const res = await apiFetch('/admin/users/' + id, {
+                    method: 'PUT',
+                    body: JSON.stringify({ email_verified: !currentVerified })
+                });
+                if (!res.ok) {
+                    const data = await res.json().catch(() => ({}));
+                    throw new Error((data.error && data.error.message) || data.message || 'Failed to update verification status');
+                }
+                loadAdminUsers();
+                if (document.getElementById('admin-user-modal').style.display !== 'none') {
+                    loadUserDetail(id);
+                }
+            } catch (err) {
+                dbg.error('Toggle verify error:', err);
+                showToast(err.message, 'error');
+            }
+        }
+
+        async function adminToggleRole(id, currentRole) {
+            const newRole = currentRole === 'admin' ? 'user' : 'admin';
+            if (!(await showConfirmModal(`Change this user's role to "${newRole}"?`, { okLabel: 'Change Role', safe: true }))) return;
+            try {
+                const res = await apiFetch('/admin/users/' + id, {
+                    method: 'PUT',
+                    body: JSON.stringify({ role: newRole })
+                });
+                if (!res.ok) {
+                    const data = await res.json().catch(() => ({}));
+                    throw new Error((data.error && data.error.message) || data.message || 'Failed to update role');
+                }
+                loadAdminUsers();
+                if (document.getElementById('admin-user-modal').style.display !== 'none') {
+                    loadUserDetail(id);
+                }
+            } catch (err) {
+                dbg.error('Toggle role error:', err);
+                showToast(err.message, 'error');
+            }
+        }
+
+        async function adminUnlockUser(id) {
+            try {
+                const res = await apiFetch('/admin/users/' + id + '/unlock', { method: 'POST' });
+                if (!res.ok) {
+                    const data = await res.json().catch(() => ({}));
+                    throw new Error((data.error && data.error.message) || data.message || 'Failed to unlock account');
+                }
+                showToast('Account unlocked.', 'success');
+                loadAdminUsers();
+            } catch (err) {
+                dbg.error('Unlock error:', err);
+                showToast(err.message, 'error');
+            }
+        }
+
+        async function adminLockUser(id) {
+            if (!(await showConfirmModal('Lock this user account? They will not be able to log in until unlocked.', { okLabel: 'Lock Account' }))) return;
+            try {
+                const res = await apiFetch('/admin/users/' + id + '/lock', { method: 'POST' });
+                if (!res.ok) {
+                    const data = await res.json().catch(() => ({}));
+                    throw new Error((data.error && data.error.message) || data.message || 'Failed to lock account');
+                }
+                showToast('Account locked.', 'success');
+                loadAdminUsers();
+                if (document.getElementById('admin-user-modal').style.display !== 'none') {
+                    loadUserDetail(id);
+                }
+            } catch (err) {
+                dbg.error('Lock error:', err);
+                showToast(err.message, 'error');
+            }
+        }
+
+        async function adminDeleteUser(id) {
+            if (!(await showConfirmModal('Are you sure you want to delete this user? This cannot be undone.', { okLabel: 'Delete User' }))) return;
+            try {
+                const res = await apiFetch('/admin/users/' + id, { method: 'DELETE' });
+                if (!res.ok) {
+                    const data = await res.json().catch(() => ({}));
+                    throw new Error((data.error && data.error.message) || data.message || 'Failed to delete user');
+                }
+                document.getElementById('admin-user-modal').style.display = 'none';
+                loadAdminUsers();
+                loadAdminStats();
+            } catch (err) {
+                dbg.error('Delete error:', err);
+                showToast(err.message, 'error');
+            }
+        }
+
+        // ========== CREATE USER ==========
+
+        function openCreateUserModal() {
+            document.getElementById('admin-create-form').reset();
+            document.querySelectorAll('.admin-role-option').forEach(b => b.classList.toggle('active', b.dataset.role === 'user'));
+            document.getElementById('create-user-verified').checked = true;
+            const msg = document.getElementById('admin-create-message');
+            msg.style.display = 'none';
+            document.getElementById('admin-create-modal').style.display = 'flex';
+        }
+
+        function closeCreateUserModal() {
+            document.getElementById('admin-create-modal').style.display = 'none';
+        }
+
+        async function handleCreateUser(e) {
+            e.preventDefault();
+            const msg = document.getElementById('admin-create-message');
+            msg.style.display = 'none';
+
+            const name = document.getElementById('create-user-name').value.trim();
+            const email = document.getElementById('create-user-email').value.trim();
+            const password = document.getElementById('create-user-password').value;
+            const confirm = document.getElementById('create-user-confirm').value;
+            const verified = document.getElementById('create-user-verified').checked;
+            const role = document.querySelector('.admin-role-option.active')?.dataset.role || 'user';
+
+            if (!email || !password) {
+                msg.textContent = 'Email and password are required.';
+                msg.className = 'admin-create-message error';
+                msg.style.display = 'block';
+                return;
+            }
+            if (password.length < 8) {
+                msg.textContent = 'Password must be at least 8 characters.';
+                msg.className = 'admin-create-message error';
+                msg.style.display = 'block';
+                return;
+            }
+            if (password !== confirm) {
+                msg.textContent = 'Passwords do not match.';
+                msg.className = 'admin-create-message error';
+                msg.style.display = 'block';
+                return;
+            }
+
+            try {
+                // Step 1: Register the user via auth endpoint
+                const regBody = { email, password };
+                if (name) regBody.display_name = name;
+                let regRes;
+                try {
+                    regRes = await fetch(API_BASE + '/auth/register', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify(regBody)
+                    });
+                } catch (networkErr) {
+                    throw new Error('Cannot connect to server. Please make sure the backend is running.');
+                }
+                const regData = await regRes.json().catch(() => ({}));
+                if (!regRes.ok) throw new Error(regData.error || regData.message || 'Registration failed');
+
+                // Step 2: Find the new user in admin user list to get their ID
+                const searchRes = await apiFetch('/admin/users?search=' + encodeURIComponent(email) + '&limit=1');
+                if (!searchRes.ok) throw new Error('Could not find newly created user');
+                const searchData = await searchRes.json();
+                const users = searchData.users || searchData.data || [];
+                const newUser = users.find(u => u.email === email);
+
+                if (newUser) {
+                    // Step 3: Update role and verification via admin endpoint
+                    const updates = {};
+                    if (role !== 'user') updates.role = role;
+                    if (verified) updates.email_verified = true;
+
+                    if (Object.keys(updates).length > 0) {
+                        await apiFetch('/admin/users/' + newUser.id, {
+                            method: 'PUT',
+                            body: JSON.stringify(updates)
+                        });
+                    }
+                }
+
+                msg.textContent = 'User created successfully!';
+                msg.className = 'admin-create-message success';
+                msg.style.display = 'block';
+
+                // Refresh data
+                loadAdminUsers();
+                loadAdminStats();
+
+                // Close after a moment
+                setTimeout(() => {
+                    closeCreateUserModal();
+                }, 1200);
+
+            } catch (err) {
+                dbg.error('Create user error:', err);
+                msg.textContent = err.message || 'Failed to create user.';
+                msg.className = 'admin-create-message error';
+                msg.style.display = 'block';
+            }
+        }
+
+        // ========== ADMIN CONTENT TABS (Generic CRUD) ==========
+
+        const adminTabConfig = {
+            foods: {
+                label: 'Foods',
+                apiPath: '/admin/foods',
+                searchPlaceholder: 'Search foods...',
+                columns: [
+                    { key: 'name', label: 'Name' },
+                    { key: 'calories', label: 'Calories' },
+                    { key: 'protein', label: 'Protein' },
+                    { key: 'carbs', label: 'Carbs' },
+                    { key: 'fats', label: 'Fats' },
+                    { key: 'portion', label: 'Portion' },
+                    { key: 'category', label: 'Category' }
+                ],
+                formFields: [
+                    { key: 'name', label: 'Name', type: 'text', required: true },
+                    { key: 'calories', label: 'Calories', type: 'number', required: true },
+                    { key: 'protein', label: 'Protein (g)', type: 'number', step: '0.01', required: true },
+                    { key: 'carbs', label: 'Carbs (g)', type: 'number', step: '0.01', required: true },
+                    { key: 'fats', label: 'Fats (g)', type: 'number', step: '0.01', required: true },
+                    { key: 'fiber', label: 'Fiber (g)', type: 'number', step: '0.01' },
+                    { key: 'sugar', label: 'Sugar (g)', type: 'number', step: '0.01' },
+                    { key: 'sodium', label: 'Sodium (mg)', type: 'number', step: '0.01' },
+                    { key: 'portion', label: 'Portion', type: 'text', required: true },
+                    { key: 'portion_grams', label: 'Portion (grams)', type: 'number' },
+                    { key: 'icon', label: 'Icon (emoji)', type: 'text' },
+                    { key: 'category', label: 'Category', type: 'text' },
+                    { key: 'tags', label: 'Tags', type: 'text' }
+                ]
+            },
+            exercises: {
+                label: 'Exercises',
+                apiPath: '/admin/exercises',
+                searchPlaceholder: 'Search exercises...',
+                columns: [
+                    { key: 'name', label: 'Name' },
+                    { key: 'muscle_group', label: 'Muscle Group' },
+                    { key: 'equipment_type', label: 'Equipment' },
+                    { key: 'difficulty', label: 'Difficulty' },
+                    { key: 'default_sets', label: 'Sets' },
+                    { key: 'default_reps', label: 'Reps' }
+                ],
+                formFields: [
+                    { key: 'name', label: 'Name', type: 'text', required: true },
+                    { key: 'muscle_group', label: 'Muscle Group', type: 'text', required: true },
+                    { key: 'equipment_type', label: 'Equipment Type', type: 'text', required: true },
+                    { key: 'difficulty', label: 'Difficulty', type: 'select', options: ['beginner','intermediate','advanced'] },
+                    { key: 'default_sets', label: 'Default Sets', type: 'number', required: true },
+                    { key: 'default_reps', label: 'Default Reps', type: 'text', required: true },
+                    { key: 'instructions', label: 'Instructions', type: 'textarea' },
+                    { key: 'video_url', label: 'Video URL', type: 'text' }
+                ]
+            },
+            achievements: {
+                label: 'Achievements',
+                apiPath: '/admin/achievements',
+                searchPlaceholder: 'Search achievements...',
+                manualId: true,
+                columns: [
+                    { key: 'id', label: 'ID' },
+                    { key: 'icon', label: 'Icon' },
+                    { key: 'title', label: 'Title' },
+                    { key: 'category', label: 'Category' },
+                    { key: 'xp_reward', label: 'XP' }
+                ],
+                formFields: [
+                    { key: 'id', label: 'ID (unique key)', type: 'text', required: true, createOnly: true },
+                    { key: 'title', label: 'Title', type: 'text', required: true },
+                    { key: 'icon', label: 'Icon (emoji)', type: 'text', required: true },
+                    { key: 'description', label: 'Description', type: 'textarea', required: true },
+                    { key: 'category', label: 'Category', type: 'text' },
+                    { key: 'xp_reward', label: 'XP Reward', type: 'number' },
+                    { key: 'sort_order', label: 'Sort Order', type: 'number' }
+                ]
+            },
+            challenges: {
+                label: 'Challenges',
+                apiPath: '/admin/challenges',
+                searchPlaceholder: 'Search challenges...',
+                manualId: true,
+                columns: [
+                    { key: 'id', label: 'ID' },
+                    { key: 'icon', label: 'Icon' },
+                    { key: 'name', label: 'Name' },
+                    { key: 'target', label: 'Target' },
+                    { key: 'metric_key', label: 'Metric' },
+                    { key: 'xp_reward', label: 'XP' }
+                ],
+                formFields: [
+                    { key: 'id', label: 'ID (unique key)', type: 'text', required: true, createOnly: true },
+                    { key: 'name', label: 'Name', type: 'text', required: true },
+                    { key: 'icon', label: 'Icon (emoji)', type: 'text', required: true },
+                    { key: 'target', label: 'Target', type: 'number', required: true },
+                    { key: 'metric_key', label: 'Metric Key', type: 'text', required: true },
+                    { key: 'xp_reward', label: 'XP Reward', type: 'number' },
+                    { key: 'category', label: 'Category', type: 'text' }
+                ]
+            },
+            splits: {
+                label: 'Splits',
+                apiPath: '/admin/splits',
+                searchPlaceholder: 'Search splits...',
+                manualId: true,
+                columns: [
+                    { key: 'id', label: 'ID' },
+                    { key: 'name', label: 'Name' },
+                    { key: 'description', label: 'Description' },
+                    { key: 'recommended_for', label: 'Recommended For' }
+                ],
+                formFields: [
+                    { key: 'id', label: 'ID (unique key)', type: 'text', required: true, createOnly: true },
+                    { key: 'name', label: 'Name', type: 'text', required: true },
+                    { key: 'description', label: 'Description', type: 'textarea' },
+                    { key: 'days_pattern', label: 'Days Pattern (JSON)', type: 'textarea', required: true },
+                    { key: 'day_configs', label: 'Day Configs (JSON)', type: 'textarea', required: true },
+                    { key: 'recommended_for', label: 'Recommended For', type: 'text' }
+                ]
+            }
+        };
+
+        const adminContentState = {
+            activeTab: 'users',
+            currentPage: 1,
+            totalPages: 1,
+            searchQuery: '',
+            searchTimeout: null,
+            editingItem: null
+        };
+
+        function setupAdminTabs() {
+            // Tab clicks
+            document.querySelectorAll('.admin-tab').forEach(tab => {
+                tab.addEventListener('click', () => switchAdminTab(tab.dataset.tab));
+            });
+
+            // Content search
+            const contentSearch = document.getElementById('admin-content-search');
+            contentSearch.addEventListener('input', () => {
+                clearTimeout(adminContentState.searchTimeout);
+                adminContentState.searchTimeout = setTimeout(() => {
+                    adminContentState.searchQuery = contentSearch.value.trim();
+                    adminContentState.currentPage = 1;
+                    loadAdminContentTable();
+                }, 350);
+            });
+
+            // Content pagination
+            document.getElementById('admin-content-prev').addEventListener('click', () => {
+                if (adminContentState.currentPage > 1) {
+                    adminContentState.currentPage--;
+                    loadAdminContentTable();
+                }
+            });
+            document.getElementById('admin-content-next').addEventListener('click', () => {
+                if (adminContentState.currentPage < adminContentState.totalPages) {
+                    adminContentState.currentPage++;
+                    loadAdminContentTable();
+                }
+            });
+
+            // Add button
+            document.getElementById('admin-content-add-btn').addEventListener('click', () => {
+                openAdminContentModal(adminContentState.activeTab, null);
+            });
+
+            // Content modal close
+            document.getElementById('admin-content-modal-close').addEventListener('click', closeAdminContentModal);
+            document.getElementById('admin-content-modal-cancel').addEventListener('click', closeAdminContentModal);
+            document.getElementById('admin-content-modal').addEventListener('click', (e) => {
+                if (e.target === e.currentTarget) closeAdminContentModal();
+            });
+
+            // Content form submit
+            document.getElementById('admin-content-form').addEventListener('submit', handleAdminContentSave);
+        }
+
+        function switchAdminTab(tab) {
+            adminContentState.activeTab = tab;
+            adminContentState.currentPage = 1;
+            adminContentState.searchQuery = '';
+
+            // Update tab active states
+            document.querySelectorAll('.admin-tab').forEach(t => {
+                t.classList.toggle('active', t.dataset.tab === tab);
+            });
+
+            // Show/hide content areas
+            const usersPane = document.getElementById('admin-tab-users');
+            const contentPane = document.getElementById('admin-tab-content');
+
+            if (tab === 'users') {
+                usersPane.classList.add('active');
+                contentPane.classList.remove('active');
+            } else {
+                usersPane.classList.remove('active');
+                contentPane.classList.add('active');
+                // Update title + search placeholder
+                const cfg = adminTabConfig[tab];
+                document.getElementById('admin-content-title').textContent = cfg.label;
+                document.getElementById('admin-content-search').value = '';
+                document.getElementById('admin-content-search').placeholder = cfg.searchPlaceholder;
+                // Update create button visibility
+                document.getElementById('admin-create-user-btn').style.display = 'none';
+                loadAdminContentTable();
+            }
+
+            // Show/hide create user button
+            if (tab === 'users') {
+                document.getElementById('admin-create-user-btn').style.display = '';
+            }
+        }
+
+        async function loadAdminContentTable() {
+            const tab = adminContentState.activeTab;
+            const cfg = adminTabConfig[tab];
+            if (!cfg) return;
+
+            const thead = document.getElementById('admin-content-thead');
+            const tbody = document.getElementById('admin-content-tbody');
+
+            // Render header
+            thead.innerHTML = '<tr>' +
+                cfg.columns.map(c => `<th>${escapeHtml(c.label)}</th>`).join('') +
+                '<th>Actions</th></tr>';
+
+            tbody.innerHTML = `<tr><td colspan="${cfg.columns.length + 1}" class="admin-table-empty">Loading...</td></tr>`;
+
+            try {
+                const params = new URLSearchParams({ page: adminContentState.currentPage, limit: 15 });
+                if (adminContentState.searchQuery) params.set('search', adminContentState.searchQuery);
+
+                const res = await apiFetch(cfg.apiPath + '?' + params.toString());
+                if (!res.ok) throw new Error('Failed to load data');
+                const result = await res.json();
+
+                const items = result.data || [];
+                const pagination = result.pagination || {};
+                adminContentState.totalPages = pagination.totalPages || 1;
+
+                // Store items for click handlers
+                window._adminContentItems = {};
+
+                if (items.length === 0) {
+                    tbody.innerHTML = `<tr><td colspan="${cfg.columns.length + 1}" class="admin-table-empty">No items found.</td></tr>`;
+                } else {
+                    tbody.innerHTML = items.map((item, idx) => {
+                        window._adminContentItems[idx] = item;
+                        const cells = cfg.columns.map(c => {
+                            let val = item[c.key];
+                            if (val !== null && val !== undefined && typeof val === 'object') val = JSON.stringify(val);
+                            return `<td>${escapeHtml(String(val ?? ''))}</td>`;
+                        }).join('');
+                        return `<tr data-idx="${idx}" onclick="openAdminContentModal('${tab}', window._adminContentItems[${idx}])" style="cursor:pointer">
+                            ${cells}
+                            <td class="admin-actions-cell" onclick="event.stopPropagation()">
+                                <div class="admin-actions">
+                                    <button class="admin-action-btn admin-btn-edit" onclick="openAdminContentModal('${tab}', window._adminContentItems[${idx}])">Edit</button>
+                                </div>
+                            </td>
+                        </tr>`;
+                    }).join('');
+                }
+
+                // Pagination
+                document.getElementById('admin-content-page-info').textContent = `Page ${adminContentState.currentPage} of ${adminContentState.totalPages}`;
+                document.getElementById('admin-content-prev').disabled = adminContentState.currentPage <= 1;
+                document.getElementById('admin-content-next').disabled = adminContentState.currentPage >= adminContentState.totalPages;
+            } catch (err) {
+                dbg.error('Admin content load error:', err);
+                tbody.innerHTML = `<tr><td colspan="${cfg.columns.length + 1}" class="admin-table-empty">Failed to load data.</td></tr>`;
+            }
+        }
+
+        function openAdminContentModal(tab, item) {
+            const cfg = adminTabConfig[tab];
+            if (!cfg) return;
+
+            adminContentState.editingItem = item;
+            const isEdit = !!item;
+            const modal = document.getElementById('admin-content-modal');
+            const title = document.getElementById('admin-content-modal-title');
+            const fieldsContainer = document.getElementById('admin-content-form-fields');
+            const msg = document.getElementById('admin-content-message');
+
+            title.textContent = isEdit ? `Edit ${cfg.label.replace(/s$/, '')}` : `Create ${cfg.label.replace(/s$/, '')}`;
+            msg.style.display = 'none';
+
+            // Build form fields
+            fieldsContainer.innerHTML = cfg.formFields
+                .filter(f => !isEdit || !f.createOnly)
+                .map(f => {
+                    const val = isEdit ? (item[f.key] ?? '') : '';
+                    const displayVal = (typeof val === 'object' && val !== null) ? JSON.stringify(val, null, 2) : val;
+                    const req = f.required ? 'required' : '';
+                    const disabled = (isEdit && f.createOnly) ? 'disabled' : '';
+
+                    if (f.type === 'textarea') {
+                        return `<div class="admin-form-field">
+                            <label class="admin-form-label">${escapeHtml(f.label)}</label>
+                            <textarea class="admin-form-input" name="${f.key}" rows="3" ${req} ${disabled} style="resize:vertical;min-height:60px">${escapeHtml(String(displayVal))}</textarea>
+                        </div>`;
+                    }
+                    if (f.type === 'select') {
+                        const opts = (f.options || []).map(o =>
+                            `<option value="${o}" ${val === o ? 'selected' : ''}>${o}</option>`
+                        ).join('');
+                        return `<div class="admin-form-field">
+                            <label class="admin-form-label">${escapeHtml(f.label)}</label>
+                            <select class="admin-form-input" name="${f.key}" ${req}><option value="">--</option>${opts}</select>
+                        </div>`;
+                    }
+                    return `<div class="admin-form-field">
+                        <label class="admin-form-label">${escapeHtml(f.label)}</label>
+                        <input class="admin-form-input" type="${f.type}" name="${f.key}" value="${escapeHtml(String(displayVal))}" ${f.step ? `step="${f.step}"` : ''} ${req} ${disabled}>
+                    </div>`;
+                }).join('');
+
+            // Show/hide delete button for edit mode
+            const deleteBtn = document.getElementById('admin-content-delete-btn');
+            if (isEdit) {
+                deleteBtn.style.display = 'block';
+                deleteBtn.onclick = () => adminDeleteContentItem(tab, item.id);
+            } else {
+                deleteBtn.style.display = 'none';
+                deleteBtn.onclick = null;
+            }
+
+            modal.style.display = 'flex';
+        }
+
+        function closeAdminContentModal() {
+            document.getElementById('admin-content-modal').style.display = 'none';
+            adminContentState.editingItem = null;
+        }
+
+        async function handleAdminContentSave(e) {
+            e.preventDefault();
+            const tab = adminContentState.activeTab;
+            const cfg = adminTabConfig[tab];
+            if (!cfg) return;
+
+            const form = document.getElementById('admin-content-form');
+            const msg = document.getElementById('admin-content-message');
+            msg.style.display = 'none';
+
+            const isEdit = !!adminContentState.editingItem;
+            const body = {};
+
+            cfg.formFields.forEach(f => {
+                if (isEdit && f.createOnly) return;
+                const el = form.elements[f.key];
+                if (!el) return;
+                let val = el.value;
+                if (f.type === 'number' && val !== '') val = Number(val);
+                if (val === '' && !f.required) val = null;
+                body[f.key] = val;
+            });
+
+            try {
+                let url = cfg.apiPath;
+                let method = 'POST';
+                if (isEdit) {
+                    url += '/' + adminContentState.editingItem.id;
+                    method = 'PUT';
+                }
+
+                const res = await apiFetch(url, {
+                    method,
+                    body: JSON.stringify(body)
+                });
+
+                if (!res.ok) {
+                    const data = await res.json().catch(() => ({}));
+                    throw new Error((data.error && data.error.message) || data.message || 'Failed to save');
+                }
+
+                msg.textContent = isEdit ? 'Updated successfully!' : 'Created successfully!';
+                msg.className = 'admin-create-message success';
+                msg.style.display = 'block';
+
+                loadAdminContentTable();
+
+                setTimeout(() => closeAdminContentModal(), 800);
+            } catch (err) {
+                dbg.error('Admin content save error:', err);
+                msg.textContent = err.message || 'Failed to save.';
+                msg.className = 'admin-create-message error';
+                msg.style.display = 'block';
+            }
+        }
+
+        async function adminDeleteContentItem(tab, id) {
+            if (!(await showConfirmModal('Are you sure you want to delete this item? This cannot be undone.', { okLabel: 'Delete' }))) return;
+            const cfg = adminTabConfig[tab];
+            if (!cfg) return;
+
+            try {
+                const res = await apiFetch(cfg.apiPath + '/' + id, { method: 'DELETE' });
+                if (!res.ok) {
+                    const data = await res.json().catch(() => ({}));
+                    throw new Error((data.error && data.error.message) || data.message || 'Failed to delete');
+                }
+                closeAdminContentModal();
+                loadAdminContentTable();
+            } catch (err) {
+                dbg.error('Admin content delete error:', err);
+                showToast(err.message, 'error');
+            }
+        }
+
+        // HTML escape helper for admin table
+        function escapeHtml(str) {
+            if (!str) return '';
+            const div = document.createElement('div');
+            div.textContent = str;
+            return div.innerHTML;
+        }
+
+        // ══════════════════════════════════════════════════════════════
+        // WEARABLE FEATURE
+        // ══════════════════════════════════════════════════════════════
+
+        const _wearableMode = new URLSearchParams(location.search).get('wearable') === '1';
+
+        const wearableState = {
+            isRunning: false,
+            steps: 0,
+            calories: 0,
+            hr: null,
+            hrReadings: [],
+            startTime: null,
+            activeSecs: 0,
+            timerInterval: null,
+            motionListener: null,
+            rising: false,
+            lastStepTime: 0,
+        };
+
+        // ── Mobile overlay ────────────────────────────────────────────
+
+        function initWearableOverlay() {
+            const overlay = document.getElementById('wearable-overlay');
+            if (!overlay) return;
+            overlay.style.display = 'flex';
+            document.body.style.overflow = 'hidden';
+
+            // Hide normal app shell
+            const appContainer = document.querySelector('.app-container');
+            if (appContainer) appContainer.style.display = 'none';
+
+            document.getElementById('wo-start-btn').addEventListener('click', _woToggleSession);
+            document.getElementById('wo-hr-btn').addEventListener('click', _woStartHR);
+            document.getElementById('wo-save-btn').addEventListener('click', _woSaveSession);
+            document.getElementById('wo-hr-cancel').addEventListener('click', _woCancelHR);
+
+            _woUpdateUI();
+        }
+
+        async function _woToggleSession() {
+            if (wearableState.isRunning) {
+                _woPause();
+            } else {
+                await _woStart();
+            }
+        }
+
+        async function _woStart() {
+            // iOS 13+ requires a user-gesture-triggered permission call
+            if (typeof DeviceMotionEvent !== 'undefined' &&
+                typeof DeviceMotionEvent.requestPermission === 'function') {
+                try {
+                    const result = await DeviceMotionEvent.requestPermission();
+                    if (result !== 'granted') {
+                        _woSetStatus('Motion permission denied — check iOS Settings > Safari');
+                        return;
+                    }
+                } catch (e) {
+                    _woSetStatus('Could not request motion permission');
+                    return;
+                }
+            }
+
+            wearableState.isRunning = true;
+            if (!wearableState.startTime) wearableState.startTime = Date.now();
+
+            wearableState.motionListener = _woHandleMotion;
+            window.addEventListener('devicemotion', wearableState.motionListener);
+
+            wearableState.timerInterval = setInterval(() => {
+                wearableState.activeSecs++;
+                _woUpdateUI();
+            }, 1000);
+
+            const btn = document.getElementById('wo-start-btn');
+            btn.classList.add('running');
+            btn.querySelector('span').textContent = 'Pause';
+            btn.querySelector('svg').innerHTML = '<rect x="6" y="4" width="4" height="16"/><rect x="14" y="4" width="4" height="16"/>';
+            _woSetStatus('Tracking...');
+        }
+
+        function _woPause() {
+            wearableState.isRunning = false;
+
+            if (wearableState.motionListener) {
+                window.removeEventListener('devicemotion', wearableState.motionListener);
+                wearableState.motionListener = null;
+            }
+            clearInterval(wearableState.timerInterval);
+
+            const btn = document.getElementById('wo-start-btn');
+            btn.classList.remove('running');
+            btn.querySelector('span').textContent = 'Resume';
+            btn.querySelector('svg').innerHTML = '<polygon points="5 3 19 12 5 21 5 3"/>';
+            _woSetStatus('Paused');
+
+            if (wearableState.steps > 0) {
+                document.getElementById('wo-save-btn').style.display = 'flex';
+            }
+        }
+
+        function _woHandleMotion(event) {
+            const a = event.accelerationIncludingGravity;
+            if (!a || a.x === null) return;
+
+            const mag = Math.sqrt((a.x || 0) ** 2 + (a.y || 0) ** 2 + (a.z || 0) ** 2);
+            const THRESHOLD = 13.0;
+            const COOLDOWN_MS = 300;
+
+            if (mag > THRESHOLD && !wearableState.rising) {
+                wearableState.rising = true;
+            } else if (wearableState.rising && mag < THRESHOLD) {
+                wearableState.rising = false;
+                const now = Date.now();
+                if (now - wearableState.lastStepTime > COOLDOWN_MS) {
+                    wearableState.lastStepTime = now;
+                    wearableState.steps++;
+                    // ~0.04 kcal/step, scaled by weight
+                    const weightKg = state.weight || 70;
+                    wearableState.calories = Math.round(wearableState.steps * 0.04 * (weightKg / 70));
+                    _woUpdateUI();
+                }
+            }
+        }
+
+        function _woUpdateUI() {
+            const stepsEl = document.getElementById('wo-steps-display');
+            if (stepsEl) stepsEl.textContent = wearableState.steps.toLocaleString();
+
+            // Step ring (circumference ≈ 534.07)
+            const arc = document.getElementById('wo-ring-arc');
+            if (arc) {
+                const pct = Math.min(wearableState.steps / 10000, 1);
+                arc.style.strokeDashoffset = (534.07 * (1 - pct)).toFixed(2);
+            }
+
+            const calEl = document.getElementById('wo-cal-display');
+            if (calEl) calEl.textContent = wearableState.calories;
+
+            const hrEl = document.getElementById('wo-hr-display');
+            if (hrEl) hrEl.textContent = wearableState.hr ? wearableState.hr : '—';
+
+            const timeEl = document.getElementById('wo-time-display');
+            if (timeEl) {
+                const m = Math.floor(wearableState.activeSecs / 60);
+                const s = wearableState.activeSecs % 60;
+                timeEl.textContent = `${m}:${String(s).padStart(2, '0')}`;
+            }
+        }
+
+        function _woSetStatus(msg) {
+            const el = document.getElementById('wo-status');
+            if (el) el.textContent = msg;
+        }
+
+        // ── HR measurement (camera PPG) ───────────────────────────────
+
+        let _hrStream = null;
+        let _hrFrameInterval = null;
+        let _hrCountdownTimer = null;
+        let _hrSamples = [];
+        let _hrSecondsLeft = 30;
+
+        async function _woStartHR() {
+            // Stop the HR panel if already open
+            if (_hrStream) { _woCancelHR(); return; }
+
+            _woSetStatus('Requesting camera...');
+            try {
+                _hrStream = await navigator.mediaDevices.getUserMedia({
+                    video: { facingMode: 'environment', width: { ideal: 320 }, height: { ideal: 240 } }
+                });
+            } catch (e) {
+                _woSetStatus('Camera access denied');
+                return;
+            }
+
+            // Try to enable rear torch (works on Android; limited on iOS)
+            const track = _hrStream.getVideoTracks()[0];
+            try {
+                await track.applyConstraints({ advanced: [{ torch: true }] });
+            } catch (e) { /* torch not available */ }
+
+            const video = document.getElementById('wo-cam-video');
+            video.srcObject = _hrStream;
+            await video.play();
+
+            const offCanvas = document.createElement('canvas');
+            offCanvas.width = 32;
+            offCanvas.height = 32;
+            const offCtx = offCanvas.getContext('2d');
+
+            _hrSamples = [];
+            _hrSecondsLeft = 30;
+
+            const panel = document.getElementById('wo-hr-panel');
+            panel.style.display = 'flex';
+            document.getElementById('wo-hr-countdown').textContent = '30s';
+            document.getElementById('wo-hr-progress-fill').style.width = '0%';
+
+            _woSetStatus('Measuring heart rate...');
+
+            // Sample red channel at ~30 fps
+            _hrFrameInterval = setInterval(() => {
+                try {
+                    offCtx.drawImage(video, 0, 0, 32, 32);
+                    const px = offCtx.getImageData(0, 0, 32, 32).data;
+                    let r = 0;
+                    for (let i = 0; i < px.length; i += 4) r += px[i];
+                    _hrSamples.push(r / (px.length / 4));
+                } catch (e) { /* frame read error */ }
+            }, 33);
+
+            _hrCountdownTimer = setInterval(() => {
+                _hrSecondsLeft--;
+                document.getElementById('wo-hr-countdown').textContent = `${_hrSecondsLeft}s`;
+                document.getElementById('wo-hr-progress-fill').style.width =
+                    `${((30 - _hrSecondsLeft) / 30) * 100}%`;
+                if (_hrSecondsLeft <= 0) _woFinishHR();
+            }, 1000);
+        }
+
+        function _woFinishHR() {
+            clearInterval(_hrFrameInterval);
+            clearInterval(_hrCountdownTimer);
+            _hrFrameInterval = null;
+            _hrCountdownTimer = null;
+
+            if (_hrStream) {
+                _hrStream.getTracks().forEach(t => t.stop());
+                _hrStream = null;
+            }
+
+            document.getElementById('wo-hr-panel').style.display = 'none';
+
+            if (_hrSamples.length >= 60) {
+                const bpm = _woCalcBPM(_hrSamples);
+                if (bpm >= 40 && bpm <= 200) {
+                    wearableState.hr = bpm;
+                    wearableState.hrReadings.push({ time: Date.now(), bpm });
+                    _woSetStatus(`HR: ${bpm} bpm ✓`);
+                    _woUpdateUI();
+                    if (wearableState.steps > 0 || bpm > 0) {
+                        document.getElementById('wo-save-btn').style.display = 'flex';
+                    }
+                } else {
+                    _woSetStatus('Could not read HR — try again');
+                }
+            } else {
+                _woSetStatus('Too few samples — try again');
+            }
+        }
+
+        function _woCancelHR() {
+            clearInterval(_hrFrameInterval);
+            clearInterval(_hrCountdownTimer);
+            _hrFrameInterval = null;
+            _hrCountdownTimer = null;
+
+            if (_hrStream) {
+                _hrStream.getTracks().forEach(t => t.stop());
+                _hrStream = null;
+            }
+
+            document.getElementById('wo-hr-panel').style.display = 'none';
+            _woSetStatus(wearableState.isRunning ? 'Tracking...' : 'Ready');
+        }
+
+        function _woCalcBPM(samples) {
+            // Moving average smoothing (window = 5)
+            const smooth = [];
+            for (let i = 0; i < samples.length; i++) {
+                let s = 0, c = 0;
+                for (let j = Math.max(0, i - 5); j <= Math.min(samples.length - 1, i + 5); j++) {
+                    s += samples[j]; c++;
+                }
+                smooth.push(s / c);
+            }
+
+            const mean = smooth.reduce((a, b) => a + b) / smooth.length;
+            const peaks = [];
+
+            for (let i = 2; i < smooth.length - 2; i++) {
+                if (smooth[i] > mean &&
+                    smooth[i] > smooth[i - 1] && smooth[i] > smooth[i - 2] &&
+                    smooth[i] > smooth[i + 1] && smooth[i] > smooth[i + 2]) {
+                    if (peaks.length === 0 || i - peaks[peaks.length - 1] > 8) {
+                        peaks.push(i);
+                    }
+                }
+            }
+
+            if (peaks.length < 2) return 0;
+
+            const intervals = [];
+            for (let i = 1; i < peaks.length; i++) {
+                intervals.push(peaks[i] - peaks[i - 1]);
+            }
+            const avgInterval = intervals.reduce((a, b) => a + b) / intervals.length;
+            // Each sample ≈ 33 ms → BPM = 60000 / (avgInterval × 33)
+            return Math.round(60000 / (avgInterval * 33));
+        }
+
+        async function _woSaveSession() {
+            const { steps, calories, hr, hrReadings, activeSecs } = wearableState;
+            if (steps === 0 && !hr) return;
+
+            const sessionData = {
+                steps,
+                calories,
+                hr_avg: hr || null,
+                hr_readings: hrReadings.length > 0 ? hrReadings : undefined,
+                active_secs: activeSecs,
+            };
+
+            // Try backend first
+            let saved = false;
+            if (state.accessToken) {
+                try {
+                    await apiFetch('/wearable/session', {
+                        method: 'POST',
+                        body: JSON.stringify(sessionData)
+                    });
+                    saved = true;
+                } catch (e) { /* fall through to localStorage */ }
+            }
+
+            // Always write to localStorage as backup
+            const key = userKey('fixit-wearable-sessions');
+            const sessions = JSON.parse(localStorage.getItem(key) || '[]');
+            sessions.unshift({
+                ...sessionData,
+                date: new Date().toISOString().split('T')[0],
+                savedAt: Date.now()
+            });
+            if (sessions.length > 50) sessions.pop();
+            localStorage.setItem(key, JSON.stringify(sessions));
+
+            document.getElementById('wo-save-btn').style.display = 'none';
+            const toast = document.getElementById('wo-saved-msg');
+            toast.textContent = saved
+                ? 'Saved! Check the Wearables tab on your computer.'
+                : 'Saved locally. Log in to sync to your account.';
+            toast.style.display = 'block';
+            setTimeout(() => { toast.style.display = 'none'; }, 5000);
+
+            _woResetSession();
+        }
+
+        function _woResetSession() {
+            if (wearableState.motionListener) {
+                window.removeEventListener('devicemotion', wearableState.motionListener);
+            }
+            clearInterval(wearableState.timerInterval);
+
+            Object.assign(wearableState, {
+                isRunning: false,
+                steps: 0,
+                calories: 0,
+                hr: null,
+                hrReadings: [],
+                startTime: null,
+                activeSecs: 0,
+                timerInterval: null,
+                motionListener: null,
+                rising: false,
+                lastStepTime: 0,
+            });
+
+            const btn = document.getElementById('wo-start-btn');
+            btn.classList.remove('running');
+            btn.querySelector('span').textContent = 'Start';
+            btn.querySelector('svg').innerHTML = '<polygon points="5 3 19 12 5 21 5 3"/>';
+            _woSetStatus('Ready');
+            _woUpdateUI();
+        }
+
+        // ── Desktop wearable screen ───────────────────────────────────
+
+        let _wearableScreenInitialized = false;
+
+        async function initWearableScreen() {
+            const origin = location.origin;
+            const isPublicUrl = !origin.includes('localhost') &&
+                                !origin.includes('127.0.0.1') &&
+                                !origin.startsWith('file:');
+
+            if (isPublicUrl) {
+                document.getElementById('wearable-setup-guide').style.display = 'none';
+                const qrSection = document.getElementById('wearable-qr-section');
+                qrSection.style.display = 'flex';
+
+                const wearableUrl = origin + '/index.html?wearable=1';
+                const urlEl = document.getElementById('wearable-qr-url');
+                if (urlEl) urlEl.textContent = wearableUrl;
+
+                if (!_wearableScreenInitialized && window.QRCode) {
+                    const canvas = document.getElementById('wearable-qr-canvas');
+                    try {
+                        await QRCode.toCanvas(canvas, wearableUrl, {
+                            width: 180,
+                            margin: 2,
+                            color: { dark: '#1a1814', light: '#f5f0e8' }
+                        });
+                    } catch (e) { dbg.warn('QR generation failed', e); }
+                }
+
+                if (!_wearableScreenInitialized) {
+                    const copyBtn = document.getElementById('wearable-copy-link');
+                    if (copyBtn) {
+                        copyBtn.addEventListener('click', () => {
+                            navigator.clipboard.writeText(wearableUrl)
+                                .then(() => showToast('Link copied!', 'success'))
+                                .catch(() => showToast('Copy failed — select manually', 'error'));
+                        });
+                    }
+                }
+            }
+
+            const refreshBtn = document.getElementById('wearable-refresh-btn');
+            if (refreshBtn && !_wearableScreenInitialized) {
+                refreshBtn.addEventListener('click', _loadWearableData);
+            }
+
+            _wearableScreenInitialized = true;
+            await _loadWearableData();
+        }
+
+        async function _loadWearableData() {
+            if (state.accessToken) {
+                try {
+                    const [todayData, sessions] = await Promise.all([
+                        apiFetch('/wearable/today'),
+                        apiFetch('/wearable/sessions?limit=14')
+                    ]);
+                    _renderWearableToday(todayData);
+                    _renderWearableSessions(sessions);
+                    return;
+                } catch (e) { /* fall through to localStorage */ }
+            }
+
+            // Fallback: localStorage
+            const key = userKey('fixit-wearable-sessions');
+            const all = JSON.parse(localStorage.getItem(key) || '[]');
+            const today = new Date().toISOString().split('T')[0];
+            const todaySessions = all.filter(s => s.date === today);
+
+            const todaySummary = todaySessions.reduce((acc, s) => ({
+                total_steps: (acc.total_steps || 0) + (s.steps || 0),
+                avg_hr: s.hr_avg || s.hr || acc.avg_hr,
+                total_calories: (acc.total_calories || 0) + (s.calories || 0),
+                total_active_secs: (acc.total_active_secs || 0) + (s.active_secs || s.activeSecs || 0),
+            }), {});
+
+            _renderWearableToday(todaySummary);
+            _renderWearableSessions(all);
+        }
+
+        function _renderWearableToday(data) {
+            if (!data) return;
+            const steps = data.total_steps || 0;
+            const hr = data.avg_hr;
+            const cal = data.total_calories || 0;
+            const activeSecs = data.total_active_secs || 0;
+
+            const el = (id, v) => { const e = document.getElementById(id); if (e) e.textContent = v; };
+            el('today-steps', steps ? steps.toLocaleString() : '—');
+            el('today-hr', hr ? `${hr} bpm` : '—');
+            el('today-calories', cal ? `${cal} cal` : '—');
+            el('today-active', activeSecs ? `${Math.round(activeSecs / 60)} min` : '—');
+
+            const pct = Math.min(steps / 10000, 1);
+            const fillEl = document.getElementById('today-goal-fill');
+            const pctEl = document.getElementById('today-goal-pct');
+            if (fillEl) fillEl.style.width = `${(pct * 100).toFixed(0)}%`;
+            if (pctEl) pctEl.textContent = `${(pct * 100).toFixed(0)}%`;
+        }
+
+        function _renderWearableSessions(sessions) {
+            const list = document.getElementById('wearable-sessions-list');
+            if (!list) return;
+
+            if (!sessions || sessions.length === 0) {
+                list.innerHTML = '<div class="wearable-empty-state">No sessions yet — start tracking on your phone</div>';
+                return;
+            }
+
+            list.innerHTML = sessions.map(s => {
+                const d = new Date((s.date || s.session_date) + 'T00:00:00');
+                const dateStr = d.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' });
+                const steps = s.steps != null ? Number(s.steps).toLocaleString() : '—';
+                const hr = (s.hr_avg || s.hr) ? `${s.hr_avg || s.hr} bpm` : '—';
+                const cal = s.calories ? `${Math.round(s.calories)} cal` : '—';
+                const activeSecs = s.active_secs || s.activeSecs;
+                const active = activeSecs ? `${Math.round(activeSecs / 60)} min` : '—';
+
+                return `<div class="wearable-session-row">
+                    <div class="wearable-session-date">${dateStr}</div>
+                    <div class="wearable-session-stats">
+                        <span class="ws-stat"><strong>${steps}</strong> steps</span>
+                        <span class="ws-stat">${hr}</span>
+                        <span class="ws-stat">${cal}</span>
+                        <span class="ws-stat">${active}</span>
+                    </div>
+                </div>`;
+            }).join('');
+        }
+
+        // Auto-activate wearable overlay on mobile when ?wearable=1
+        if (_wearableMode) {
+            // Wait for DOM to be ready
+            if (document.readyState === 'loading') {
+                document.addEventListener('DOMContentLoaded', initWearableOverlay);
+            } else {
+                initWearableOverlay();
+            }
+        }
+
+        // Initialize app
+        init();
