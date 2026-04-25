@@ -14,7 +14,7 @@ const generalLimiter = rateLimit({
 
 const authLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
-  max: 10 * devMultiplier,
+  max: 30 * devMultiplier,
   standardHeaders: true,
   legacyHeaders: false,
   message: { error: { code: 'RATE_LIMITED', message: 'Too many auth attempts, try again later' } },
