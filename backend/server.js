@@ -126,12 +126,23 @@ app.use(errorHandler);
 
 // ── Auto-migrations (safe to re-run) ──
 async function runMigrations() {
+  // On a fresh database (Railway) the core schema doesn't exist yet — run 001_init.sql first
+  const { rows } = await db.query(
+    "SELECT COUNT(*) FROM information_schema.tables WHERE table_schema='public' AND table_name='users'"
+  );
+  if (parseInt(rows[0].count) === 0) {
+    console.log('[migrations] Fresh database detected — running initial schema...');
+    const initSql = fs.readFileSync(path.join(__dirname, 'database/001_init.sql'), 'utf8');
+    await db.query(initSql);
+    console.log('[migrations] Initial schema created successfully');
+  }
+
   const migrations = [
     'ALTER TABLE users ADD COLUMN IF NOT EXISTS avatar_url TEXT NULL',
 
     `CREATE TABLE IF NOT EXISTS sleep_logs (
       id          SERIAL PRIMARY KEY,
-      user_id     INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      user_id     UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
       sleep_date  DATE NOT NULL,
       hours       NUMERIC(4,2) NOT NULL,
       quality     VARCHAR(20) NOT NULL DEFAULT 'good',
@@ -143,7 +154,7 @@ async function runMigrations() {
 
     `CREATE TABLE IF NOT EXISTS hydration_logs (
       id            SERIAL PRIMARY KEY,
-      user_id       INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      user_id       UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
       log_date      DATE NOT NULL,
       glasses_drunk INTEGER NOT NULL DEFAULT 0,
       updated_at    TIMESTAMPTZ NOT NULL DEFAULT NOW(),
@@ -152,7 +163,7 @@ async function runMigrations() {
 
     `CREATE TABLE IF NOT EXISTS goal_weight (
       id         SERIAL PRIMARY KEY,
-      user_id    INTEGER NOT NULL UNIQUE REFERENCES users(id) ON DELETE CASCADE,
+      user_id    UUID NOT NULL UNIQUE REFERENCES users(id) ON DELETE CASCADE,
       goal_kg    NUMERIC(5,2) NOT NULL,
       start_kg   NUMERIC(5,2),
       set_at     TIMESTAMPTZ NOT NULL DEFAULT NOW(),
@@ -161,7 +172,7 @@ async function runMigrations() {
 
     `CREATE TABLE IF NOT EXISTS weight_log (
       id         SERIAL PRIMARY KEY,
-      user_id    INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      user_id    UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
       log_date   DATE NOT NULL,
       weight_kg  NUMERIC(5,2) NOT NULL,
       created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
@@ -172,7 +183,7 @@ async function runMigrations() {
 
     `CREATE TABLE IF NOT EXISTS measurement_logs (
       id         SERIAL PRIMARY KEY,
-      user_id    INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      user_id    UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
       log_date   DATE NOT NULL,
       chest      NUMERIC(5,2),
       waist      NUMERIC(5,2),
@@ -186,7 +197,7 @@ async function runMigrations() {
 
     `CREATE TABLE IF NOT EXISTS lift_log (
       id            SERIAL PRIMARY KEY,
-      user_id       INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      user_id       UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
       exercise_name VARCHAR(100) NOT NULL,
       log_date      DATE NOT NULL,
       weight_kg     NUMERIC(6,2) NOT NULL,
@@ -201,7 +212,7 @@ async function runMigrations() {
     // Persona tracking table (safety — also in 001_init.sql)
     `CREATE TABLE IF NOT EXISTS user_personas_used (
       id           SERIAL PRIMARY KEY,
-      user_id      INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      user_id      UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
       persona      VARCHAR(50) NOT NULL,
       first_used_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
       UNIQUE(user_id, persona)
@@ -236,7 +247,7 @@ async function runMigrations() {
 
     `CREATE TABLE IF NOT EXISTS wearable_sessions (
       id           SERIAL PRIMARY KEY,
-      user_id      INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      user_id      UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
       session_date DATE NOT NULL,
       steps        INTEGER NOT NULL DEFAULT 0,
       hr_avg       INTEGER,
