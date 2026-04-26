@@ -15588,7 +15588,9 @@ Please try again with a different photo.`;
                     _renderWearableToday(todayData);
                     _renderWearableSessions(sessions);
                     return;
-                } catch (e) { /* fall through to localStorage */ }
+                } catch (e) {
+                    showToast('Could not load wearable data — try logging out and back in', 'error');
+                }
             }
 
             // Fallback: localStorage
