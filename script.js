@@ -15643,8 +15643,9 @@ Please try again with a different photo.`;
             }
 
             list.innerHTML = sessions.map(s => {
-                const d = new Date((s.date || s.session_date) + 'T00:00:00');
-                const dateStr = d.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' });
+                const rawDate = (s.date || s.session_date || '').toString().split('T')[0];
+                const d = new Date(rawDate + 'T00:00:00');
+                const dateStr = !isNaN(d) ? d.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' }) : rawDate;
                 const steps = s.steps != null ? Number(s.steps).toLocaleString() : '—';
                 const hr = (s.hr_avg || s.hr) ? `${s.hr_avg || s.hr} bpm` : '—';
                 const cal = s.calories ? `${Math.round(s.calories)} cal` : '—';
