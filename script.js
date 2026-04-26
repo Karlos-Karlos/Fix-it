@@ -15525,32 +15525,38 @@ Please try again with a different photo.`;
                                 !origin.includes('127.0.0.1') &&
                                 !origin.startsWith('file:');
 
-            if (isPublicUrl) {
-                document.getElementById('wearable-setup-guide').style.display = 'none';
-                const qrSection = document.getElementById('wearable-qr-section');
-                qrSection.style.display = 'flex';
+            if (!_wearableScreenInitialized) {
+                const tabInfo    = document.getElementById('wr-tab-info');
+                const tabQr      = document.getElementById('wr-tab-qr');
+                const panelInfo  = document.getElementById('wearable-setup-guide');
+                const panelQr    = document.getElementById('wearable-qr-section');
 
-                const wearableUrl = origin + '/index.html?wearable=1';
-                const urlEl = document.getElementById('wearable-qr-url');
-                if (urlEl) urlEl.textContent = wearableUrl;
+                const showTab = (tab) => {
+                    const isQr = tab === 'qr';
+                    tabInfo.classList.toggle('wr-tab-active', !isQr);
+                    tabQr.classList.toggle('wr-tab-active', isQr);
+                    if (panelInfo) panelInfo.style.display = isQr ? 'none' : '';
+                    if (panelQr)   panelQr.style.display   = isQr ? 'flex' : 'none';
+                };
 
-                if (!_wearableScreenInitialized) {
-                    const img = document.getElementById('wearable-qr-img');
+                if (tabInfo) tabInfo.addEventListener('click', () => showTab('info'));
+                if (tabQr)   tabQr.addEventListener('click',   () => showTab('qr'));
+
+                if (isPublicUrl) {
+                    const wearableUrl = origin + '/index.html?wearable=1';
+                    const urlEl = document.getElementById('wearable-qr-url');
+                    if (urlEl) urlEl.textContent = wearableUrl;
+
+                    // Pre-load QR image so it's ready when tab is clicked
+                    const img     = document.getElementById('wearable-qr-img');
                     const loading = document.getElementById('wearable-qr-loading');
                     if (img) {
-                        const qrUrl = `https://api.qrserver.com/v1/create-qr-code/?size=180x180&margin=8&data=${encodeURIComponent(wearableUrl)}`;
-                        img.onload = () => {
-                            img.style.display = 'block';
-                            if (loading) loading.style.display = 'none';
-                        };
-                        img.onerror = () => {
-                            if (loading) loading.textContent = 'QR unavailable — use the Copy button below';
-                        };
+                        const qrUrl = `https://api.qrserver.com/v1/create-qr-code/?size=160x160&margin=8&data=${encodeURIComponent(wearableUrl)}`;
+                        img.onload  = () => { img.style.display = 'block'; if (loading) loading.style.display = 'none'; };
+                        img.onerror = () => { if (loading) loading.textContent = 'QR unavailable — use Copy below'; };
                         img.src = qrUrl;
                     }
-                }
 
-                if (!_wearableScreenInitialized) {
                     const copyBtn = document.getElementById('wearable-copy-link');
                     if (copyBtn) {
                         copyBtn.addEventListener('click', () => {
@@ -15559,12 +15565,13 @@ Please try again with a different photo.`;
                                 .catch(() => showToast('Copy failed — select manually', 'error'));
                         });
                     }
+                } else {
+                    // Localhost: disable QR tab
+                    if (tabQr) { tabQr.disabled = true; tabQr.title = 'Available on Railway (HTTPS)'; }
                 }
-            }
 
-            const refreshBtn = document.getElementById('wearable-refresh-btn');
-            if (refreshBtn && !_wearableScreenInitialized) {
-                refreshBtn.addEventListener('click', _loadWearableData);
+                const refreshBtn = document.getElementById('wearable-refresh-btn');
+                if (refreshBtn) refreshBtn.addEventListener('click', _loadWearableData);
             }
 
             const loginLabel = document.getElementById('wearable-logged-in-as');

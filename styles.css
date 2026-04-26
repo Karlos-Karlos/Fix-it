@@ -16390,3 +16390,42 @@
 /* Connect card labels */
 .wr-connect-sub { color: var(--text-secondary); }
 .wr-how-step { color: var(--text-secondary); }
+
+/* ── Wearable connect card tabs ── */
+.wr-tab-bar {
+    display: flex;
+    gap: 4px;
+    background: rgba(255,255,255,0.05);
+    border-radius: 10px;
+    padding: 3px;
+}
+.wr-tab-btn {
+    flex: 1;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 5px;
+    padding: 7px 10px;
+    border-radius: 8px;
+    border: none;
+    background: transparent;
+    color: var(--text-secondary);
+    font-size: 0.78rem;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.18s;
+}
+.wr-tab-btn svg { opacity: 0.7; }
+.wr-tab-btn:hover:not(:disabled) {
+    background: rgba(255,255,255,0.06);
+    color: var(--text-primary);
+}
+.wr-tab-btn.wr-tab-active {
+    background: rgba(201,169,98,0.15);
+    color: #c9a962;
+    border: 1px solid rgba(201,169,98,0.25);
+}
+.wr-tab-btn.wr-tab-active svg { opacity: 1; stroke: #c9a962; }
+.wr-tab-btn:disabled { opacity: 0.35; cursor: not-allowed; }
+
+.wr-tab-panel { display: flex; flex-direction: column; gap: 12px; }

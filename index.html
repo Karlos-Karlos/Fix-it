@@ -3783,30 +3783,45 @@
                     <!-- Right column -->
                     <div class="wr-right-col">
                         <div class="wr-connect-card">
-                            <div id="wearable-setup-guide">
+                            <!-- Tab bar -->
+                            <div class="wr-tab-bar">
+                                <button class="wr-tab-btn wr-tab-active" id="wr-tab-info">
+                                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="13" height="13"><rect x="5" y="2" width="14" height="20" rx="2"/><path d="M12 18h.01"/></svg>
+                                    Connect
+                                </button>
+                                <button class="wr-tab-btn" id="wr-tab-qr">
+                                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="13" height="13"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/><path d="M14 14h3v3h-3zM17 17h3v3h-3zM14 20h3"/></svg>
+                                    QR Code
+                                </button>
+                            </div>
+
+                            <!-- Connect panel (default) -->
+                            <div id="wearable-setup-guide" class="wr-tab-panel">
                                 <div class="wr-phone-icon">
                                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" width="24" height="24"><rect x="5" y="2" width="14" height="20" rx="2"/><path d="M12 18h.01"/></svg>
                                 </div>
                                 <h3 class="wr-connect-h3">Connect Your Phone</h3>
-                                <p class="wr-connect-sub">Deploy to Railway for HTTPS, then scan the QR on your phone (iPhone or Android) to start tracking live.</p>
+                                <p class="wr-connect-sub">Works with iPhone and Android. Open the QR Code tab to scan and start tracking.</p>
                                 <div class="wr-how-steps">
                                     <div class="wr-how-step"><span class="wr-how-num">01</span><span>Get a Railway HTTPS URL</span></div>
-                                    <div class="wr-how-step"><span class="wr-how-num">02</span><span>Open it on your phone</span></div>
-                                    <div class="wr-how-step"><span class="wr-how-num">03</span><span>Steps &amp; HR sync in real time</span></div>
+                                    <div class="wr-how-step"><span class="wr-how-num">02</span><span>Tap <strong>QR Code</strong> tab above</span></div>
+                                    <div class="wr-how-step"><span class="wr-how-num">03</span><span>Scan with your phone &amp; start moving</span></div>
                                 </div>
                             </div>
-                            <div id="wearable-qr-section" style="display:none" class="wr-qr-section">
-                                <h3 class="wr-connect-h3">Scan with Your Phone</h3>
+
+                            <!-- QR panel (shown on tab click) -->
+                            <div id="wearable-qr-section" style="display:none" class="wr-tab-panel wr-qr-section">
                                 <div class="wr-qr-frame">
                                     <img id="wearable-qr-img" src="" alt="QR Code" width="160" height="160" style="display:none; border-radius:6px;">
                                     <div id="wearable-qr-loading" class="wr-qr-loading">Generating...</div>
                                 </div>
-                                <p class="wr-qr-hint">Opens the live tracker on your phone</p>
+                                <p class="wr-qr-hint">Scan to open the live tracker on your phone</p>
                                 <div class="wr-url-row">
                                     <span class="wr-url-text" id="wearable-qr-url"></span>
                                     <button class="wr-copy-btn" id="wearable-copy-link">Copy</button>
                                 </div>
                             </div>
+
                             <div class="wr-live-pill">
                                 <span class="wr-live-dot"></span> Live &middot; syncs every 60s
                             </div>
