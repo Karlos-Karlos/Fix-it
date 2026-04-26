@@ -16435,3 +16435,18 @@
 .wr-srow-date { color: var(--text-primary); font-weight: 600; }
 .wr-sessions-cols-hdr span { color: var(--text-secondary); }
 .wr-qr-hint { color: var(--text-secondary); }
+
+/* ── Wearable back button ── */
+.wr-header-left { display: flex; align-items: center; gap: 12px; }
+.wr-back-btn {
+    width: 36px; height: 36px;
+    display: flex; align-items: center; justify-content: center;
+    background: rgba(255,255,255,0.06);
+    border: 1px solid rgba(255,255,255,0.1);
+    border-radius: 10px;
+    cursor: pointer;
+    color: var(--text-primary);
+    flex-shrink: 0;
+    transition: background 0.18s;
+}
+.wr-back-btn:hover { background: rgba(255,255,255,0.12); }
