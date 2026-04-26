@@ -16429,3 +16429,9 @@
 .wr-tab-btn:disabled { opacity: 0.35; cursor: not-allowed; }
 
 .wr-tab-panel { display: flex; flex-direction: column; gap: 12px; }
+
+/* ── Wearable visibility fixes ── */
+.wr-url-text { color: var(--text-secondary); font-size: 0.72rem; }
+.wr-srow-date { color: var(--text-primary); font-weight: 600; }
+.wr-sessions-cols-hdr span { color: var(--text-secondary); }
+.wr-qr-hint { color: var(--text-secondary); }
