@@ -15530,7 +15530,7 @@ Please try again with a different photo.`;
             await _loadWearableData();
 
             if (!_wearablePollInterval) {
-                _wearablePollInterval = setInterval(_loadWearableData, 30000);
+                _wearablePollInterval = setInterval(_loadWearableData, 60000);
             }
         }
 

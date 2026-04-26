@@ -6,7 +6,7 @@ const devMultiplier = isDev ? 10 : 1;
 
 const generalLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
-  max: 100 * devMultiplier,
+  max: 300 * devMultiplier,
   standardHeaders: true,
   legacyHeaders: false,
   message: { error: { code: 'RATE_LIMITED', message: 'Too many requests, try again later' } },
