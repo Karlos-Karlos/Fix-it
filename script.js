@@ -15567,6 +15567,9 @@ Please try again with a different photo.`;
                 refreshBtn.addEventListener('click', _loadWearableData);
             }
 
+            const loginLabel = document.getElementById('wearable-logged-in-as');
+            if (loginLabel && state.user) loginLabel.textContent = `Logged in as: ${state.user.email}`;
+
             _wearableScreenInitialized = true;
             await _loadWearableData();
 
