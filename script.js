@@ -15634,17 +15634,15 @@ Please try again with a different photo.`;
             if (fillEl) fillEl.style.width = `${(pct * 100).toFixed(0)}%`;
             if (pctEl) pctEl.textContent = `${(pct * 100).toFixed(0)}%`;
 
-            // Animate ring
-            const CIRCUMFERENCE = 565.49;
+            // Animate ring (r=88, cx=cy=120, circumference=552.92)
+            const CIRCUMFERENCE = 552.92;
             const arc = document.getElementById('wr-ring-fill');
             const dot = document.getElementById('wr-ring-dot');
             if (arc) arc.style.strokeDashoffset = (CIRCUMFERENCE * (1 - pct)).toFixed(2);
-            if (dot && steps > 0) {
+            if (dot) {
                 const angle = pct * 2 * Math.PI;
-                const cx = (110 + 90 * Math.sin(angle)).toFixed(2);
-                const cy = (110 - 90 * Math.cos(angle)).toFixed(2);
-                dot.setAttribute('cx', cx);
-                dot.setAttribute('cy', cy);
+                dot.setAttribute('cx', (120 + 88 * Math.sin(angle)).toFixed(2));
+                dot.setAttribute('cy', (120 - 88 * Math.cos(angle)).toFixed(2));
             }
         }
 
