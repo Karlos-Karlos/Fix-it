@@ -15572,6 +15572,67 @@ Please try again with a different photo.`;
 
                 const refreshBtn = document.getElementById('wearable-refresh-btn');
                 if (refreshBtn) refreshBtn.addEventListener('click', _loadWearableData);
+
+                // ── Daily goal editor ──────────────────────────────────
+                const editBtn    = document.getElementById('wr-goal-edit-btn');
+                const editor     = document.getElementById('wr-goal-editor');
+                const goalInput  = document.getElementById('wr-goal-input');
+                const goalUnit   = document.getElementById('wr-goal-unit');
+                const saveBtn    = document.getElementById('wr-goal-save-btn');
+                const cancelBtn  = document.getElementById('wr-goal-cancel-btn');
+                const gtypeBtns  = document.querySelectorAll('.wr-gtype-btn');
+
+                let _goalType = 'steps';
+
+                const _getGoalSteps = () => parseInt(localStorage.getItem('fixit-wearable-daily-goal')) || 10000;
+                const _updateGoalDisplay = () => {
+                    const g = _getGoalSteps();
+                    const el = document.getElementById('wr-goal-display');
+                    if (el) el.textContent = `${g.toLocaleString()} steps (${(g * 0.00076).toFixed(1)} km)`;
+                };
+                _updateGoalDisplay();
+
+                gtypeBtns.forEach(btn => btn.addEventListener('click', () => {
+                    _goalType = btn.dataset.type;
+                    gtypeBtns.forEach(b => b.classList.toggle('wr-gtype-active', b === btn));
+                    const currentSteps = _getGoalSteps();
+                    if (_goalType === 'km') {
+                        goalInput.value = (currentSteps * 0.00076).toFixed(1);
+                        goalInput.step  = '0.5';
+                        goalInput.min   = '0.1';
+                        goalInput.max   = '150';
+                        if (goalUnit) goalUnit.textContent = 'km';
+                    } else {
+                        goalInput.value = currentSteps;
+                        goalInput.step  = '500';
+                        goalInput.min   = '100';
+                        goalInput.max   = '200000';
+                        if (goalUnit) goalUnit.textContent = 'steps';
+                    }
+                }));
+
+                if (editBtn) editBtn.addEventListener('click', () => {
+                    goalInput.value = _getGoalSteps();
+                    _goalType = 'steps';
+                    gtypeBtns.forEach(b => b.classList.toggle('wr-gtype-active', b.dataset.type === 'steps'));
+                    if (goalUnit) goalUnit.textContent = 'steps';
+                    if (editor) editor.style.display = 'flex';
+                });
+
+                if (saveBtn) saveBtn.addEventListener('click', () => {
+                    const raw = parseFloat(goalInput.value);
+                    if (!raw || raw <= 0) return;
+                    const steps = _goalType === 'km' ? Math.round(raw / 0.00076) : Math.round(raw);
+                    localStorage.setItem('fixit-wearable-daily-goal', steps);
+                    _updateGoalDisplay();
+                    if (editor) editor.style.display = 'none';
+                    _loadWearableData();
+                    showToast(`Daily goal set to ${steps.toLocaleString()} steps`, 'success');
+                });
+
+                if (cancelBtn) cancelBtn.addEventListener('click', () => {
+                    if (editor) editor.style.display = 'none';
+                });
             }
 
             const loginLabel = document.getElementById('wearable-logged-in-as');
@@ -15635,7 +15696,8 @@ Please try again with a different photo.`;
             el('today-calories', cal ? `${cal}` : '—');
             el('today-active', activeSecs ? `${Math.round(activeSecs / 60)}` : '—');
 
-            const pct = Math.min(steps / 10000, 1);
+            const GOAL = parseInt(localStorage.getItem('fixit-wearable-daily-goal')) || 10000;
+            const pct = Math.min(steps / GOAL, 1);
             const fillEl = document.getElementById('today-goal-fill');
             const pctEl = document.getElementById('today-goal-pct');
             if (fillEl) fillEl.style.width = `${(pct * 100).toFixed(0)}%`;

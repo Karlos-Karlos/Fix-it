@@ -16450,3 +16450,56 @@
     transition: background 0.18s;
 }
 .wr-back-btn:hover { background: rgba(255,255,255,0.12); }
+
+/* ── Goal editor ── */
+.wr-goal-meta { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.wr-goal-edit-btn {
+    display: inline-flex; align-items: center; gap: 4px;
+    padding: 3px 8px; margin-left: 2px;
+    background: rgba(201,169,98,0.1); border: 1px solid rgba(201,169,98,0.22);
+    border-radius: 6px; color: #c9a962; font-size: 0.7rem; font-weight: 600;
+    cursor: pointer; transition: background 0.15s;
+}
+.wr-goal-edit-btn:hover { background: rgba(201,169,98,0.2); }
+
+.wr-goal-editor {
+    display: none; flex-direction: column; gap: 10px;
+    background: rgba(255,255,255,0.04);
+    border: 1px solid rgba(201,169,98,0.2);
+    border-radius: 12px; padding: 14px;
+}
+.wr-goal-type-row { display: flex; gap: 6px; }
+.wr-gtype-btn {
+    flex: 1; padding: 6px; border-radius: 7px;
+    background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.08);
+    color: var(--text-secondary); font-size: 0.78rem; font-weight: 600;
+    cursor: pointer; transition: all 0.15s;
+}
+.wr-gtype-btn.wr-gtype-active {
+    background: rgba(201,169,98,0.15); border-color: rgba(201,169,98,0.35);
+    color: #c9a962;
+}
+.wr-goal-input-row { display: flex; align-items: center; gap: 8px; }
+.wr-goal-input {
+    flex: 1; min-width: 0;
+    background: rgba(255,255,255,0.06); border: 1px solid rgba(255,255,255,0.12);
+    border-radius: 8px; padding: 7px 10px;
+    color: var(--text-primary); font-size: 0.9rem; font-weight: 700;
+    outline: none;
+}
+.wr-goal-input:focus { border-color: rgba(201,169,98,0.5); }
+.wr-goal-unit { font-size: 0.75rem; color: var(--text-secondary); white-space: nowrap; }
+.wr-goal-save-btn {
+    padding: 7px 14px; border-radius: 8px;
+    background: rgba(201,169,98,0.18); border: 1px solid rgba(201,169,98,0.35);
+    color: #c9a962; font-size: 0.78rem; font-weight: 700;
+    cursor: pointer; transition: background 0.15s; white-space: nowrap;
+}
+.wr-goal-save-btn:hover { background: rgba(201,169,98,0.28); }
+.wr-goal-cancel-btn {
+    padding: 7px 10px; border-radius: 8px;
+    background: transparent; border: 1px solid rgba(255,255,255,0.1);
+    color: var(--text-secondary); font-size: 0.78rem;
+    cursor: pointer; transition: background 0.15s;
+}
+.wr-goal-cancel-btn:hover { background: rgba(255,255,255,0.06); }

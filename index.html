@@ -3776,9 +3776,28 @@
 
                         <div class="wr-goal-wrap">
                             <div class="wr-goal-meta">
-                                <span>Daily goal &mdash; 10,000 steps</span>
+                                <span>Daily goal — <span id="wr-goal-display">10,000 steps</span></span>
+                                <button class="wr-goal-edit-btn" id="wr-goal-edit-btn" title="Change goal">
+                                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="12" height="12"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
+                                    Edit
+                                </button>
                                 <span class="wr-goal-pct" id="today-goal-pct">0%</span>
                             </div>
+
+                            <!-- Inline goal editor -->
+                            <div class="wr-goal-editor" id="wr-goal-editor" style="display:none">
+                                <div class="wr-goal-type-row">
+                                    <button class="wr-gtype-btn wr-gtype-active" data-type="steps">Steps</button>
+                                    <button class="wr-gtype-btn" data-type="km">Distance (km)</button>
+                                </div>
+                                <div class="wr-goal-input-row">
+                                    <input type="number" id="wr-goal-input" class="wr-goal-input" placeholder="10000" min="100" max="200000" step="500">
+                                    <span class="wr-goal-unit" id="wr-goal-unit">steps</span>
+                                    <button class="wr-goal-save-btn" id="wr-goal-save-btn">Save</button>
+                                    <button class="wr-goal-cancel-btn" id="wr-goal-cancel-btn">Cancel</button>
+                                </div>
+                            </div>
+
                             <div class="wr-goal-track">
                                 <div class="wr-goal-fill" id="today-goal-fill"></div>
                             </div>
