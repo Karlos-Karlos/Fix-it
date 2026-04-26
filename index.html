@@ -3696,102 +3696,180 @@
 
         <!-- Screen 9: Wearables -->
         <section class="screen" id="screen-wearable">
-            <div class="wearable-scr">
-                <div class="wearable-scr-header">
+            <div class="wr-page">
+
+                <!-- Header -->
+                <div class="wr-header">
                     <div>
-                        <h1>Wearables</h1>
-                        <p class="wearable-scr-sub">Connect your iPhone to track steps, heart rate &amp; calories live</p>
-                        <p id="wearable-logged-in-as" style="font-size:0.75rem;opacity:0.5;margin-top:2px;"></p>
+                        <h1 class="wr-title">Activity Hub</h1>
+                        <p id="wearable-logged-in-as" class="wr-account-label"></p>
+                    </div>
+                    <button class="wr-sync-btn" id="wearable-refresh-btn">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" width="13" height="13"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg>
+                        Sync
+                    </button>
+                </div>
+
+                <!-- Main grid: ring + right column -->
+                <div class="wr-grid">
+
+                    <!-- Activity Ring Card -->
+                    <div class="wr-ring-card">
+                        <div class="wr-ring-area">
+                            <!-- Ring SVG -->
+                            <div class="wr-ring-wrap">
+                                <svg class="wr-ring-svg" viewBox="0 0 220 220" xmlns="http://www.w3.org/2000/svg">
+                                    <defs>
+                                        <linearGradient id="wr-grad" x1="0%" y1="0%" x2="100%" y2="100%">
+                                            <stop offset="0%" stop-color="#c9a962"/>
+                                            <stop offset="55%" stop-color="#b87351"/>
+                                            <stop offset="100%" stop-color="#7d9a78"/>
+                                        </linearGradient>
+                                        <filter id="wr-glow" x="-25%" y="-25%" width="150%" height="150%">
+                                            <feGaussianBlur in="SourceGraphic" stdDeviation="4" result="blur"/>
+                                            <feMerge><feMergeNode in="blur"/><feMergeNode in="SourceGraphic"/></feMerge>
+                                        </filter>
+                                    </defs>
+                                    <!-- Subtle outer ring decoration -->
+                                    <circle cx="110" cy="110" r="104" fill="none" stroke="rgba(255,255,255,0.03)" stroke-width="1"/>
+                                    <!-- Track -->
+                                    <circle class="wr-track" cx="110" cy="110" r="90"/>
+                                    <!-- Progress arc -->
+                                    <circle class="wr-arc" id="wr-ring-fill"
+                                        cx="110" cy="110" r="90"
+                                        stroke="url(#wr-grad)"
+                                        filter="url(#wr-glow)"
+                                        stroke-dasharray="565.49"
+                                        stroke-dashoffset="565.49"
+                                        transform="rotate(-90 110 110)"/>
+                                    <!-- Leading dot -->
+                                    <circle class="wr-dot" id="wr-ring-dot" cx="110" cy="20" r="6"/>
+                                </svg>
+                                <!-- Center text -->
+                                <div class="wr-ring-center">
+                                    <div class="wr-steps-big" id="today-steps">—</div>
+                                    <div class="wr-steps-lbl">steps</div>
+                                    <div class="wr-distance-val" id="today-distance">— km</div>
+                                </div>
+                            </div>
+
+                            <!-- Stats beside ring -->
+                            <div class="wr-ring-aside">
+                                <div class="wr-aside-stat">
+                                    <div class="wr-aside-icon wr-icon-cal">
+                                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" width="16" height="16"><path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z"/></svg>
+                                    </div>
+                                    <div>
+                                        <div class="wr-aside-val" id="today-calories">—</div>
+                                        <div class="wr-aside-lbl">kcal burned</div>
+                                    </div>
+                                </div>
+                                <div class="wr-aside-stat">
+                                    <div class="wr-aside-icon wr-icon-time">
+                                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" width="16" height="16"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
+                                    </div>
+                                    <div>
+                                        <div class="wr-aside-val" id="today-active">—</div>
+                                        <div class="wr-aside-lbl">active minutes</div>
+                                    </div>
+                                </div>
+                                <div class="wr-aside-stat">
+                                    <div class="wr-aside-icon wr-icon-hr">
+                                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" width="16" height="16"><path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z"/></svg>
+                                    </div>
+                                    <div>
+                                        <div class="wr-aside-val" id="today-hr">—</div>
+                                        <div class="wr-aside-lbl">avg heart rate</div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Goal bar -->
+                        <div class="wr-goal-wrap">
+                            <div class="wr-goal-meta">
+                                <span>Daily step goal</span>
+                                <span>10,000 steps</span>
+                                <span class="wr-goal-pct" id="today-goal-pct">0%</span>
+                            </div>
+                            <div class="wr-goal-track">
+                                <div class="wr-goal-fill" id="today-goal-fill"></div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Right column -->
+                    <div class="wr-right-col">
+
+                        <!-- Connect / QR card -->
+                        <div class="wr-connect-card">
+                            <!-- Localhost: setup guide -->
+                            <div id="wearable-setup-guide">
+                                <div class="wr-phone-icon">
+                                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" width="26" height="26"><rect x="5" y="2" width="14" height="20" rx="2"/><path d="M12 18h.01"/></svg>
+                                </div>
+                                <h3 class="wr-connect-h3">Connect Your Phone</h3>
+                                <p class="wr-connect-sub">Deploy to Railway for HTTPS, then scan the QR code on your iPhone to start tracking</p>
+                                <div class="wr-how-steps">
+                                    <div class="wr-how-step"><div class="wr-how-num">01</div><div>Deploy to Railway for HTTPS access</div></div>
+                                    <div class="wr-how-step"><div class="wr-how-num">02</div><div>Open the Railway URL on your phone</div></div>
+                                    <div class="wr-how-step"><div class="wr-how-num">03</div><div>Steps &amp; heart rate sync live</div></div>
+                                </div>
+                            </div>
+
+                            <!-- Remote: QR code -->
+                            <div id="wearable-qr-section" style="display:none" class="wr-qr-section">
+                                <h3 class="wr-connect-h3">Scan with Your iPhone</h3>
+                                <div class="wr-qr-frame">
+                                    <img id="wearable-qr-img" src="" alt="QR Code" width="160" height="160" style="display:none; border-radius:6px;">
+                                    <div id="wearable-qr-loading" class="wr-qr-loading">Generating...</div>
+                                </div>
+                                <p class="wr-qr-hint">Opens the live tracker on your phone</p>
+                                <div class="wr-url-row">
+                                    <span class="wr-url-text" id="wearable-qr-url"></span>
+                                    <button class="wr-copy-btn" id="wearable-copy-link">Copy</button>
+                                </div>
+                            </div>
+
+                            <div class="wr-live-pill">
+                                <span class="wr-live-dot"></span> Live · syncs every 60s
+                            </div>
+                        </div>
+
+                        <!-- Tip card -->
+                        <div class="wr-tip-card">
+                            <div class="wr-tip-icon">
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" width="18" height="18"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
+                            </div>
+                            <div>
+                                <div class="wr-tip-title">Quick fact</div>
+                                <div class="wr-tip-body">Every 1,000 steps covers roughly 0.76 km and burns around 40–50 kcal depending on your weight.</div>
+                            </div>
+                        </div>
+
                     </div>
                 </div>
 
-                <div class="wearable-scr-grid">
-                    <!-- Connect / QR card -->
-                    <div class="glass-card wearable-connect-card">
-                        <!-- State: localhost — show setup guide -->
-                        <div id="wearable-setup-guide">
-                            <div class="wearable-card-icon">
-                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" width="36" height="36"><rect x="5" y="2" width="14" height="20" rx="2"/><path d="M12 18h.01"/></svg>
-                            </div>
-                            <h3>Connect Your Phone</h3>
-                            <p class="wearable-guide-sub">Expose your server with ngrok to get a phone-accessible HTTPS link</p>
-                            <div class="wearable-steps-list">
-                                <div class="wearable-step-item">
-                                    <div class="wearable-step-num">1</div>
-                                    <div class="wearable-step-body">Install ngrok: <code>npm install -g ngrok</code></div>
-                                </div>
-                                <div class="wearable-step-item">
-                                    <div class="wearable-step-num">2</div>
-                                    <div class="wearable-step-body">Run: <code>ngrok http 3000</code></div>
-                                </div>
-                                <div class="wearable-step-item">
-                                    <div class="wearable-step-num">3</div>
-                                    <div class="wearable-step-body">Open the HTTPS URL it gives you in this browser</div>
-                                </div>
-                            </div>
-                            <p class="wearable-guide-hint">A QR code will appear here automatically once you're on ngrok</p>
-                        </div>
-
-                        <!-- State: ngrok/remote — show QR code -->
-                        <div id="wearable-qr-section" style="display:none">
-                            <h3>Scan with Your iPhone</h3>
-                            <div class="wearable-qr-wrap">
-                                <img id="wearable-qr-img" src="" alt="QR Code" width="180" height="180" style="display:none; border-radius:8px;">
-                                <div id="wearable-qr-loading" style="width:180px;height:180px;display:flex;align-items:center;justify-content:center;color:#8a8578;font-size:0.85rem;">Generating...</div>
-                            </div>
-                            <p class="wearable-guide-hint">Opens the wearable tracker on your phone</p>
-                            <div class="wearable-qr-url-row">
-                                <span class="wearable-qr-url-text" id="wearable-qr-url"></span>
-                                <button class="wearable-copy-btn" id="wearable-copy-link">Copy</button>
-                            </div>
-                        </div>
+                <!-- Recent Sessions -->
+                <div class="wr-sessions">
+                    <div class="wr-sessions-head">
+                        <h3 class="wr-sessions-title">Recent Sessions</h3>
+                        <span class="wr-sessions-sub">Last 14 recorded</span>
                     </div>
-
-                    <!-- Today's activity card -->
-                    <div class="glass-card wearable-today-card">
-                        <h3>Today's Activity</h3>
-                        <div class="wearable-today-grid">
-                            <div class="wearable-today-stat">
-                                <div class="wearable-today-val" id="today-steps">—</div>
-                                <div class="wearable-today-lbl">Steps</div>
-                            </div>
-                            <div class="wearable-today-stat">
-                                <div class="wearable-today-val" id="today-hr">—</div>
-                                <div class="wearable-today-lbl">Avg HR</div>
-                            </div>
-                            <div class="wearable-today-stat">
-                                <div class="wearable-today-val" id="today-calories">—</div>
-                                <div class="wearable-today-lbl">Calories</div>
-                            </div>
-                            <div class="wearable-today-stat">
-                                <div class="wearable-today-val" id="today-active">—</div>
-                                <div class="wearable-today-lbl">Active Min</div>
-                            </div>
-                        </div>
-                        <div class="wearable-goal-section">
-                            <div class="wearable-goal-bar-label">
-                                <span>Daily Step Goal</span>
-                                <span id="today-goal-pct">0%</span>
-                            </div>
-                            <div class="wearable-goal-track">
-                                <div class="wearable-goal-fill" id="today-goal-fill"></div>
-                            </div>
-                            <div class="wearable-goal-caption">Goal: 10,000 steps</div>
-                        </div>
-                        <button class="wearable-refresh-btn" id="wearable-refresh-btn">
-                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="14" height="14"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg>
-                            Refresh
-                        </button>
+                    <!-- Column labels -->
+                    <div class="wr-sessions-cols">
+                        <span>Date</span>
+                        <span>Steps</span>
+                        <span>Distance</span>
+                        <span>Calories</span>
+                        <span>Active</span>
+                        <span>Heart Rate</span>
+                    </div>
+                    <div id="wearable-sessions-list" class="wr-sessions-body">
+                        <div class="wr-empty">No sessions yet — start tracking on your phone</div>
                     </div>
                 </div>
 
-                <!-- Recent sessions -->
-                <div class="glass-card wearable-sessions-card">
-                    <h3>Recent Sessions</h3>
-                    <div id="wearable-sessions-list">
-                        <div class="wearable-empty-state">No sessions yet — start tracking on your phone</div>
-                    </div>
-                </div>
             </div>
         </section>
 

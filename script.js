@@ -15619,18 +15619,33 @@ Please try again with a different photo.`;
             const hr = data.avg_hr;
             const cal = data.total_calories || 0;
             const activeSecs = data.total_active_secs || 0;
+            const distKm = (steps * 0.00076).toFixed(2);
 
             const el = (id, v) => { const e = document.getElementById(id); if (e) e.textContent = v; };
             el('today-steps', steps ? steps.toLocaleString() : '—');
-            el('today-hr', hr ? `${hr} bpm` : '—');
-            el('today-calories', cal ? `${cal} cal` : '—');
-            el('today-active', activeSecs ? `${Math.round(activeSecs / 60)} min` : '—');
+            el('today-distance', steps ? `${distKm} km` : '— km');
+            el('today-hr', hr ? `${hr}` : '—');
+            el('today-calories', cal ? `${cal}` : '—');
+            el('today-active', activeSecs ? `${Math.round(activeSecs / 60)}` : '—');
 
             const pct = Math.min(steps / 10000, 1);
             const fillEl = document.getElementById('today-goal-fill');
             const pctEl = document.getElementById('today-goal-pct');
             if (fillEl) fillEl.style.width = `${(pct * 100).toFixed(0)}%`;
             if (pctEl) pctEl.textContent = `${(pct * 100).toFixed(0)}%`;
+
+            // Animate ring
+            const CIRCUMFERENCE = 565.49;
+            const arc = document.getElementById('wr-ring-fill');
+            const dot = document.getElementById('wr-ring-dot');
+            if (arc) arc.style.strokeDashoffset = (CIRCUMFERENCE * (1 - pct)).toFixed(2);
+            if (dot && steps > 0) {
+                const angle = pct * 2 * Math.PI;
+                const cx = (110 + 90 * Math.sin(angle)).toFixed(2);
+                const cy = (110 - 90 * Math.cos(angle)).toFixed(2);
+                dot.setAttribute('cx', cx);
+                dot.setAttribute('cy', cy);
+            }
         }
 
         function _renderWearableSessions(sessions) {
@@ -15638,7 +15653,7 @@ Please try again with a different photo.`;
             if (!list) return;
 
             if (!sessions || sessions.length === 0) {
-                list.innerHTML = '<div class="wearable-empty-state">No sessions yet — start tracking on your phone</div>';
+                list.innerHTML = '<div class="wr-empty">No sessions yet — start tracking on your phone</div>';
                 return;
             }
 
@@ -15646,20 +15661,21 @@ Please try again with a different photo.`;
                 const rawDate = (s.date || s.session_date || '').toString().split('T')[0];
                 const d = new Date(rawDate + 'T00:00:00');
                 const dateStr = !isNaN(d) ? d.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' }) : rawDate;
-                const steps = s.steps != null ? Number(s.steps).toLocaleString() : '—';
+                const stepsNum = s.steps != null ? Number(s.steps) : 0;
+                const steps = stepsNum ? stepsNum.toLocaleString() : '—';
+                const dist = stepsNum ? `${(stepsNum * 0.00076).toFixed(2)} km` : '—';
                 const hr = (s.hr_avg || s.hr) ? `${s.hr_avg || s.hr} bpm` : '—';
-                const cal = s.calories ? `${Math.round(s.calories)} cal` : '—';
+                const cal = s.calories ? `${Math.round(s.calories)} kcal` : '—';
                 const activeSecs = s.active_secs || s.activeSecs;
                 const active = activeSecs ? `${Math.round(activeSecs / 60)} min` : '—';
 
-                return `<div class="wearable-session-row">
-                    <div class="wearable-session-date">${dateStr}</div>
-                    <div class="wearable-session-stats">
-                        <span class="ws-stat"><strong>${steps}</strong> steps</span>
-                        <span class="ws-stat">${hr}</span>
-                        <span class="ws-stat">${cal}</span>
-                        <span class="ws-stat">${active}</span>
-                    </div>
+                return `<div class="wr-session-row">
+                    <div class="wr-srow-date">${dateStr}</div>
+                    <div class="wr-srow-steps">${steps}</div>
+                    <div class="wr-srow-dist">${dist}</div>
+                    <div class="wr-srow-chip">${cal}</div>
+                    <div class="wr-srow-chip">${active}</div>
+                    <div class="wr-srow-chip wr-srow-hr">${hr}</div>
                 </div>`;
             }).join('');
         }
