@@ -2752,6 +2752,12 @@
                 workoutPlayerState.isPlaying = false;
             }
 
+            // Cleanup: stop wearable auto-refresh when leaving wearable screen
+            if (state.currentScreen === 9 && num !== 9 && _wearablePollInterval) {
+                clearInterval(_wearablePollInterval);
+                _wearablePollInterval = null;
+            }
+
             // Hide all screens
             Object.values(screens).forEach(s => s.classList.remove('active'));
 
@@ -15470,6 +15476,7 @@ Please try again with a different photo.`;
         // ── Desktop wearable screen ───────────────────────────────────
 
         let _wearableScreenInitialized = false;
+        let _wearablePollInterval = null;
 
         async function initWearableScreen() {
             const origin = location.origin;
@@ -15521,6 +15528,10 @@ Please try again with a different photo.`;
 
             _wearableScreenInitialized = true;
             await _loadWearableData();
+
+            if (!_wearablePollInterval) {
+                _wearablePollInterval = setInterval(_loadWearableData, 30000);
+            }
         }
 
         async function _loadWearableData() {
