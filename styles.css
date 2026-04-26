@@ -16503,3 +16503,24 @@
     cursor: pointer; transition: background 0.15s;
 }
 .wr-goal-cancel-btn:hover { background: rgba(255,255,255,0.06); }
+
+/* ── Wearable back btn — matches admin-back-pill style ── */
+.wr-back-btn {
+    width: 36px;
+    height: 36px;
+    border-radius: 50%;
+    border: 1px solid var(--border-subtle);
+    background: var(--bg-card);
+    color: var(--text-tertiary);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    transition: all 0.2s ease;
+    flex-shrink: 0;
+}
+.wr-back-btn:hover {
+    border-color: var(--accent-primary);
+    color: var(--accent-primary);
+    background: var(--accent-primary-subtle);
+}
