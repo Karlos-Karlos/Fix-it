@@ -2386,35 +2386,36 @@
             // to the neural net when coachModel is non-null, so the coach works fully
             // without the model trained.
 
-            setupUpload();
-            setupCamera();
-            setupNavigation();
-            setupResults();
-            setupBreakdown();
-            setupSimulator();
-            setupWorkout();
-            setupNutrition();
-            setupGenderConfirmation();
-            setupCoach();
-            setupProgress();
-            setupAdmin();
-            setupDataManagement();
-            setupWaterTracker();
-            setupMeasurements();
-            setupShareCard();
-            setupProgressCharts();
-            setupFoodLog();
-            setupGoalWeight();
+            const trySetup = (fn) => { try { fn(); } catch (e) { console.error('[setup error]', fn.name, e); } };
+            trySetup(setupUpload);
+            trySetup(setupCamera);
+            trySetup(setupNavigation);
+            trySetup(setupResults);
+            trySetup(setupBreakdown);
+            trySetup(setupSimulator);
+            trySetup(setupWorkout);
+            trySetup(setupNutrition);
+            trySetup(setupGenderConfirmation);
+            trySetup(setupCoach);
+            trySetup(setupProgress);
+            trySetup(setupAdmin);
+            trySetup(setupDataManagement);
+            trySetup(setupWaterTracker);
+            trySetup(setupMeasurements);
+            trySetup(setupShareCard);
+            trySetup(setupProgressCharts);
+            trySetup(setupFoodLog);
+            trySetup(setupGoalWeight);
             loadPresetsFromDB(); // fetch foods & exercises from DB, overrides hardcoded fallbacks
-            setupWorkoutLog();
-            setupExerciseLog();
-            setupLiftTracker();
-            setupMeasurementsTracker();
-            setupSleepTracker();
-            setupHabitTracker();
-            animateGauges();
-            showOnboardingIfNeeded();
-            registerServiceWorker();
+            trySetup(setupWorkoutLog);
+            trySetup(setupExerciseLog);
+            trySetup(setupLiftTracker);
+            trySetup(setupMeasurementsTracker);
+            trySetup(setupSleepTracker);
+            trySetup(setupHabitTracker);
+            trySetup(animateGauges);
+            trySetup(showOnboardingIfNeeded);
+            trySetup(registerServiceWorker);
 
             // Setup BMI input listeners with 3-digit limit and range clamping
             const heightInput = document.getElementById('height-input');
@@ -10551,33 +10552,35 @@ Please try again with a different photo.`;
         }
 
         function refreshProgressScreen() {
+            const safe = (fn) => { try { fn(); } catch (e) { console.error('[progress]', e); } };
+
             // Chunk 1 — runs synchronously so the screen feels instantly populated
-            checkAchievements();
-            renderStreakTracker();
-            renderHeatmap();
-            renderLevelXP();
-            renderBadges();
+            safe(checkAchievements);
+            safe(renderStreakTracker);
+            safe(renderHeatmap);
+            safe(renderLevelXP);
+            safe(renderBadges);
 
             // Chunk 2 — deferred so the click handler returns first and the
             // browser can render the screen before doing heavier work
             setTimeout(() => {
-                renderChallenges();
-                renderWeeklyReport();
-                renderGoalWeight();
-                renderWorkoutLog();
-                renderPersonalRecords();
+                safe(renderChallenges);
+                safe(renderWeeklyReport);
+                safe(renderGoalWeight);
+                safe(renderWorkoutLog);
+                safe(renderPersonalRecords);
             }, 0);
 
             // Chunk 3 — deferred again to keep the main thread free
             setTimeout(() => {
-                renderMeasurementsTracker();
-                renderSleepTracker();
-                renderHabitTracker();
-                renderInsights();
-                renderScanHistory();
+                safe(renderMeasurementsTracker);
+                safe(renderSleepTracker);
+                safe(renderHabitTracker);
+                safe(renderInsights);
+                safe(renderScanHistory);
                 const activeTab = document.querySelector('.chart-tab.active');
-                renderProgressChart(activeTab?.dataset?.chart || 'weight');
-                spawnEmbers();
+                safe(() => renderProgressChart(activeTab?.dataset?.chart || 'weight'));
+                safe(spawnEmbers);
             }, 50);
         }
 

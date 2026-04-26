@@ -16116,7 +16116,7 @@
 .wr-sync-btn:hover { background: rgba(201,169,98,0.2); }
 
 /* Grid */
-.wr-grid { display: grid; grid-template-columns: 1fr 300px; gap: 20px; align-items: start; }
+.wr-page .wr-grid { display: grid; grid-template-columns: 1fr 300px; gap: 20px; align-items: start; }
 
 /* ── Ring Card ── */
 .wr-ring-card {
@@ -16189,8 +16189,8 @@
 .wr-ic-hr { background: rgba(224,112,112,0.1); border: 1px solid rgba(224,112,112,0.2); }
 .wr-ic-hr svg { stroke: #e07070; }
 
-.wr-stat-val { font-size: 1.35rem; font-weight: 800; letter-spacing: -0.03em; color: var(--text-primary); line-height: 1; }
-.wr-stat-lbl { font-size: 0.67rem; color: rgba(255,255,255,0.32); text-transform: uppercase; letter-spacing: 0.08em; }
+.wr-page .wr-stat-val { font-size: 1.35rem; font-weight: 800; letter-spacing: -0.03em; color: var(--text-primary); line-height: 1; }
+.wr-page .wr-stat-lbl { font-size: 0.67rem; color: rgba(255,255,255,0.32); text-transform: uppercase; letter-spacing: 0.08em; }
 
 /* Goal bar */
 .wr-goal-wrap { display: flex; flex-direction: column; gap: 7px; }
@@ -16300,7 +16300,7 @@
 .wr-srow-hr { color: rgba(224,112,112,0.8); }
 
 @media (max-width: 820px) {
-    .wr-grid { grid-template-columns: 1fr; }
+    .wr-page .wr-grid { grid-template-columns: 1fr; }
     .wr-sessions-cols-hdr, .wr-session-row { grid-template-columns: 120px 1fr 1fr 1fr; }
     .wr-sessions-cols-hdr span:nth-child(n+5), .wr-session-row > *:nth-child(n+5) { display: none; }
 }
@@ -16366,9 +16366,9 @@
 .wr-ic-time svg { stroke: #c9a962; stroke-width: 2.2; }
 .wr-ic-hr svg { stroke: #e07070; stroke-width: 2.2; }
 
-.wr-stat-val { font-size: 1.5rem; }
+.wr-page .wr-stat-val { font-size: 1.5rem; }
 
-.wr-stat-lbl {
+.wr-page .wr-stat-lbl {
     font-size: 0.72rem;
     color: var(--text-secondary);
     text-transform: uppercase;
