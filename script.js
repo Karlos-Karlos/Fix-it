@@ -15133,6 +15133,46 @@ Please try again with a different photo.`;
             document.getElementById('wo-hr-cancel').addEventListener('click', _woCancelHR);
 
             _woUpdateUI();
+
+            // Upload any locally-saved sessions that never made it to the server
+            setTimeout(_woSyncUnsynced, 2000);
+        }
+
+        async function _woSyncUnsynced() {
+            if (!state.accessToken) return;
+            const key = userKey('fixit-wearable-sessions');
+            const sessions = JSON.parse(localStorage.getItem(key) || '[]');
+            const unsynced = sessions.filter(s => !s.synced);
+            if (unsynced.length === 0) return;
+
+            let uploaded = 0;
+            for (const s of unsynced) {
+                try {
+                    await apiFetch('/wearable/session', {
+                        method: 'POST',
+                        body: JSON.stringify({
+                            steps: s.steps || 0,
+                            calories: s.calories || null,
+                            hr_avg: s.hr_avg || null,
+                            hr_readings: s.hr_readings || undefined,
+                            active_secs: s.active_secs || s.activeSecs || 0,
+                            session_date: s.date
+                        })
+                    });
+                    s.synced = true;
+                    uploaded++;
+                } catch (e) { /* leave unsynced, try next time */ }
+            }
+
+            if (uploaded > 0) {
+                localStorage.setItem(key, JSON.stringify(sessions));
+                const toast = document.getElementById('wo-saved-msg');
+                if (toast) {
+                    toast.textContent = `${uploaded} session${uploaded > 1 ? 's' : ''} synced to your account.`;
+                    toast.style.display = 'block';
+                    setTimeout(() => { toast.style.display = 'none'; }, 4000);
+                }
+            }
         }
 
         async function _woToggleSession() {
@@ -15429,7 +15469,8 @@ Please try again with a different photo.`;
             sessions.unshift({
                 ...sessionData,
                 date: new Date().toISOString().split('T')[0],
-                savedAt: Date.now()
+                savedAt: Date.now(),
+                synced: saved
             });
             if (sessions.length > 50) sessions.pop();
             localStorage.setItem(key, JSON.stringify(sessions));
@@ -15438,7 +15479,7 @@ Please try again with a different photo.`;
             const toast = document.getElementById('wo-saved-msg');
             toast.textContent = saved
                 ? 'Saved! Check the Wearables tab on your computer.'
-                : 'Saved locally. Log in to sync to your account.';
+                : 'Saved locally — will sync next time you open this page logged in.';
             toast.style.display = 'block';
             setTimeout(() => { toast.style.display = 'none'; }, 5000);
 
