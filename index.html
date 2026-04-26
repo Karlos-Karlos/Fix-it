@@ -3699,18 +3699,17 @@
         <section class="screen" id="screen-wearable">
             <div class="wr-page">
 
+                <button class="back-button" onclick="goToScreen(8)">
+                    <svg viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                        <line x1="19" y1="12" x2="5" y2="12"/>
+                        <polyline points="12 19 5 12 12 5"/>
+                    </svg>
+                </button>
+
                 <div class="wr-header">
-                    <div class="wr-header-left">
-                        <button class="back-button" onclick="goToScreen(8)">
-                            <svg viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                                <line x1="19" y1="12" x2="5" y2="12"/>
-                                <polyline points="12 19 5 12 12 5"/>
-                            </svg>
-                        </button>
-                        <div>
-                            <h1 class="wr-title">Activity Hub</h1>
-                            <p id="wearable-logged-in-as" class="wr-account-label"></p>
-                        </div>
+                    <div>
+                        <h1 class="wr-title">Activity Hub</h1>
+                        <p id="wearable-logged-in-as" class="wr-account-label"></p>
                     </div>
                     <button class="wr-sync-btn" id="wearable-refresh-btn">
                         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" width="13" height="13"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg>
