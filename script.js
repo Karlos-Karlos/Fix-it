@@ -15581,16 +15581,19 @@ Please try again with a different photo.`;
         async function _loadWearableData() {
             if (state.accessToken) {
                 try {
-                    const [todayData, sessions] = await Promise.all([
+                    const [todayRes, sessionsRes] = await Promise.all([
                         apiFetch('/wearable/today'),
                         apiFetch('/wearable/sessions?limit=14')
+                    ]);
+                    if (!todayRes.ok || !sessionsRes.ok) throw new Error('API error');
+                    const [todayData, sessions] = await Promise.all([
+                        todayRes.json(),
+                        sessionsRes.json()
                     ]);
                     _renderWearableToday(todayData);
                     _renderWearableSessions(sessions);
                     return;
-                } catch (e) {
-                    showToast('Could not load wearable data — try logging out and back in', 'error');
-                }
+                } catch (e) { /* fall through to localStorage */ }
             }
 
             // Fallback: localStorage
