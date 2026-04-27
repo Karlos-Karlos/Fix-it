@@ -24,7 +24,7 @@
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="styles.css?v=39">
+    <link rel="stylesheet" href="styles.css?v=40">
     <link rel="manifest" href="manifest.json">
     <!-- Chart.js for Progress Charts -->
     <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
@@ -3737,21 +3737,14 @@
                                         <stop offset="50%" stop-color="#b87351"/>
                                         <stop offset="100%" stop-color="#c9a962"/>
                                     </linearGradient>
-                                    <filter id="wr-glow">
-                                        <feGaussianBlur stdDeviation="3.5" result="blur"/>
-                                        <feMerge><feMergeNode in="blur"/><feMergeNode in="SourceGraphic"/></feMerge>
-                                    </filter>
                                 </defs>
-                                <circle cx="120" cy="120" r="100" fill="none" stroke="rgba(201,169,98,0.08)" stroke-width="1.5"/>
                                 <circle class="wr-track" cx="120" cy="120" r="88"/>
                                 <circle class="wr-arc" id="wr-ring-fill"
                                     cx="120" cy="120" r="88"
                                     stroke="url(#wr-grad)"
-                                    filter="url(#wr-glow)"
                                     stroke-dasharray="552.92"
                                     stroke-dashoffset="552.92"
                                     transform="rotate(-90 120 120)"/>
-                                <circle class="wr-dot" id="wr-ring-dot" cx="120" cy="32" r="7"/>
                             </svg>
                             <div class="wr-ring-center">
                                 <div class="wr-steps-big" id="today-steps">&#8212;</div>
