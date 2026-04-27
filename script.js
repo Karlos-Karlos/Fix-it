@@ -2972,7 +2972,7 @@ Please try again with a different photo.`;
                 modal.classList.add('active');
             } else {
                 // No recommendation needed - proceed directly to results
-                populateResults();
+                populateResults(true);
                 goToScreen(3);
             }
         }
@@ -3097,7 +3097,7 @@ Please try again with a different photo.`;
             document.getElementById('gender-confirm-close')?.addEventListener('click', () => {
                 modal.classList.remove('active');
                 delete modal.dataset.switchedGoal;
-                populateResults();
+                populateResults(true);
                 goToScreen(3);
             });
 
@@ -3122,7 +3122,7 @@ Please try again with a different photo.`;
                 delete modal.dataset.switchedGoal;
 
                 // Populate results with the final goal
-                populateResults();
+                populateResults(true);
                 goToScreen(3);
             });
         }
@@ -3210,7 +3210,7 @@ Please try again with a different photo.`;
         }
 
         // Populate results from AI analysis
-        function populateResults() {
+        function populateResults(isNewScan = false) {
             const result = state.analysisResult;
             if (!result) return;
 
@@ -3224,20 +3224,22 @@ Please try again with a different photo.`;
                 // Zone dots are positioned from goToScreen(3) after screen is visible
             }
 
-            // Track analysis for gamification
-            const ta = parseInt(localStorage.getItem(userKey('fixit-total-analyses')) || '0') + 1;
-            localStorage.setItem(userKey('fixit-total-analyses'), ta);
-            awardXP(30, 'analysis');
-            checkAchievements();
+            if (isNewScan) {
+                // Track analysis for gamification (only on fresh scan, not restore)
+                const ta = parseInt(localStorage.getItem(userKey('fixit-total-analyses')) || '0') + 1;
+                localStorage.setItem(userKey('fixit-total-analyses'), ta);
+                awardXP(30, 'analysis');
+                checkAchievements();
 
-            // Save analysis snapshot for progress comparison
-            saveSnapshot(state.analysisResult, state.imageData, {
-                gender: state.gender,
-                height: state.height,
-                weight: state.weight,
-                bmi: state.bmi,
-                goal: state.fitnessGoal
-            });
+                // Save analysis snapshot for progress comparison
+                saveSnapshot(state.analysisResult, state.imageData, {
+                    gender: state.gender,
+                    height: state.height,
+                    weight: state.weight,
+                    bmi: state.bmi,
+                    goal: state.fitnessGoal
+                });
+            }
 
             // Save session state for persistence across page refresh
             saveSessionState();
