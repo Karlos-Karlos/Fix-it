@@ -16859,7 +16859,7 @@
         padding-bottom: calc(120px + env(safe-area-inset-bottom));
     }
 
-    /* ── Sticky header so nav is always reachable ── */
+    /* ── Sticky header: CSS Grid so logo/user-menu/nav stay in correct positions ── */
     .header {
         position: sticky;
         top: 0;
@@ -16871,25 +16871,23 @@
         width: calc(100% + 28px);
         padding: 10px 14px 6px;
         border-bottom: 1px solid rgba(255,255,255,0.06);
-        flex-wrap: wrap;
-        gap: 6px;
-        row-gap: 6px;
+        /* Grid: logo top-left, avatar top-right, nav full-width below */
+        display: grid;
+        grid-template-areas: "logo usermenu" "nav nav";
+        grid-template-columns: 1fr auto;
+        grid-template-rows: auto auto;
+        align-items: center;
+        gap: 6px 8px;
     }
 
-    .logo { flex-shrink: 0; gap: 8px; }
+    .logo         { grid-area: logo; gap: 8px; }
+    .nav-steps    { grid-area: nav; justify-content: center; gap: 5px; padding-bottom: 4px; }
+    .user-menu-wrapper { grid-area: usermenu; }
+
     .logo-img { height: 28px; }
     .logo-text { font-size: 1rem; }
-
-    /* Nav row sits below logo + user menu */
-    .nav-steps {
-        order: 3;
-        width: 100%;
-        justify-content: center;
-        gap: 5px;
-        padding-bottom: 4px;
-    }
     .nav-step { width: 22px; height: 22px; font-size: 0.55rem; }
-    .nav-step.active { width: 22px; }   /* keep uniform on mobile */
+    .nav-step.active { width: 22px; }
 
     /* ── Offset screen content below sticky header ── */
     .screen.active { padding-top: 16px; }
