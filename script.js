@@ -9707,9 +9707,12 @@ Please try again with a different photo.`;
                 id: scan.id,
                 serverId: scan.id,
                 date: scan.scan_date || scan.created_at,
-                thumbnail: scan.thumbnail_url ? (API_BASE.replace('/api', '') + scan.thumbnail_url) : null,
-                imageData: scan.image_url ? (API_BASE.replace('/api', '') + scan.image_url) :
-                           (scan.thumbnail_url ? (API_BASE.replace('/api', '') + scan.thumbnail_url) : null),
+                thumbnail: scan.thumbnail_url
+                    ? (scan.thumbnail_url.startsWith('data:') ? scan.thumbnail_url : (API_BASE.replace('/api', '') + scan.thumbnail_url))
+                    : null,
+                imageData: scan.thumbnail_url
+                    ? (scan.thumbnail_url.startsWith('data:') ? scan.thumbnail_url : (API_BASE.replace('/api', '') + scan.thumbnail_url))
+                    : null,
                 analysisResult: {
                     bodyComposition: {
                         score: r.body_comp_score,
@@ -9754,23 +9757,13 @@ Please try again with a different photo.`;
 
         async function syncSnapshotToBackend(analysisResult, imageData, userProfile) {
             try {
-                // Convert base64 to file and upload
-                const blob = await fetch(imageData).then(r => r.blob());
-                const formData = new FormData();
-                formData.append('image', blob, 'scan.jpg');
-
-                const uploadRes = await fetch(API_BASE + '/analysis/upload', {
-                    method: 'POST',
-                    headers: { 'Authorization': 'Bearer ' + state.accessToken },
-                    body: formData,
-                });
-                if (!uploadRes.ok) throw new Error('Upload failed');
-                const { imageUrl, thumbnailUrl } = await uploadRes.json();
+                // Create a small thumbnail to store directly in the DB (avoids ephemeral filesystem)
+                const thumbnailData = await createThumbnail(imageData, 150, 200);
 
                 // Save scan with results
                 const scanBody = {
-                    image_url: imageUrl,
-                    thumbnail_url: thumbnailUrl,
+                    image_url: 'local',
+                    thumbnail_url: thumbnailData,
                     height_at_scan: userProfile.height || null,
                     weight_at_scan: userProfile.weight || null,
                     bmi_at_scan: userProfile.bmi || null,
@@ -9973,14 +9966,20 @@ Please try again with a different photo.`;
         async function getMergedSnapshots() {
             const [local, server] = await Promise.all([getAllSnapshots(), fetchServerScans()]);
 
-            // Deduplicate: if a server scan exists with a similar date (within 5s) to a local one, prefer server
+            // Deduplicate: if a server scan has a matching local scan (within 5s), prefer server
+            // but backfill the local base64 thumbnail when the server thumbnail is a broken file URL
             const merged = [...server];
             const serverDates = server.map(s => new Date(s.date).getTime());
 
             for (const loc of local) {
                 const locTime = new Date(loc.date).getTime();
-                const isDuplicate = serverDates.some(st => Math.abs(st - locTime) < 5000);
-                if (!isDuplicate) {
+                const matchIdx = serverDates.findIndex(st => Math.abs(st - locTime) < 5000);
+                if (matchIdx >= 0) {
+                    // Backfill local base64 thumbnail if server copy doesn't have one
+                    if (!merged[matchIdx].thumbnail && loc.thumbnail) {
+                        merged[matchIdx].thumbnail = loc.thumbnail;
+                    }
+                } else {
                     merged.push(loc);
                 }
             }

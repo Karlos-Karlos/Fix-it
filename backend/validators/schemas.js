@@ -72,8 +72,8 @@ const updatePreferencesSchema = z.object({
 
 // ── Analysis ──
 const createScanSchema = z.object({
-  image_url: z.string().min(1),
-  thumbnail_url: z.string().min(1),
+  image_url: z.string().optional().nullable(),
+  thumbnail_url: z.string().optional().nullable(),
   height_at_scan: z.number().positive().optional().nullable(),
   weight_at_scan: z.number().positive().optional().nullable(),
   bmi_at_scan: z.number().positive().optional().nullable(),
