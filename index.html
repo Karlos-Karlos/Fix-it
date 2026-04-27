@@ -16,7 +16,7 @@
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="styles.css?v=26">
+    <link rel="stylesheet" href="styles.css?v=27">
     <link rel="manifest" href="manifest.json">
     <!-- Chart.js for Progress Charts -->
     <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
@@ -3861,6 +3861,30 @@
                                 <div class="wr-tip-title">Quick fact</div>
                                 <div class="wr-tip-body">1,000 steps &asymp; 0.76 km and burns roughly 40&ndash;50 kcal.</div>
                             </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Step History Chart -->
+                <div class="wr-step-chart-card">
+                    <div class="wr-step-chart-head">
+                        <h3 class="wr-sessions-title">Step History</h3>
+                        <div class="wr-period-btns">
+                            <button class="wr-period-btn wr-period-active" data-days="7">7D</button>
+                            <button class="wr-period-btn" data-days="14">14D</button>
+                            <button class="wr-period-btn" data-days="30">30D</button>
+                        </div>
+                    </div>
+                    <div class="wr-step-chart-wrap">
+                        <canvas id="wr-steps-chart"></canvas>
+                    </div>
+                    <div class="wr-step-detail" id="wr-step-detail" style="display:none">
+                        <div class="wr-detail-date" id="wr-detail-date"></div>
+                        <div class="wr-detail-stats">
+                            <div class="wr-detail-stat"><span class="wr-detail-val" id="wr-detail-steps">—</span><span class="wr-detail-lbl">steps</span></div>
+                            <div class="wr-detail-stat"><span class="wr-detail-val" id="wr-detail-dist">—</span><span class="wr-detail-lbl">km</span></div>
+                            <div class="wr-detail-stat"><span class="wr-detail-val" id="wr-detail-cal">—</span><span class="wr-detail-lbl">kcal</span></div>
+                            <div class="wr-detail-stat"><span class="wr-detail-val" id="wr-detail-active">—</span><span class="wr-detail-lbl">active min</span></div>
                         </div>
                     </div>
                 </div>

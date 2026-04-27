@@ -15759,7 +15759,154 @@ Please try again with a different photo.`;
             }
         }
 
+        let _wrStepChartInstance = null;
+        let _wrAllSessions = [];
+        let _wrChartDays = 7;
+
+        function _renderWearableStepChart(sessions, days) {
+            _wrAllSessions = sessions || [];
+            _wrChartDays = days || 7;
+
+            const canvas = document.getElementById('wr-steps-chart');
+            if (!canvas) return;
+
+            const GOAL = parseInt(localStorage.getItem('fixit-wearable-daily-goal')) || 10000;
+            const today = new Date();
+
+            // Build a map of date → session for fast lookup
+            const byDate = {};
+            _wrAllSessions.forEach(s => {
+                const d = (s.date || s.session_date || '').toString().split('T')[0];
+                if (d) byDate[d] = s;
+            });
+
+            // Build last N days oldest → newest
+            const labels = [], stepsData = [], colors = [];
+            for (let i = _wrChartDays - 1; i >= 0; i--) {
+                const d = new Date(today);
+                d.setDate(today.getDate() - i);
+                const key = d.toISOString().split('T')[0];
+                const label = _wrChartDays <= 7
+                    ? d.toLocaleDateString('en-US', { weekday: 'short' })
+                    : d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+                labels.push(label);
+                const s = byDate[key];
+                const steps = s ? Number(s.steps || 0) : 0;
+                stepsData.push(steps);
+                colors.push(steps >= GOAL ? 'rgba(125,154,120,0.85)' : steps > 0 ? 'rgba(201,169,98,0.75)' : 'rgba(255,255,255,0.06)');
+            }
+
+            if (_wrStepChartInstance) { _wrStepChartInstance.destroy(); _wrStepChartInstance = null; }
+
+            // Store date keys for click handler
+            const dateKeys = [];
+            for (let i = _wrChartDays - 1; i >= 0; i--) {
+                const d = new Date(today);
+                d.setDate(today.getDate() - i);
+                dateKeys.push(d.toISOString().split('T')[0]);
+            }
+
+            _wrStepChartInstance = new Chart(canvas, {
+                type: 'bar',
+                data: {
+                    labels,
+                    datasets: [{
+                        label: 'Steps',
+                        data: stepsData,
+                        backgroundColor: colors,
+                        borderColor: colors.map(c => c.replace('0.75', '1').replace('0.85', '1').replace('0.06', '0.15')),
+                        borderWidth: 1,
+                        borderRadius: 5,
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    onClick: (evt, elements) => {
+                        if (!elements.length) return;
+                        const idx = elements[0].index;
+                        const key = dateKeys[idx];
+                        const s = byDate[key];
+                        _showWrDayDetail(key, s || null);
+                    },
+                    plugins: {
+                        legend: { display: false },
+                        tooltip: {
+                            backgroundColor: '#1e1c18',
+                            titleColor: '#c9a962',
+                            bodyColor: '#ccc',
+                            borderColor: '#333',
+                            borderWidth: 1,
+                            callbacks: {
+                                label: ctx => {
+                                    const v = ctx.parsed.y;
+                                    if (!v) return 'No data';
+                                    const pct = Math.round((v / GOAL) * 100);
+                                    return `${v.toLocaleString()} steps (${pct}% of goal)`;
+                                }
+                            }
+                        },
+                        annotation: undefined
+                    },
+                    scales: {
+                        x: {
+                            ticks: { color: '#666', font: { size: 10 } },
+                            grid: { display: false }
+                        },
+                        y: {
+                            ticks: {
+                                color: '#666',
+                                font: { size: 10 },
+                                callback: v => v >= 1000 ? (v / 1000).toFixed(0) + 'k' : v
+                            },
+                            grid: { color: 'rgba(255,255,255,0.04)' },
+                            beginAtZero: true,
+                        }
+                    }
+                }
+            });
+
+            // Period button wiring (only once)
+            if (!canvas._wrPeriodWired) {
+                canvas._wrPeriodWired = true;
+                document.querySelectorAll('.wr-period-btn').forEach(btn => {
+                    btn.addEventListener('click', () => {
+                        document.querySelectorAll('.wr-period-btn').forEach(b => b.classList.remove('wr-period-active'));
+                        btn.classList.add('wr-period-active');
+                        _renderWearableStepChart(_wrAllSessions, parseInt(btn.dataset.days));
+                        document.getElementById('wr-step-detail').style.display = 'none';
+                    });
+                });
+            }
+        }
+
+        function _showWrDayDetail(dateKey, session) {
+            const detailEl = document.getElementById('wr-step-detail');
+            const dateEl   = document.getElementById('wr-detail-date');
+            const stepsEl  = document.getElementById('wr-detail-steps');
+            const distEl   = document.getElementById('wr-detail-dist');
+            const calEl    = document.getElementById('wr-detail-cal');
+            const activeEl = document.getElementById('wr-detail-active');
+            if (!detailEl) return;
+
+            const d = new Date(dateKey + 'T00:00:00');
+            if (dateEl) dateEl.textContent = d.toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric' });
+
+            const steps = session ? Number(session.steps || 0) : 0;
+            const cal   = session ? Math.round(session.calories || 0) : 0;
+            const secs  = session ? (session.active_secs || session.activeSecs || 0) : 0;
+            if (stepsEl) stepsEl.textContent = steps ? steps.toLocaleString() : '—';
+            if (distEl)  distEl.textContent  = steps ? (steps * 0.00076).toFixed(2) : '—';
+            if (calEl)   calEl.textContent   = cal   ? cal : '—';
+            if (activeEl) activeEl.textContent = secs ? Math.round(secs / 60) : '—';
+
+            detailEl.style.display = '';
+        }
+
         function _renderWearableSessions(sessions) {
+            // Always render the step chart (even with no sessions)
+            _renderWearableStepChart(sessions, _wrChartDays);
+
             const list = document.getElementById('wearable-sessions-list');
             if (!list) return;
 

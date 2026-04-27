@@ -16294,6 +16294,84 @@
 .wr-tip-body { font-size: 0.77rem; color: rgba(255,255,255,0.38); line-height: 1.5; }
 
 /* ── Sessions ── */
+/* ── Step History Chart ── */
+.wr-step-chart-card {
+    background: rgba(255,255,255,0.03);
+    border: 1px solid rgba(255,255,255,0.07);
+    border-radius: 16px;
+    padding: 18px 20px;
+    margin-bottom: 20px;
+}
+.wr-step-chart-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 14px;
+}
+.wr-period-btns {
+    display: flex;
+    gap: 4px;
+    background: rgba(255,255,255,0.05);
+    border-radius: 8px;
+    padding: 3px;
+}
+.wr-period-btn {
+    padding: 4px 12px;
+    font-size: 0.72rem;
+    font-weight: 600;
+    border-radius: 6px;
+    border: none;
+    background: transparent;
+    color: rgba(255,255,255,0.35);
+    cursor: pointer;
+    transition: all 0.2s ease;
+    font-family: 'Plus Jakarta Sans', sans-serif;
+}
+.wr-period-btn:hover { color: rgba(255,255,255,0.65); }
+.wr-period-active {
+    background: rgba(201,169,98,0.2);
+    color: #c9a962 !important;
+}
+.wr-step-chart-wrap {
+    position: relative;
+    height: 160px;
+}
+.wr-step-detail {
+    margin-top: 14px;
+    padding: 12px 14px;
+    background: rgba(255,255,255,0.04);
+    border-radius: 10px;
+    border-left: 3px solid #c9a962;
+}
+.wr-detail-date {
+    font-size: 0.78rem;
+    font-weight: 600;
+    color: #c9a962;
+    margin-bottom: 10px;
+}
+.wr-detail-stats {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 8px;
+}
+.wr-detail-stat {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 2px;
+}
+.wr-detail-val {
+    font-size: 1rem;
+    font-weight: 700;
+    color: var(--text-primary);
+}
+.wr-detail-lbl {
+    font-size: 0.62rem;
+    color: rgba(255,255,255,0.3);
+    text-transform: uppercase;
+    letter-spacing: 0.07em;
+}
+
 .wr-sessions {
     background: rgba(255,255,255,0.04);
     border: 1px solid rgba(255,255,255,0.08);
