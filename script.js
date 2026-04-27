@@ -1,4 +1,3 @@
-        console.log('%c[FiX-it] script.js LOADED at ' + new Date().toISOString(), 'color:lime;font-weight:bold');
         // Debug mode: set to true during development for console output
         const DEBUG = location.hostname === 'localhost' || location.hostname === '127.0.0.1';
         const dbg = {
@@ -3133,19 +3132,9 @@ Please try again with a different photo.`;
         function positionZoneDots(landmarks) {
             const container = document.querySelector('.body-photo-wrap');
             const img = document.getElementById('body-result-photo');
-            if (!container || !img || !landmarks || landmarks.length < 27) {
-                console.warn('[dots] early exit — missing container/img/landmarks', { container: !!container, img: !!img, lmCount: landmarks?.length });
-                return;
-            }
-            if (!img.naturalWidth || !img.naturalHeight) {
-                console.warn('[dots] early exit — img dimensions zero', img.naturalWidth, img.naturalHeight);
-                return;
-            }
-            if (!container.clientWidth || !container.clientHeight) {
-                console.warn('[dots] early exit — container dimensions zero', container.clientWidth, container.clientHeight);
-                return;
-            }
-            console.log('[dots] running — container', container.clientWidth, 'x', container.clientHeight, 'img', img.naturalWidth, 'x', img.naturalHeight);
+            if (!container || !img || !landmarks || landmarks.length < 27) return;
+            if (!img.naturalWidth || !img.naturalHeight) return;
+            if (!container.clientWidth || !container.clientHeight) return;
 
             // Direct mapping: lx/ly (0–1) → left%/top% with clamping
             function toContainerPct(lx, ly) {
@@ -3196,15 +3185,11 @@ Please try again with a different photo.`;
                 'zone-legs':      legPt
             };
 
-            console.log('[dots] positions', JSON.stringify(zoneMap));
-
             Object.entries(zoneMap).forEach(([cls, pos]) => {
                 const el = document.querySelector('.' + cls);
                 if (el) {
                     el.style.top  = pos.top  + '%';
                     el.style.left = pos.left + '%';
-                } else {
-                    console.warn('[dots] element not found:', cls);
                 }
             });
         }
@@ -3213,16 +3198,6 @@ Please try again with a different photo.`;
         function populateResults(isNewScan = false) {
             const result = state.analysisResult;
             if (!result) return;
-
-            // Show the analysed photo in the body viz card
-            const bodyPhoto = document.getElementById('body-result-photo');
-            if (bodyPhoto && state.imageData) {
-                bodyPhoto.src = state.imageData;
-                // Position zone dots AFTER goToScreen(3) makes the container visible.
-                // RAF fires after the current call stack (which includes goToScreen) clears,
-                // ensuring container.clientWidth/Height are non-zero.
-                // Zone dots are positioned from goToScreen(3) after screen is visible
-            }
 
             if (isNewScan) {
                 // Track analysis for gamification (only on fresh scan, not restore)
