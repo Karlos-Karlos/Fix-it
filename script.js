@@ -16044,7 +16044,12 @@ Please try again with a different photo.`;
             const arc = document.getElementById('wr-ring-fill');
             if (arc) {
                 arc.style.strokeDashoffset = (CIRCUMFERENCE * (1 - pct)).toFixed(2);
-                arc.classList.toggle('goal-done', steps >= GOAL);
+                if (steps >= GOAL) {
+                    const successColor = getComputedStyle(document.documentElement).getPropertyValue('--accent-success').trim() || '#7d9a78';
+                    arc.setAttribute('stroke', successColor);
+                } else {
+                    arc.setAttribute('stroke', 'url(#wr-grad)');
+                }
             }
         }
 
