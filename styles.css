@@ -16839,3 +16839,194 @@
         padding-bottom: env(safe-area-inset-bottom);
     }
 }
+
+/* ══════════════════════════════════════════
+   MOBILE PWA — Comprehensive Layout Fixes
+   Targets phones ≤ 480px
+══════════════════════════════════════════ */
+@media (max-width: 480px) {
+
+    /* ── Global: kill horizontal scroll ── */
+    html { overflow-x: hidden; }
+    body { overflow-x: hidden; }
+    .screen { overflow-x: hidden; width: 100%; }
+
+    /* ── App container ── */
+    .app-container {
+        padding-left: 14px;
+        padding-right: 14px;
+        /* Extra bottom so content never hides behind fixed PWA banner / browser chrome */
+        padding-bottom: calc(120px + env(safe-area-inset-bottom));
+    }
+
+    /* ── Sticky header so nav is always reachable ── */
+    .header {
+        position: sticky;
+        top: 0;
+        z-index: 150;
+        background: rgba(20,18,17,0.96);
+        backdrop-filter: blur(14px);
+        -webkit-backdrop-filter: blur(14px);
+        margin: 0 -14px;
+        width: calc(100% + 28px);
+        padding: 10px 14px 6px;
+        border-bottom: 1px solid rgba(255,255,255,0.06);
+        flex-wrap: wrap;
+        gap: 6px;
+        row-gap: 6px;
+    }
+
+    .logo { flex-shrink: 0; gap: 8px; }
+    .logo-img { height: 28px; }
+    .logo-text { font-size: 1rem; }
+
+    /* Nav row sits below logo + user menu */
+    .nav-steps {
+        order: 3;
+        width: 100%;
+        justify-content: center;
+        gap: 5px;
+        padding-bottom: 4px;
+    }
+    .nav-step { width: 22px; height: 22px; font-size: 0.55rem; }
+    .nav-step.active { width: 22px; }   /* keep uniform on mobile */
+
+    /* ── Offset screen content below sticky header ── */
+    .screen.active { padding-top: 16px; }
+
+    /* ── Glass cards ── */
+    .glass-card { padding: 14px; }
+
+    /* ── Account modal: slide up from bottom (native feel) ── */
+    .account-modal-overlay {
+        padding: 0;
+        align-items: flex-end;
+    }
+    .account-modal {
+        border-radius: 22px 22px 0 0;
+        max-height: 88vh;
+        padding: 20px 16px calc(20px + env(safe-area-inset-bottom));
+        width: 100%;
+        margin: 0;
+    }
+    /* Drag handle hint */
+    .account-modal::before {
+        content: '';
+        display: block;
+        width: 36px; height: 4px;
+        background: rgba(255,255,255,0.18);
+        border-radius: 2px;
+        margin: 0 auto 16px;
+    }
+
+    /* Same for preferences modal */
+    #preferences-modal .account-modal {
+        border-radius: 22px 22px 0 0;
+        max-height: 88vh;
+        padding: 20px 16px calc(20px + env(safe-area-inset-bottom));
+        width: 100%;
+        margin: 0;
+    }
+    #preferences-modal .account-modal-overlay {
+        padding: 0;
+        align-items: flex-end;
+    }
+
+    /* ── User-menu dropdown: clamp to viewport ── */
+    .user-menu-dropdown {
+        width: calc(100vw - 28px);
+        right: -14px;
+        border-radius: 16px;
+    }
+
+    /* ── Wearables insights: 3-column wrap instead of 5-in-a-row ── */
+    .wr-insights-strip {
+        flex-wrap: wrap;
+        gap: 10px 6px;
+    }
+    .wr-insight-tile {
+        flex: 1 0 calc(33.33% - 8px);
+        min-width: 0;
+        padding: 6px 4px;
+    }
+    .wr-insight-divider { display: none; }
+
+    /* ── Wearables ring area ── */
+    .wr-ring-card { padding: 16px 14px; }
+    .wr-goal-row { gap: 8px; }
+    .wr-stat-tiles { gap: 8px; }
+    .wr-stat-tile { padding: 10px 8px; }
+
+    /* ── Step chart card ── */
+    .wr-step-chart-wrap { height: 130px; }
+    .wr-step-chart-head { flex-direction: column; align-items: flex-start; gap: 8px; }
+
+    /* ── Wearables session rows ── */
+    .wr-sessions-cols-hdr,
+    .wr-session-row { grid-template-columns: 1fr 60px 50px 60px; font-size: 0.72rem; }
+
+    /* ── Nutrition / Workout: ensure single column ── */
+    .nutrition-layout { grid-template-columns: 1fr !important; }
+    .macros-grid { grid-template-columns: repeat(2,1fr) !important; }
+    .workout-layout { flex-direction: column !important; }
+    .workout-sidebar { width: 100% !important; }
+    .exercise-grid { grid-template-columns: 1fr !important; }
+
+    /* ── Upload screen ── */
+    .s1-grid { grid-template-columns: 1fr !important; }
+    .s1-fields-grid { grid-template-columns: 1fr !important; }
+
+    /* ── Results / Breakdown ── */
+    .results-grid { grid-template-columns: 1fr !important; }
+    .breakdown-grid { grid-template-columns: 1fr !important; }
+
+    /* ── Progress challenges ── */
+    .prog-challenge-list { gap: 8px; }
+    .challenge-card { padding: 12px; }
+
+    /* ── Toasts: full-width on mobile ── */
+    .toast {
+        left: 14px !important;
+        right: 14px !important;
+        max-width: none !important;
+        width: auto !important;
+    }
+
+    /* ── Prevent any element from busting out ── */
+    img, video, canvas, iframe { max-width: 100%; }
+    table { display: block; overflow-x: auto; -webkit-overflow-scrolling: touch; }
+
+    /* ── Button groups: wrap ── */
+    .btn-group, .button-row, .action-row {
+        flex-wrap: wrap;
+        gap: 8px;
+    }
+    .btn-group .btn, .button-row .btn { flex: 1 1 auto; min-width: 120px; }
+
+    /* ── Input rows: always stack ── */
+    .input-row { flex-direction: column !important; gap: 10px; }
+    .input-group { width: 100%; }
+}
+
+/* ── Small tablet / large phone (481–768px) ── */
+@media (min-width: 481px) and (max-width: 768px) {
+    html { overflow-x: hidden; }
+    body { overflow-x: hidden; }
+
+    .app-container {
+        padding-left: 20px;
+        padding-right: 20px;
+        padding-bottom: calc(100px + env(safe-area-inset-bottom));
+    }
+
+    .account-modal-overlay { padding: 12px; }
+    .account-modal { max-height: 88vh; }
+
+    .wr-insights-strip { flex-wrap: wrap; gap: 8px; }
+    .wr-insight-tile { flex: 1 0 calc(33.33% - 8px); }
+    .wr-insight-divider { display: none; }
+
+    .s1-grid { grid-template-columns: 1fr !important; }
+    .nutrition-layout { grid-template-columns: 1fr !important; }
+    .exercise-grid { grid-template-columns: repeat(2,1fr) !important; }
+}
