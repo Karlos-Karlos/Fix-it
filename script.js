@@ -3216,12 +3216,12 @@ Please try again with a different photo.`;
 
             // Show the analysed photo in the body viz card
             const bodyPhoto = document.getElementById('body-result-photo');
+            const bodyVizCard = document.getElementById('body-viz-card');
             if (bodyPhoto && state.imageData) {
                 bodyPhoto.src = state.imageData;
-                // Position zone dots AFTER goToScreen(3) makes the container visible.
-                // RAF fires after the current call stack (which includes goToScreen) clears,
-                // ensuring container.clientWidth/Height are non-zero.
-                // Zone dots are positioned from goToScreen(3) after screen is visible
+                if (bodyVizCard) bodyVizCard.style.display = '';
+            } else if (bodyVizCard) {
+                bodyVizCard.style.display = 'none';
             }
 
             if (isNewScan) {
