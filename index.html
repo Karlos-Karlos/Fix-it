@@ -3210,7 +3210,7 @@
 
         <!-- Screen 8: Progress & Gamification -->
         <section class="screen" id="screen-progress">
-            <button class="back-button" id="back-to-results-progress" onclick="goToScreen(3)">
+            <button class="back-button" id="back-to-results-progress" onclick="(function(){try{goToScreen(3);}catch(e){var t=document.createElement('div');t.style='position:fixed;top:10px;left:50%;transform:translateX(-50%);background:#c00;color:#fff;padding:12px 20px;border-radius:8px;z-index:99999;font-size:14px;';t.textContent='ERR: '+e.message;document.body.appendChild(t);setTimeout(function(){t.remove()},6000);}})()">
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                     <line x1="19" y1="12" x2="5" y2="12"/>
                     <polyline points="12 19 5 12 12 5"/>
@@ -4858,6 +4858,26 @@
     </div>
 
     <script>
+        // Global error reporter — shows any JS error as visible red banner
+        window.onerror = function(msg, url, line, col, err) {
+            var d = document.createElement('div');
+            d.style = 'position:fixed;top:0;left:0;right:0;background:#c00;color:#fff;padding:10px 16px;z-index:999999;font-size:13px;font-family:monospace;';
+            d.textContent = 'JS ERR [' + line + ']: ' + msg;
+            document.body.appendChild(d);
+            setTimeout(function(){ d.remove(); }, 8000);
+        };
+
+        // Click debug: while on progress screen, flash a green dot to confirm click registered
+        document.addEventListener('click', function(e) {
+            var prog = document.getElementById('screen-progress');
+            if (!prog || !prog.classList.contains('active')) return;
+            var d = document.createElement('div');
+            d.style = 'position:fixed;bottom:80px;right:20px;background:#0a0;color:#fff;padding:8px 14px;border-radius:6px;z-index:999999;font-size:12px;pointer-events:none;';
+            d.textContent = 'CLICK: ' + (e.target.tagName + (e.target.id ? '#'+e.target.id : ''));
+            document.body.appendChild(d);
+            setTimeout(function(){ d.remove(); }, 2000);
+        }, true); // capture phase
+
         // Force fresh load on every page open — bypasses file:// protocol cache
         (function() {
             var s = document.createElement('script');
