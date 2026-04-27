@@ -15709,6 +15709,44 @@ Please try again with a different photo.`;
             if (fillEl) fillEl.style.width = `${(pct * 100).toFixed(0)}%`;
             if (pctEl) pctEl.textContent = `${(pct * 100).toFixed(0)}%`;
 
+            // Motivational message based on progress
+            const motivEl = document.getElementById('wr-motivation');
+            if (motivEl && steps > 0) {
+                let msg, tier;
+                if (pct >= 1) {
+                    msg = '🏆 Goal accomplished! Outstanding effort!';
+                    tier = 'complete';
+                } else if (pct >= 0.9) {
+                    msg = '🔥 So close! Just ' + (GOAL - steps).toLocaleString() + ' more steps to go!';
+                    tier = 'almost';
+                } else if (pct >= 0.75) {
+                    msg = '💪 Almost there — you\'re on fire!';
+                    tier = 'almost';
+                } else if (pct >= 0.5) {
+                    msg = '⚡ Halfway there! Keep pushing!';
+                    tier = 'halfway';
+                } else if (pct >= 0.25) {
+                    msg = '👟 Good progress! A quarter done!';
+                    tier = 'started';
+                } else {
+                    msg = '🚀 Great start! Every step counts!';
+                    tier = 'started';
+                }
+                motivEl.textContent = msg;
+                motivEl.className = 'wr-motivation wr-motiv-' + tier;
+
+                // Celebrate goal completion (once per day)
+                const today = new Date().toISOString().split('T')[0];
+                const celebKey = 'fixit-step-goal-celebrated-' + today;
+                if (pct >= 1 && !localStorage.getItem(celebKey)) {
+                    localStorage.setItem(celebKey, '1');
+                    setTimeout(() => showToast('🏆 Daily step goal reached! Amazing work!', 'success', 5000), 400);
+                }
+            } else if (motivEl) {
+                motivEl.textContent = '';
+                motivEl.className = 'wr-motivation';
+            }
+
             // Animate ring (r=88, cx=cy=120, circumference=552.92)
             const CIRCUMFERENCE = 552.92;
             const arc = document.getElementById('wr-ring-fill');
