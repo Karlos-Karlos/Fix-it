@@ -15759,6 +15759,93 @@ Please try again with a different photo.`;
             }
         }
 
+        function _renderWearableInsights(sessions) {
+            if (!sessions || sessions.length === 0) return;
+
+            const GOAL = parseInt(localStorage.getItem('fixit-wearable-daily-goal')) || 10000;
+            const today = new Date();
+            const todayKey = today.toISOString().split('T')[0];
+
+            // Build date → steps map
+            const byDate = {};
+            sessions.forEach(s => {
+                const key = (s.date || s.session_date || '').toString().split('T')[0];
+                if (key) byDate[key] = Number(s.steps || 0);
+            });
+
+            // ── Weekly summary (Mon → today) ──────────────────────────────
+            const dayOfWeek = today.getDay(); // 0=Sun
+            const daysFromMon = dayOfWeek === 0 ? 6 : dayOfWeek - 1;
+            let weekTotal = 0, weekDaysWithData = 0, daysGoalHit = 0;
+            for (let i = 0; i <= daysFromMon; i++) {
+                const d = new Date(today);
+                d.setDate(today.getDate() - i);
+                const key = d.toISOString().split('T')[0];
+                const steps = byDate[key] || 0;
+                if (steps > 0) { weekTotal += steps; weekDaysWithData++; }
+                if (steps >= GOAL) daysGoalHit++;
+            }
+            const weekAvg = weekDaysWithData > 0 ? Math.round(weekTotal / weekDaysWithData) : 0;
+
+            // ── Step streak (consecutive goal days going back from today) ──
+            let streak = 0;
+            for (let i = 0; i < 365; i++) {
+                const d = new Date(today);
+                d.setDate(today.getDate() - i);
+                const key = d.toISOString().split('T')[0];
+                if ((byDate[key] || 0) >= GOAL) streak++;
+                else break;
+            }
+
+            // Best streak (scan full history)
+            const sortedDates = Object.keys(byDate).filter(k => byDate[k] >= GOAL).sort();
+            let bestStreak = 0, run = 0, prevDate = null;
+            sortedDates.forEach(k => {
+                if (!prevDate) { run = 1; }
+                else {
+                    const diff = (new Date(k) - new Date(prevDate)) / 86400000;
+                    run = diff === 1 ? run + 1 : 1;
+                }
+                if (run > bestStreak) bestStreak = run;
+                prevDate = k;
+            });
+            bestStreak = Math.max(bestStreak, streak);
+
+            // ── Personal best ─────────────────────────────────────────────
+            let pbSteps = 0, pbDate = '';
+            Object.entries(byDate).forEach(([k, v]) => {
+                if (v > pbSteps) { pbSteps = v; pbDate = k; }
+            });
+            const isPbToday = pbDate === todayKey;
+
+            // ── Render ────────────────────────────────────────────────────
+            const set = (id, v) => { const e = document.getElementById(id); if (e) e.textContent = v; };
+
+            set('wr-week-total', weekTotal ? weekTotal.toLocaleString() : '—');
+            set('wr-week-avg',   weekAvg   ? weekAvg.toLocaleString()   : '—');
+            set('wr-days-hit',   `${daysGoalHit} / ${daysFromMon + 1}`);
+            set('wr-step-streak', streak > 0 ? `${streak}d` : '0d');
+
+            set('wr-step-pb', pbSteps ? pbSteps.toLocaleString() : '—');
+            const pbDateEl = document.getElementById('wr-pb-date');
+            if (pbDateEl && pbDate) {
+                const d = new Date(pbDate + 'T00:00:00');
+                pbDateEl.textContent = isPbToday ? '🎉 set today!' :
+                    d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+            }
+
+            // Highlight streak cell when on a streak
+            const streakTile = document.getElementById('wr-step-streak')?.closest('.wr-insight-tile');
+            if (streakTile) streakTile.classList.toggle('wr-insight-hot', streak >= 3);
+
+            // Celebrate PB set today
+            const pbKey = 'fixit-step-pb-celebrated-' + todayKey;
+            if (isPbToday && pbSteps > 0 && !localStorage.getItem(pbKey)) {
+                localStorage.setItem(pbKey, '1');
+                setTimeout(() => showToast('🏅 New personal best! ' + pbSteps.toLocaleString() + ' steps!', 'success', 5000), 800);
+            }
+        }
+
         let _wrStepChartInstance = null;
         let _wrAllSessions = [];
         let _wrChartDays = 7;
@@ -15904,6 +15991,8 @@ Please try again with a different photo.`;
         }
 
         function _renderWearableSessions(sessions) {
+            // Insights: weekly summary, streak, personal best
+            _renderWearableInsights(sessions);
             // Always render the step chart (even with no sessions)
             _renderWearableStepChart(sessions, _wrChartDays);
 

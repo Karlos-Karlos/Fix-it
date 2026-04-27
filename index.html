@@ -16,7 +16,7 @@
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="styles.css?v=27">
+    <link rel="stylesheet" href="styles.css?v=28">
     <link rel="manifest" href="manifest.json">
     <!-- Chart.js for Progress Charts -->
     <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
@@ -3861,6 +3861,37 @@
                                 <div class="wr-tip-title">Quick fact</div>
                                 <div class="wr-tip-body">1,000 steps &asymp; 0.76 km and burns roughly 40&ndash;50 kcal.</div>
                             </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Weekly Summary + Streak + Personal Best -->
+                <div class="wr-insights-card">
+                    <div class="wr-insights-strip">
+                        <div class="wr-insight-tile">
+                            <div class="wr-insight-val" id="wr-week-total">—</div>
+                            <div class="wr-insight-lbl">this week</div>
+                        </div>
+                        <div class="wr-insight-divider"></div>
+                        <div class="wr-insight-tile">
+                            <div class="wr-insight-val" id="wr-week-avg">—</div>
+                            <div class="wr-insight-lbl">daily avg</div>
+                        </div>
+                        <div class="wr-insight-divider"></div>
+                        <div class="wr-insight-tile">
+                            <div class="wr-insight-val" id="wr-days-hit">—</div>
+                            <div class="wr-insight-lbl">goal days</div>
+                        </div>
+                        <div class="wr-insight-divider"></div>
+                        <div class="wr-insight-tile">
+                            <div class="wr-insight-val" id="wr-step-streak">—</div>
+                            <div class="wr-insight-lbl">day streak 🔥</div>
+                        </div>
+                        <div class="wr-insight-divider"></div>
+                        <div class="wr-insight-tile wr-insight-pb">
+                            <div class="wr-insight-val" id="wr-step-pb">—</div>
+                            <div class="wr-insight-lbl">personal best 🏅</div>
+                            <div class="wr-pb-date" id="wr-pb-date"></div>
                         </div>
                     </div>
                 </div>

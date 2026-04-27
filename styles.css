@@ -16372,6 +16372,56 @@
     letter-spacing: 0.07em;
 }
 
+/* ── Insights Card ── */
+.wr-insights-card {
+    background: rgba(255,255,255,0.03);
+    border: 1px solid rgba(255,255,255,0.07);
+    border-radius: 16px;
+    padding: 16px 18px;
+    margin-bottom: 20px;
+}
+.wr-insights-strip {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 6px;
+}
+.wr-insight-tile {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 3px;
+    flex: 1;
+    min-width: 0;
+}
+.wr-insight-divider {
+    width: 1px;
+    height: 36px;
+    background: rgba(255,255,255,0.08);
+    flex-shrink: 0;
+}
+.wr-insight-val {
+    font-size: 1.05rem;
+    font-weight: 700;
+    color: var(--text-primary);
+    line-height: 1.1;
+}
+.wr-insight-lbl {
+    font-size: 0.62rem;
+    color: rgba(255,255,255,0.28);
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    text-align: center;
+    line-height: 1.3;
+}
+.wr-pb-date {
+    font-size: 0.58rem;
+    color: #c9a962;
+    margin-top: 1px;
+}
+.wr-insight-hot .wr-insight-val { color: #b87351; }
+.wr-insight-pb .wr-insight-val { color: #c9a962; }
+
 .wr-sessions {
     background: rgba(255,255,255,0.04);
     border: 1px solid rgba(255,255,255,0.08);
