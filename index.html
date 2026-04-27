@@ -24,7 +24,7 @@
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="styles.css?v=31">
+    <link rel="stylesheet" href="styles.css?v=32">
     <link rel="manifest" href="manifest.json">
     <!-- Chart.js for Progress Charts -->
     <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
@@ -39,6 +39,14 @@
     <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
     <!-- QRCode.js for wearable pairing -->
     <script src="https://cdn.jsdelivr.net/npm/qrcode@1.5.3/build/qrcode.min.js"></script>
+    <!-- Capture beforeinstallprompt BEFORE any app JS runs -->
+    <script>
+        window.__pwaPrompt = null;
+        window.addEventListener('beforeinstallprompt', function(e) {
+            e.preventDefault();
+            window.__pwaPrompt = e;
+        });
+    </script>
 </head>
 <body>
     <a href="#screen-upload" class="skip-to-content">Skip to content</a>
@@ -4736,6 +4744,16 @@
                     <input type="password" class="account-input" id="account-confirm-password" placeholder="Confirm new password">
                 </div>
                 <button class="account-save-btn account-save-btn--secondary" id="account-change-password">Update Password</button>
+            </div>
+
+            <div class="account-section" id="pwa-install-section">
+                <h3 class="account-section-title">App</h3>
+                <p class="account-danger-text" style="color:rgba(255,255,255,0.45);margin-bottom:12px;">Install FiX-it on your home screen for a native app experience — no app store needed.</p>
+                <button class="account-save-btn" id="account-install-btn" style="background:linear-gradient(135deg,#c9a962,#b87351);color:#141211;">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="15" height="15" style="vertical-align:middle;margin-right:6px"><path d="M4 12v8a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-8"/><polyline points="16 6 12 2 8 6"/><line x1="12" y1="2" x2="12" y2="15"/></svg>
+                    Install App
+                </button>
+                <p class="pwa-install-note" id="pwa-install-note" style="display:none;font-size:0.78rem;color:rgba(255,255,255,0.38);margin-top:10px;line-height:1.6;"></p>
             </div>
 
             <div class="account-section account-section--danger">

@@ -13682,8 +13682,6 @@ Please try again with a different photo.`;
 
         // ========== SERVICE WORKER + PWA INSTALL ==========
 
-        let _pwaInstallPrompt = null;
-
         function registerServiceWorker() {
             if (!('serviceWorker' in navigator)) return;
 
@@ -13695,7 +13693,6 @@ Please try again with a different photo.`;
                         if (!sw) return;
                         sw.addEventListener('statechange', () => {
                             if (sw.state === 'installed' && navigator.serviceWorker.controller) {
-                                // New version available — silently update on next load
                                 showToast('App updated — refresh for the latest version', 'info');
                             }
                         });
@@ -13703,68 +13700,104 @@ Please try again with a different photo.`;
                 })
                 .catch(err => console.warn('[SW]', err));
 
-            // Android Chrome: capture install prompt
-            window.addEventListener('beforeinstallprompt', e => {
-                e.preventDefault();
-                _pwaInstallPrompt = e;
-                _showPwaBanner('android');
-            });
+            // Pick up the prompt captured in <head> before app JS ran
+            if (window.__pwaPrompt) _showPwaBanner('android');
 
-            // Already installed → don't show banner
             window.addEventListener('appinstalled', () => {
                 _hidePwaBanner();
-                _pwaInstallPrompt = null;
+                window.__pwaPrompt = null;
+                _updateInstallAccountBtn();
             });
 
-            // iOS Safari: show manual instructions if not already installed
             const isIOS = /iphone|ipad|ipod/i.test(navigator.userAgent);
             const isSafari = /safari/i.test(navigator.userAgent) && !/crios|fxios|chrome/i.test(navigator.userAgent);
-            const isStandalone = window.matchMedia('(display-mode: standalone)').matches || window.navigator.standalone;
-            const dismissed = localStorage.getItem('fixit-pwa-dismissed');
+            const isStandalone = window.matchMedia('(display-mode: standalone)').matches || !!window.navigator.standalone;
 
-            if (isIOS && isSafari && !isStandalone && !dismissed) {
-                setTimeout(() => _showPwaBanner('ios'), 8000);
+            if (isIOS && isSafari && !isStandalone) {
+                setTimeout(() => _showPwaBanner('ios'), 3000);
+            }
+
+            _updateInstallAccountBtn();
+        }
+
+        function _isInstallable() {
+            return !!window.__pwaPrompt;
+        }
+
+        function _isIosSafari() {
+            return /iphone|ipad|ipod/i.test(navigator.userAgent) &&
+                   /safari/i.test(navigator.userAgent) &&
+                   !/crios|fxios|chrome/i.test(navigator.userAgent);
+        }
+
+        function _isStandalone() {
+            return window.matchMedia('(display-mode: standalone)').matches || !!window.navigator.standalone;
+        }
+
+        function _updateInstallAccountBtn() {
+            const btn  = document.getElementById('account-install-btn');
+            const note = document.getElementById('pwa-install-note');
+            const sec  = document.getElementById('pwa-install-section');
+            if (!btn) return;
+
+            if (_isStandalone()) {
+                if (sec) sec.style.display = 'none';
+                return;
+            }
+
+            if (_isInstallable()) {
+                btn.textContent = 'Install App';
+                btn.disabled = false;
+                btn.onclick = async () => {
+                    window.__pwaPrompt.prompt();
+                    const { outcome } = await window.__pwaPrompt.userChoice;
+                    if (outcome === 'accepted') { window.__pwaPrompt = null; _updateInstallAccountBtn(); }
+                };
+            } else if (_isIosSafari()) {
+                btn.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="15" height="15" style="vertical-align:middle;margin-right:6px"><path d="M4 12v8a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-8"/><polyline points="16 6 12 2 8 6"/><line x1="12" y1="2" x2="12" y2="15"/></svg>How to Install (iOS)';
+                btn.onclick = () => {
+                    if (note) {
+                        note.style.display = 'block';
+                        note.innerHTML = 'Tap the <strong style="color:#c9a962">Share</strong> button at the bottom of Safari, then tap <strong style="color:#c9a962">Add to Home Screen</strong>.';
+                    }
+                };
+            } else {
+                // Not installable and not iOS — hide the section
+                if (sec) sec.style.display = 'none';
             }
         }
 
         function _showPwaBanner(type) {
-            const dismissed = localStorage.getItem('fixit-pwa-dismissed');
-            if (dismissed) return;
-            const isStandalone = window.matchMedia('(display-mode: standalone)').matches || window.navigator.standalone;
-            if (isStandalone) return;
+            if (_isStandalone()) return;
 
-            const banner = document.getElementById('pwa-banner');
+            const banner     = document.getElementById('pwa-banner');
             const installBtn = document.getElementById('pwa-install-btn');
             const dismissBtn = document.getElementById('pwa-dismiss-btn');
-            const sub = document.getElementById('pwa-banner-sub');
+            const sub        = document.getElementById('pwa-banner-sub');
             if (!banner) return;
 
             if (type === 'ios') {
-                if (installBtn) { installBtn.textContent = 'How?'; }
-                if (sub) sub.textContent = 'Install FiX-it directly to your iPhone home screen';
+                if (installBtn) installBtn.textContent = 'How?';
+                if (sub) sub.textContent = 'Add FiX-it to your iPhone home screen';
                 if (installBtn) installBtn.onclick = () => {
                     _hidePwaBanner();
-                    const tip = document.getElementById('pwa-ios-tip');
-                    if (tip) tip.style.display = 'flex';
+                    const tip   = document.getElementById('pwa-ios-tip');
                     const close = document.getElementById('pwa-ios-tip-close');
+                    if (tip) tip.style.display = 'flex';
                     if (close) close.onclick = () => { tip.style.display = 'none'; };
                 };
             } else {
                 if (installBtn) installBtn.textContent = 'Install';
-                if (sub) sub.textContent = 'Add to your home screen for the full app experience';
+                if (sub) sub.textContent = 'Add to your home screen — works like a real app';
                 if (installBtn) installBtn.onclick = async () => {
-                    if (!_pwaInstallPrompt) return;
-                    _pwaInstallPrompt.prompt();
-                    const { outcome } = await _pwaInstallPrompt.userChoice;
-                    if (outcome === 'accepted') _hidePwaBanner();
-                    _pwaInstallPrompt = null;
+                    if (!window.__pwaPrompt) return;
+                    window.__pwaPrompt.prompt();
+                    const { outcome } = await window.__pwaPrompt.userChoice;
+                    if (outcome === 'accepted') { window.__pwaPrompt = null; _hidePwaBanner(); }
                 };
             }
 
-            if (dismissBtn) dismissBtn.onclick = () => {
-                _hidePwaBanner();
-                localStorage.setItem('fixit-pwa-dismissed', '1');
-            };
+            if (dismissBtn) dismissBtn.onclick = () => _hidePwaBanner();
 
             banner.style.display = 'flex';
         }
@@ -13932,6 +13965,7 @@ Please try again with a different photo.`;
             });
 
             document.getElementById('account-modal').style.display = 'flex';
+            _updateInstallAccountBtn();
         }
 
         function closeAccountModal() {
