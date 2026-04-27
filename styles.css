@@ -9131,6 +9131,16 @@
 
         /* ========== SCREEN 8: PROGRESS & GAMIFICATION ========== */
 
+        /* Nuclear pointer-events fix — overrides any cascade that blocks clicks */
+        #screen-progress,
+        #screen-progress * {
+            pointer-events: auto !important;
+        }
+        #screen-progress .progress-embers,
+        #screen-progress .progress-hero-glow {
+            pointer-events: none !important;
+        }
+
         .progress-container {
             max-width: 920px;
             margin: 0 auto;
