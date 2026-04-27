@@ -238,6 +238,12 @@ async function runMigrations() {
       is_active BOOLEAN      DEFAULT true
     )`,
 
+    // Widen thumbnail_url/image_url to TEXT so base64 data URLs fit (was VARCHAR(500))
+    'ALTER TABLE analysis_scans ALTER COLUMN thumbnail_url TYPE TEXT',
+    'ALTER TABLE analysis_scans ALTER COLUMN image_url TYPE TEXT',
+    'ALTER TABLE analysis_scans ALTER COLUMN thumbnail_url DROP NOT NULL',
+    'ALTER TABLE analysis_scans ALTER COLUMN image_url DROP NOT NULL',
+
     // Indexes for frequently queried user_id columns on tracking tables
     'CREATE INDEX IF NOT EXISTS idx_sleep_logs_user_id ON sleep_logs(user_id)',
     'CREATE INDEX IF NOT EXISTS idx_hydration_logs_user_id ON hydration_logs(user_id)',
