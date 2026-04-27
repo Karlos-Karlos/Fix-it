@@ -15545,15 +15545,25 @@ Please try again with a different photo.`;
 
             // Step ring (circumference ≈ 534.07)
             const arc = document.getElementById('wo-ring-arc');
+            const overflow = document.getElementById('wo-ring-overflow');
             if (arc) {
                 const GOAL = parseInt(localStorage.getItem('fixit-wearable-daily-goal')) || 10000;
+                const goalLbl = document.getElementById('wo-goal-label');
+                if (goalLbl) goalLbl.textContent = `Goal: ${GOAL.toLocaleString()}`;
                 const pct = Math.min(wearableState.steps / GOAL, 1);
                 arc.style.strokeDashoffset = (534.07 * (1 - pct)).toFixed(2);
                 if (wearableState.steps >= GOAL) {
                     const successColor = getComputedStyle(document.documentElement).getPropertyValue('--accent-success').trim() || '#7d9a78';
                     arc.setAttribute('stroke', successColor);
+                    if (overflow) {
+                        const overflowPct = Math.min((wearableState.steps / GOAL) - 1, 1);
+                        overflow.style.strokeDashoffset = (534.07 * (1 - overflowPct)).toFixed(2);
+                        overflow.setAttribute('stroke', successColor);
+                        overflow.style.display = '';
+                    }
                 } else {
                     arc.removeAttribute('stroke');
+                    if (overflow) overflow.style.display = 'none';
                 }
             }
 
@@ -16049,13 +16059,21 @@ Please try again with a different photo.`;
             // Animate ring (r=88, cx=cy=120, circumference=552.92)
             const CIRCUMFERENCE = 552.92;
             const arc = document.getElementById('wr-ring-fill');
+            const overflow = document.getElementById('wr-ring-overflow');
             if (arc) {
                 arc.style.strokeDashoffset = (CIRCUMFERENCE * (1 - pct)).toFixed(2);
                 if (steps >= GOAL) {
                     const successColor = getComputedStyle(document.documentElement).getPropertyValue('--accent-success').trim() || '#7d9a78';
                     arc.setAttribute('stroke', successColor);
+                    if (overflow) {
+                        const overflowPct = Math.min((steps / GOAL) - 1, 1);
+                        overflow.style.strokeDashoffset = (CIRCUMFERENCE * (1 - overflowPct)).toFixed(2);
+                        overflow.setAttribute('stroke', successColor);
+                        overflow.style.display = '';
+                    }
                 } else {
                     arc.setAttribute('stroke', 'url(#wr-grad)');
+                    if (overflow) overflow.style.display = 'none';
                 }
             }
         }

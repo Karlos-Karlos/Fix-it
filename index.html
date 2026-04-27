@@ -24,7 +24,7 @@
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="styles.css?v=42">
+    <link rel="stylesheet" href="styles.css?v=43">
     <link rel="manifest" href="manifest.json">
     <!-- Chart.js for Progress Charts -->
     <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
@@ -3745,6 +3745,12 @@
                                     stroke-dasharray="552.92"
                                     stroke-dashoffset="552.92"
                                     transform="rotate(-90 120 120)"/>
+                                <circle class="wr-arc wr-arc-overflow" id="wr-ring-overflow"
+                                    cx="120" cy="120" r="88"
+                                    stroke-dasharray="552.92"
+                                    stroke-dashoffset="552.92"
+                                    transform="rotate(-90 120 120)"
+                                    style="display:none"/>
                             </svg>
                             <div class="wr-ring-center">
                                 <div class="wr-steps-big" id="today-steps">&#8212;</div>
@@ -5028,11 +5034,15 @@
                 <circle cx="100" cy="100" r="85" class="wo-ring-fill" id="wo-ring-arc"
                     stroke-dasharray="534.07" stroke-dashoffset="534.07"
                     transform="rotate(-90 100 100)"/>
+                <circle cx="100" cy="100" r="85" class="wo-ring-fill wo-ring-overflow" id="wo-ring-overflow"
+                    stroke-dasharray="534.07" stroke-dashoffset="534.07"
+                    transform="rotate(-90 100 100)"
+                    style="display:none"/>
             </svg>
             <div class="wo-ring-content">
                 <div class="wo-steps-num" id="wo-steps-display">0</div>
                 <div class="wo-steps-unit">steps</div>
-                <div class="wo-goal-label">Goal: 10,000</div>
+                <div class="wo-goal-label" id="wo-goal-label">Goal: 10,000</div>
             </div>
         </div>
 
