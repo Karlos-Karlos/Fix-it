@@ -15123,25 +15123,51 @@ Please try again with a different photo.`;
 
         // ── Mobile overlay ────────────────────────────────────────────
 
+        let _woOverlayInited = false;
+
         function initWearableOverlay() {
             const overlay = document.getElementById('wearable-overlay');
             if (!overlay) return;
             overlay.style.display = 'flex';
             document.body.style.overflow = 'hidden';
 
-            // Hide normal app shell
+            // Hide normal app shell when launched from the app
             const appContainer = document.querySelector('.app-container');
             if (appContainer) appContainer.style.display = 'none';
 
-            document.getElementById('wo-start-btn').addEventListener('click', _woToggleSession);
-            document.getElementById('wo-hr-btn').addEventListener('click', _woStartHR);
-            document.getElementById('wo-save-btn').addEventListener('click', _woSaveSession);
-            document.getElementById('wo-hr-cancel').addEventListener('click', _woCancelHR);
+            // Wire buttons only once
+            if (!_woOverlayInited) {
+                document.getElementById('wo-start-btn').addEventListener('click', _woToggleSession);
+                document.getElementById('wo-hr-btn').addEventListener('click', _woStartHR);
+                document.getElementById('wo-save-btn').addEventListener('click', _woSaveSession);
+                document.getElementById('wo-hr-cancel').addEventListener('click', _woCancelHR);
+                const closeBtn = document.getElementById('wo-close-btn');
+                if (closeBtn) closeBtn.addEventListener('click', _woCloseOverlay);
+                _woOverlayInited = true;
+            }
 
             _woUpdateUI();
-
-            // Upload any locally-saved sessions that never made it to the server
             setTimeout(_woSyncUnsynced, 2000);
+        }
+
+        function _woCloseOverlay() {
+            // Stop active session timer but keep step count (don't reset)
+            if (wearableState.isRunning) {
+                clearInterval(wearableState.timerInterval);
+                wearableState.isRunning = false;
+                const btn = document.getElementById('wo-start-btn');
+                if (btn) {
+                    btn.innerHTML = '<svg viewBox="0 0 24 24" fill="currentColor" width="20" height="20"><polygon points="5 3 19 12 5 21 5 3"/></svg><span>Start</span>';
+                    btn.className = 'wo-btn wo-btn-start';
+                }
+            }
+            const overlay = document.getElementById('wearable-overlay');
+            if (overlay) overlay.style.display = 'none';
+            const appContainer = document.querySelector('.app-container');
+            if (appContainer) appContainer.style.display = '';
+            document.body.style.overflow = '';
+            // Refresh wearables data so new session shows immediately
+            if (typeof _loadWearableData === 'function') _loadWearableData();
         }
 
         async function _woSyncUnsynced() {
@@ -15526,55 +15552,9 @@ Please try again with a different photo.`;
         let _wearablePollInterval = null;
 
         async function initWearableScreen() {
-            const origin = location.origin;
-            const isPublicUrl = !origin.includes('localhost') &&
-                                !origin.includes('127.0.0.1') &&
-                                !origin.startsWith('file:');
-
             if (!_wearableScreenInitialized) {
-                const tabInfo    = document.getElementById('wr-tab-info');
-                const tabQr      = document.getElementById('wr-tab-qr');
-                const panelInfo  = document.getElementById('wearable-setup-guide');
-                const panelQr    = document.getElementById('wearable-qr-section');
-
-                const showTab = (tab) => {
-                    const isQr = tab === 'qr';
-                    tabInfo.classList.toggle('wr-tab-active', !isQr);
-                    tabQr.classList.toggle('wr-tab-active', isQr);
-                    if (panelInfo) panelInfo.style.display = isQr ? 'none' : '';
-                    if (panelQr)   panelQr.style.display   = isQr ? 'flex' : 'none';
-                };
-
-                if (tabInfo) tabInfo.addEventListener('click', () => showTab('info'));
-                if (tabQr)   tabQr.addEventListener('click',   () => showTab('qr'));
-
-                if (isPublicUrl) {
-                    const wearableUrl = origin + '/index.html?wearable=1';
-                    const urlEl = document.getElementById('wearable-qr-url');
-                    if (urlEl) urlEl.textContent = wearableUrl;
-
-                    // Pre-load QR image so it's ready when tab is clicked
-                    const img     = document.getElementById('wearable-qr-img');
-                    const loading = document.getElementById('wearable-qr-loading');
-                    if (img) {
-                        const qrUrl = `https://api.qrserver.com/v1/create-qr-code/?size=160x160&margin=8&data=${encodeURIComponent(wearableUrl)}`;
-                        img.onload  = () => { img.style.display = 'block'; if (loading) loading.style.display = 'none'; };
-                        img.onerror = () => { if (loading) loading.textContent = 'QR unavailable — use Copy below'; };
-                        img.src = qrUrl;
-                    }
-
-                    const copyBtn = document.getElementById('wearable-copy-link');
-                    if (copyBtn) {
-                        copyBtn.addEventListener('click', () => {
-                            navigator.clipboard.writeText(wearableUrl)
-                                .then(() => showToast('Link copied!', 'success'))
-                                .catch(() => showToast('Copy failed — select manually', 'error'));
-                        });
-                    }
-                } else {
-                    // Localhost: disable QR tab
-                    if (tabQr) { tabQr.disabled = true; tabQr.title = 'Available on Railway (HTTPS)'; }
-                }
+                const startCountBtn = document.getElementById('wr-start-count-btn');
+                if (startCountBtn) startCountBtn.addEventListener('click', initWearableOverlay);
 
                 const refreshBtn = document.getElementById('wearable-refresh-btn');
                 if (refreshBtn) refreshBtn.addEventListener('click', _loadWearableData);

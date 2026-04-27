@@ -15813,6 +15813,17 @@
     border-radius: 20px;
     padding: 4px 12px;
 }
+.wo-close-btn {
+    width: 34px; height: 34px;
+    background: rgba(255,255,255,0.07);
+    border: 1px solid rgba(255,255,255,0.12);
+    border-radius: 50%;
+    display: flex; align-items: center; justify-content: center;
+    cursor: pointer; color: rgba(255,255,255,0.55);
+    transition: background 0.15s, color 0.15s;
+    flex-shrink: 0;
+}
+.wo-close-btn:hover { background: rgba(255,255,255,0.13); color: #fff; }
 
 /* Step ring */
 .wo-ring-wrap {
@@ -16283,6 +16294,35 @@
 .wr-live-pill { display: flex; align-items: center; justify-content: center; gap: 7px; font-size: 0.71rem; color: rgba(255,255,255,0.28); }
 .wr-live-dot { width: 6px; height: 6px; background: #7d9a78; border-radius: 50%; animation: wr-pulse 2.2s ease-in-out infinite; }
 @keyframes wr-pulse { 0%,100%{opacity:1;transform:scale(1)} 50%{opacity:0.3;transform:scale(0.6)} }
+
+/* ── Start Count Card ── */
+.wr-start-card {
+    background: rgba(255,255,255,0.04);
+    border: 1px solid rgba(255,255,255,0.08);
+    border-radius: 20px;
+    padding: 24px 18px 20px;
+    display: flex; flex-direction: column; align-items: center; gap: 10px;
+    text-align: center;
+}
+.wr-start-icon-wrap {
+    width: 56px; height: 56px;
+    background: rgba(201,169,98,0.1); border: 1px solid rgba(201,169,98,0.22);
+    border-radius: 16px; display: flex; align-items: center; justify-content: center;
+    color: #c9a962; margin-bottom: 4px;
+}
+.wr-start-title { font-size: 0.95rem; font-weight: 700; color: var(--text-primary); margin: 0; }
+.wr-start-sub { font-size: 0.77rem; color: rgba(255,255,255,0.38); line-height: 1.55; margin: 0 0 6px; }
+.wr-start-count-btn {
+    display: inline-flex; align-items: center; gap: 8px;
+    padding: 11px 26px;
+    background: linear-gradient(135deg, #c9a962, #b87351);
+    border: none; border-radius: 30px;
+    color: #141211; font-size: 0.88rem; font-weight: 700;
+    cursor: pointer; transition: opacity 0.18s, transform 0.15s;
+    font-family: 'Plus Jakarta Sans', sans-serif;
+}
+.wr-start-count-btn:hover { opacity: 0.88; transform: translateY(-1px); }
+.wr-start-count-btn:active { transform: translateY(0); }
 
 .wr-tip-card {
     background: rgba(125,154,120,0.07); border: 1px solid rgba(125,154,120,0.15);
