@@ -10331,7 +10331,7 @@ Please try again with a different photo.`;
                         const extra = CHALLENGE_KEY_MAP[r.metric_key] || { key: `fixit-${r.metric_key}` };
                         return { id: r.id, name: r.name, icon: r.icon, target: r.target, key: extra.key, ...(extra.isArray ? { isArray: true } : {}) };
                     }).filter(c => c.key);
-                    if (mapped.length > 0) CHALLENGE_POOL = mapped;
+                    if (mapped.length >= 3) CHALLENGE_POOL = mapped;
                 }
             } catch (e) {
                 console.warn('Could not load challenge pool from API:', e);
@@ -10402,11 +10402,13 @@ Please try again with a different photo.`;
                 localStorage.setItem(weekKey, JSON.stringify(baseline));
             }
 
-            // Seed-based selection: pick 3 challenges deterministically from pool
+            // Seed-based selection: pick up to 3 challenges deterministically from pool
+            const numPick = Math.min(3, CHALLENGE_POOL.length);
             const seed = year * 100 + weekNum;
             const indices = [];
             let s = seed;
-            while (indices.length < 3) {
+            let iters = 0;
+            while (indices.length < numPick && iters++ < 10000) {
                 s = (s * 1103515245 + 12345) & 0x7fffffff;
                 const idx = s % CHALLENGE_POOL.length;
                 if (!indices.includes(idx)) indices.push(idx);
