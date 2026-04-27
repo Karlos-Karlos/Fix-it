@@ -13724,10 +13724,18 @@ Please try again with a different photo.`;
             return !!window.__pwaPrompt;
         }
 
+        function _isIos() {
+            return /iphone|ipad|ipod/i.test(navigator.userAgent);
+        }
+
         function _isIosSafari() {
-            return /iphone|ipad|ipod/i.test(navigator.userAgent) &&
+            return _isIos() &&
                    /safari/i.test(navigator.userAgent) &&
                    !/crios|fxios|chrome/i.test(navigator.userAgent);
+        }
+
+        function _isIosChrome() {
+            return _isIos() && /crios/i.test(navigator.userAgent);
         }
 
         function _isStandalone() {
@@ -13753,8 +13761,19 @@ Please try again with a different photo.`;
                     const { outcome } = await window.__pwaPrompt.userChoice;
                     if (outcome === 'accepted') { window.__pwaPrompt = null; _updateInstallAccountBtn(); }
                 };
+            } else if (_isIosChrome()) {
+                btn.textContent = 'Open in Safari to Install';
+                btn.style.background = 'rgba(255,255,255,0.08)';
+                btn.style.color = 'rgba(255,255,255,0.6)';
+                btn.style.border = '1px solid rgba(255,255,255,0.12)';
+                btn.onclick = () => {
+                    if (note) {
+                        note.style.display = 'block';
+                        note.innerHTML = 'Chrome on iPhone cannot install apps. Open this page in <strong style="color:#c9a962">Safari</strong>, then tap Share → <strong style="color:#c9a962">Add to Home Screen</strong>.';
+                    }
+                };
             } else if (_isIosSafari()) {
-                btn.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="15" height="15" style="vertical-align:middle;margin-right:6px"><path d="M4 12v8a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-8"/><polyline points="16 6 12 2 8 6"/><line x1="12" y1="2" x2="12" y2="15"/></svg>How to Install (iOS)';
+                btn.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="15" height="15" style="vertical-align:middle;margin-right:6px"><path d="M4 12v8a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-8"/><polyline points="16 6 12 2 8 6"/><line x1="12" y1="2" x2="12" y2="15"/></svg>How to Install';
                 btn.onclick = () => {
                     if (note) {
                         note.style.display = 'block';
@@ -13762,7 +13781,6 @@ Please try again with a different photo.`;
                     }
                 };
             } else {
-                // Not installable and not iOS — hide the section
                 if (sec) sec.style.display = 'none';
             }
         }
