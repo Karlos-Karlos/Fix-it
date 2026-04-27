@@ -16042,7 +16042,10 @@ Please try again with a different photo.`;
             // Animate ring (r=88, cx=cy=120, circumference=552.92)
             const CIRCUMFERENCE = 552.92;
             const arc = document.getElementById('wr-ring-fill');
-            if (arc) arc.style.strokeDashoffset = (CIRCUMFERENCE * (1 - pct)).toFixed(2);
+            if (arc) {
+                arc.style.strokeDashoffset = (CIRCUMFERENCE * (1 - pct)).toFixed(2);
+                arc.classList.toggle('goal-done', steps >= GOAL);
+            }
         }
 
         function _renderWearableInsights(sessions) {
