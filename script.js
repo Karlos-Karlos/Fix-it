@@ -16093,11 +16093,16 @@ Please try again with a different photo.`;
             const GOAL = parseInt(localStorage.getItem('fixit-wearable-daily-goal')) || 10000;
             const today = new Date();
 
-            // Build a map of date → session for fast lookup
+            // Build a map of date → aggregated totals (sum across multiple sessions per day)
             const byDate = {};
             _wrAllSessions.forEach(s => {
                 const d = (s.date || s.session_date || '').toString().split('T')[0];
-                if (d) byDate[d] = s;
+                if (!d) return;
+                if (!byDate[d]) byDate[d] = { steps: 0, calories: 0, activeSecs: 0 };
+                byDate[d].steps     += Number(s.steps    || 0);
+                byDate[d].calories  += Number(s.calories || 0);
+                byDate[d].activeSecs += Number(s.activeSecs || s.active_secs || 0);
+                if (s.hr || s.hr_avg) byDate[d].hr = s.hr || s.hr_avg;
             });
 
             // Build last N days oldest → newest
