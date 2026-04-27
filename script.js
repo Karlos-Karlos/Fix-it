@@ -15546,8 +15546,15 @@ Please try again with a different photo.`;
             // Step ring (circumference ≈ 534.07)
             const arc = document.getElementById('wo-ring-arc');
             if (arc) {
-                const pct = Math.min(wearableState.steps / 10000, 1);
+                const GOAL = parseInt(localStorage.getItem('fixit-wearable-daily-goal')) || 10000;
+                const pct = Math.min(wearableState.steps / GOAL, 1);
                 arc.style.strokeDashoffset = (534.07 * (1 - pct)).toFixed(2);
+                if (wearableState.steps >= GOAL) {
+                    const successColor = getComputedStyle(document.documentElement).getPropertyValue('--accent-success').trim() || '#7d9a78';
+                    arc.setAttribute('stroke', successColor);
+                } else {
+                    arc.removeAttribute('stroke');
+                }
             }
 
             const calEl = document.getElementById('wo-cal-display');
