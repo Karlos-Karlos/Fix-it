@@ -15119,7 +15119,63 @@ Please try again with a different photo.`;
             motionListener: null,
             rising: false,
             lastStepTime: 0,
+            // background tracking
+            _accSecs: 0,        // accumulated secs before current run segment
+            _runStartWall: null, // wall time when current segment started
+            _bgStart: null,     // wall time when tab went to background
         };
+
+        let _woWakeLock = null;
+
+        async function _woRequestWakeLock() {
+            if ('wakeLock' in navigator) {
+                try {
+                    _woWakeLock = await navigator.wakeLock.request('screen');
+                    _woWakeLock.addEventListener('release', () => { _woWakeLock = null; });
+                } catch (_) { /* not supported or denied */ }
+            }
+        }
+
+        function _woReleaseWakeLock() {
+            if (_woWakeLock) { _woWakeLock.release(); _woWakeLock = null; }
+        }
+
+        function _woHandleVisibility() {
+            if (!wearableState.isRunning) return;
+
+            if (document.visibilityState === 'hidden') {
+                // Going to background — record when
+                wearableState._bgStart = Date.now();
+                // Freeze accumulated secs at current value
+                if (wearableState._runStartWall) {
+                    wearableState._accSecs += Math.round((Date.now() - wearableState._runStartWall) / 1000);
+                    wearableState.activeSecs = wearableState._accSecs;
+                    wearableState._runStartWall = null;
+                }
+            } else if (document.visibilityState === 'visible' && wearableState._bgStart) {
+                // Returning to foreground
+                const bgElapsed = Math.round((Date.now() - wearableState._bgStart) / 1000);
+                wearableState._bgStart = null;
+
+                if (bgElapsed > 2) {
+                    // Add background time to active secs
+                    wearableState._accSecs += bgElapsed;
+                    wearableState.activeSecs = wearableState._accSecs;
+                    // Estimate steps at ~90 steps/min (typical walking cadence)
+                    const estimated = Math.round(bgElapsed * 1.5);
+                    wearableState.steps += estimated;
+                    const weightKg = (state && state.weight) || 70;
+                    wearableState.calories = Math.round(wearableState.steps * 0.04 * (weightKg / 70));
+                    _woSetStatus(`+${estimated} steps estimated while away`);
+                    setTimeout(() => { if (wearableState.isRunning) _woSetStatus('Tracking...'); }, 3000);
+                }
+
+                // Resume wall-clock segment and re-request wake lock
+                wearableState._runStartWall = Date.now();
+                _woRequestWakeLock();
+                _woUpdateUI();
+            }
+        }
 
         // ── Mobile overlay ────────────────────────────────────────────
 
@@ -15143,6 +15199,7 @@ Please try again with a different photo.`;
                 document.getElementById('wo-hr-cancel').addEventListener('click', _woCancelHR);
                 const closeBtn = document.getElementById('wo-close-btn');
                 if (closeBtn) closeBtn.addEventListener('click', _woCloseOverlay);
+                document.addEventListener('visibilitychange', _woHandleVisibility);
                 _woOverlayInited = true;
             }
 
@@ -15154,6 +15211,7 @@ Please try again with a different photo.`;
             // Stop active session timer but keep step count (don't reset)
             if (wearableState.isRunning) {
                 clearInterval(wearableState.timerInterval);
+                _woReleaseWakeLock();
                 wearableState.isRunning = false;
                 const btn = document.getElementById('wo-start-btn');
                 if (btn) {
@@ -15234,13 +15292,23 @@ Please try again with a different photo.`;
             wearableState.isRunning = true;
             if (!wearableState.startTime) wearableState.startTime = Date.now();
 
+            // Save accumulated secs so far, start a new wall-clock segment
+            wearableState._accSecs = wearableState.activeSecs;
+            wearableState._runStartWall = Date.now();
+
             wearableState.motionListener = _woHandleMotion;
             window.addEventListener('devicemotion', wearableState.motionListener);
 
+            // Use wall-clock diff for accurate timing even when throttled in background
             wearableState.timerInterval = setInterval(() => {
-                wearableState.activeSecs++;
+                if (wearableState._runStartWall && !wearableState._bgStart) {
+                    wearableState.activeSecs = wearableState._accSecs +
+                        Math.round((Date.now() - wearableState._runStartWall) / 1000);
+                }
                 _woUpdateUI();
             }, 1000);
+
+            await _woRequestWakeLock();
 
             const btn = document.getElementById('wo-start-btn');
             btn.classList.add('running');
@@ -15252,11 +15320,19 @@ Please try again with a different photo.`;
         function _woPause() {
             wearableState.isRunning = false;
 
+            // Freeze accumulated secs at current value before stopping
+            if (wearableState._runStartWall) {
+                wearableState._accSecs += Math.round((Date.now() - wearableState._runStartWall) / 1000);
+                wearableState.activeSecs = wearableState._accSecs;
+                wearableState._runStartWall = null;
+            }
+
             if (wearableState.motionListener) {
                 window.removeEventListener('devicemotion', wearableState.motionListener);
                 wearableState.motionListener = null;
             }
             clearInterval(wearableState.timerInterval);
+            _woReleaseWakeLock();
 
             const btn = document.getElementById('wo-start-btn');
             btn.classList.remove('running');
@@ -15523,6 +15599,7 @@ Please try again with a different photo.`;
                 window.removeEventListener('devicemotion', wearableState.motionListener);
             }
             clearInterval(wearableState.timerInterval);
+            _woReleaseWakeLock();
 
             Object.assign(wearableState, {
                 isRunning: false,
@@ -15536,6 +15613,9 @@ Please try again with a different photo.`;
                 motionListener: null,
                 rising: false,
                 lastStepTime: 0,
+                _accSecs: 0,
+                _runStartWall: null,
+                _bgStart: null,
             });
 
             const btn = document.getElementById('wo-start-btn');
