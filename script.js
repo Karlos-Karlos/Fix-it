@@ -15551,10 +15551,72 @@ Please try again with a different photo.`;
         let _wearableScreenInitialized = false;
         let _wearablePollInterval = null;
 
+        function _isMobileDevice() {
+            return /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent)
+                || (navigator.maxTouchPoints > 1 && window.innerWidth < 1024);
+        }
+
         async function initWearableScreen() {
             if (!_wearableScreenInitialized) {
-                const startCountBtn = document.getElementById('wr-start-count-btn');
-                if (startCountBtn) startCountBtn.addEventListener('click', initWearableOverlay);
+                const isMobile = _isMobileDevice();
+                const startCard   = document.getElementById('wr-start-card');
+                const connectCard = document.getElementById('wr-connect-card');
+
+                // Show the appropriate card based on device type
+                if (isMobile) {
+                    if (startCard)   startCard.style.display   = '';
+                    if (connectCard) connectCard.style.display = 'none';
+                    const startCountBtn = document.getElementById('wr-start-count-btn');
+                    if (startCountBtn) startCountBtn.addEventListener('click', initWearableOverlay);
+                } else {
+                    if (startCard)   startCard.style.display   = 'none';
+                    if (connectCard) connectCard.style.display = '';
+
+                    const origin = location.origin;
+                    const isPublicUrl = !origin.includes('localhost') &&
+                                        !origin.includes('127.0.0.1') &&
+                                        !origin.startsWith('file:');
+
+                    const tabInfo  = document.getElementById('wr-tab-info');
+                    const tabQr    = document.getElementById('wr-tab-qr');
+                    const panelInfo = document.getElementById('wearable-setup-guide');
+                    const panelQr   = document.getElementById('wearable-qr-section');
+
+                    const showTab = (tab) => {
+                        const isQr = tab === 'qr';
+                        tabInfo.classList.toggle('wr-tab-active', !isQr);
+                        tabQr.classList.toggle('wr-tab-active', isQr);
+                        if (panelInfo) panelInfo.style.display = isQr ? 'none' : '';
+                        if (panelQr)   panelQr.style.display   = isQr ? 'flex' : 'none';
+                    };
+                    if (tabInfo) tabInfo.addEventListener('click', () => showTab('info'));
+                    if (tabQr)   tabQr.addEventListener('click',   () => showTab('qr'));
+
+                    if (isPublicUrl) {
+                        const wearableUrl = origin + '/index.html?wearable=1';
+                        const urlEl = document.getElementById('wearable-qr-url');
+                        if (urlEl) urlEl.textContent = wearableUrl;
+
+                        const img     = document.getElementById('wearable-qr-img');
+                        const loading = document.getElementById('wearable-qr-loading');
+                        if (img) {
+                            const qrUrl = `https://api.qrserver.com/v1/create-qr-code/?size=160x160&margin=8&data=${encodeURIComponent(wearableUrl)}`;
+                            img.onload  = () => { img.style.display = 'block'; if (loading) loading.style.display = 'none'; };
+                            img.onerror = () => { if (loading) loading.textContent = 'QR unavailable — use Copy below'; };
+                            img.src = qrUrl;
+                        }
+                        const copyBtn = document.getElementById('wearable-copy-link');
+                        if (copyBtn) {
+                            copyBtn.addEventListener('click', () => {
+                                navigator.clipboard.writeText(wearableUrl)
+                                    .then(() => showToast('Link copied!', 'success'))
+                                    .catch(() => showToast('Copy failed — select manually', 'error'));
+                            });
+                        }
+                    } else {
+                        if (tabQr) { tabQr.disabled = true; tabQr.title = 'Available on Railway (HTTPS)'; }
+                    }
+                }
 
                 const refreshBtn = document.getElementById('wearable-refresh-btn');
                 if (refreshBtn) refreshBtn.addEventListener('click', _loadWearableData);

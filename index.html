@@ -16,7 +16,7 @@
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="styles.css?v=29">
+    <link rel="stylesheet" href="styles.css?v=30">
     <link rel="manifest" href="manifest.json">
     <!-- Chart.js for Progress Charts -->
     <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
@@ -3808,7 +3808,8 @@
 
                     <!-- Right column -->
                     <div class="wr-right-col">
-                        <div class="wr-start-card">
+                        <!-- Mobile: Start Count button -->
+                        <div class="wr-start-card" id="wr-start-card" style="display:none">
                             <div class="wr-start-icon-wrap">
                                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" width="30" height="30"><path d="M13 4a1 1 0 1 1 2 0 1 1 0 0 1-2 0z" fill="currentColor" stroke="none"/><path d="M5.5 16.5c1-2 2-3.5 3-5l2 2 3-5.5"/><path d="M17 17l-2-4-2.5 1.5"/></svg>
                             </div>
@@ -3818,6 +3819,52 @@
                                 <svg viewBox="0 0 24 24" fill="currentColor" width="16" height="16"><polygon points="5 3 19 12 5 21 5 3"/></svg>
                                 Start Counting
                             </button>
+                        </div>
+
+                        <!-- Desktop: QR connect card -->
+                        <div class="wr-connect-card" id="wr-connect-card" style="display:none">
+                            <!-- Tab bar -->
+                            <div class="wr-tab-bar">
+                                <button class="wr-tab-btn wr-tab-active" id="wr-tab-info">
+                                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="13" height="13"><rect x="5" y="2" width="14" height="20" rx="2"/><path d="M12 18h.01"/></svg>
+                                    Connect
+                                </button>
+                                <button class="wr-tab-btn" id="wr-tab-qr">
+                                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="13" height="13"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/><path d="M14 14h3v3h-3zM17 17h3v3h-3zM14 20h3"/></svg>
+                                    QR Code
+                                </button>
+                            </div>
+
+                            <!-- Connect panel (default) -->
+                            <div id="wearable-setup-guide" class="wr-tab-panel">
+                                <div class="wr-phone-icon">
+                                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" width="24" height="24"><rect x="5" y="2" width="14" height="20" rx="2"/><path d="M12 18h.01"/></svg>
+                                </div>
+                                <h3 class="wr-connect-h3">Connect Your Phone</h3>
+                                <p class="wr-connect-sub">Open the QR Code tab and scan with your phone to start tracking steps.</p>
+                                <div class="wr-how-steps">
+                                    <div class="wr-how-step"><span class="wr-how-num">01</span><span>Open the <strong>QR Code</strong> tab above</span></div>
+                                    <div class="wr-how-step"><span class="wr-how-num">02</span><span>Scan with your phone camera</span></div>
+                                    <div class="wr-how-step"><span class="wr-how-num">03</span><span>Tap <strong>Start</strong> and start moving</span></div>
+                                </div>
+                            </div>
+
+                            <!-- QR panel (shown on tab click) -->
+                            <div id="wearable-qr-section" style="display:none" class="wr-tab-panel wr-qr-section">
+                                <div class="wr-qr-frame">
+                                    <img id="wearable-qr-img" src="" alt="QR Code" width="160" height="160" style="display:none; border-radius:6px;">
+                                    <div id="wearable-qr-loading" class="wr-qr-loading">Generating...</div>
+                                </div>
+                                <p class="wr-qr-hint">Scan to open the live tracker on your phone</p>
+                                <div class="wr-url-row">
+                                    <span class="wr-url-text" id="wearable-qr-url"></span>
+                                    <button class="wr-copy-btn" id="wearable-copy-link">Copy</button>
+                                </div>
+                            </div>
+
+                            <div class="wr-live-pill">
+                                <span class="wr-live-dot"></span> Live &middot; syncs every 60s
+                            </div>
                         </div>
 
                         <div class="wr-tip-card">
