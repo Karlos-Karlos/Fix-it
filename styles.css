@@ -16728,3 +16728,114 @@
     color: var(--accent-primary);
     background: var(--accent-primary-subtle);
 }
+
+/* ══════════════════════════════════════════
+   PWA — Install Banner & iOS Tip
+══════════════════════════════════════════ */
+.pwa-banner {
+    position: fixed;
+    bottom: 0; left: 0; right: 0;
+    z-index: 9999;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 14px 16px;
+    padding-bottom: calc(14px + env(safe-area-inset-bottom));
+    background: #1e1b18;
+    border-top: 1px solid rgba(201,169,98,0.25);
+    box-shadow: 0 -8px 32px rgba(0,0,0,0.5);
+    animation: pwaSlideUp 0.3s ease;
+}
+@keyframes pwaSlideUp {
+    from { transform: translateY(100%); opacity: 0; }
+    to   { transform: translateY(0);   opacity: 1; }
+}
+.pwa-banner-logo {
+    width: 40px; height: 40px; flex-shrink: 0;
+    background: rgba(201,169,98,0.1);
+    border: 1px solid rgba(201,169,98,0.25);
+    border-radius: 10px;
+    display: flex; align-items: center; justify-content: center;
+}
+.pwa-banner-text {
+    flex: 1;
+    display: flex; flex-direction: column; gap: 2px;
+    min-width: 0;
+}
+.pwa-banner-title {
+    font-size: 0.88rem; font-weight: 700; color: var(--text-primary);
+}
+.pwa-banner-sub {
+    font-size: 0.72rem; color: rgba(255,255,255,0.38);
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.pwa-install-btn {
+    flex-shrink: 0;
+    padding: 8px 16px;
+    background: linear-gradient(135deg, #c9a962, #b87351);
+    border: none; border-radius: 20px;
+    color: #141211; font-size: 0.82rem; font-weight: 700;
+    cursor: pointer; transition: opacity 0.15s;
+    font-family: 'Plus Jakarta Sans', sans-serif;
+}
+.pwa-install-btn:hover { opacity: 0.85; }
+.pwa-dismiss-btn {
+    flex-shrink: 0; width: 28px; height: 28px;
+    background: rgba(255,255,255,0.07);
+    border: 1px solid rgba(255,255,255,0.1);
+    border-radius: 50%; display: flex; align-items: center; justify-content: center;
+    cursor: pointer; color: rgba(255,255,255,0.4);
+}
+.pwa-dismiss-btn:hover { color: rgba(255,255,255,0.7); }
+
+/* iOS "How to install" tooltip */
+.pwa-ios-tip {
+    position: fixed;
+    bottom: calc(20px + env(safe-area-inset-bottom));
+    left: 50%; transform: translateX(-50%);
+    z-index: 10000;
+    background: #1e1b18;
+    border: 1px solid rgba(201,169,98,0.3);
+    border-radius: 14px;
+    padding: 16px 20px;
+    width: calc(100% - 40px);
+    max-width: 360px;
+    flex-direction: column;
+    align-items: center;
+    gap: 12px;
+    text-align: center;
+    box-shadow: 0 8px 32px rgba(0,0,0,0.6);
+}
+.pwa-ios-tip p {
+    font-size: 0.88rem; color: rgba(255,255,255,0.7); margin: 0; line-height: 1.6;
+}
+.pwa-ios-tip strong { color: #c9a962; }
+.pwa-ios-tip-arrow {
+    width: 0; height: 0;
+    border-left: 10px solid transparent;
+    border-right: 10px solid transparent;
+    border-top: 10px solid rgba(201,169,98,0.3);
+    position: absolute; bottom: -10px; left: 50%; transform: translateX(-50%);
+}
+.pwa-ios-tip-close {
+    padding: 8px 24px;
+    background: rgba(201,169,98,0.12);
+    border: 1px solid rgba(201,169,98,0.3);
+    border-radius: 20px; color: #c9a962;
+    font-size: 0.82rem; font-weight: 600;
+    cursor: pointer; font-family: 'Plus Jakarta Sans', sans-serif;
+}
+
+/* Safe area padding for notched phones in standalone mode */
+@media (display-mode: standalone) {
+    .app-container {
+        padding-top: env(safe-area-inset-top);
+    }
+    .nav-bottom {
+        padding-bottom: env(safe-area-inset-bottom);
+    }
+    .wearable-overlay {
+        padding-top: env(safe-area-inset-top);
+        padding-bottom: env(safe-area-inset-bottom);
+    }
+}

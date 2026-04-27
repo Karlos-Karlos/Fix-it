@@ -5,10 +5,18 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <meta name="description" content="FiX-it is an AI-powered body composition analysis and fitness visualization app. Upload a photo for instant body analysis, workout plans, and nutrition guidance.">
     <meta name="keywords" content="fitness, body composition, AI analysis, workout planner, nutrition tracker, body visualization">
-    <meta name="theme-color" content="#141211">
+    <meta name="theme-color" content="#c9a962">
     <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
     <meta http-equiv="Pragma" content="no-cache">
     <meta http-equiv="Expires" content="0">
+    <!-- PWA: iOS / Safari -->
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <meta name="apple-mobile-web-app-title" content="FiX-it">
+    <link rel="apple-touch-icon" href="Logo.png">
+    <!-- PWA: Android Chrome splash -->
+    <meta name="mobile-web-app-capable" content="yes">
+    <meta name="application-name" content="FiX-it">
     <meta property="og:title" content="FiX-it - AI Body Composition Analysis">
     <meta property="og:description" content="Upload a photo for AI-powered body analysis, personalized workouts, and nutrition plans.">
     <meta property="og:type" content="website">
@@ -16,7 +24,7 @@
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="styles.css?v=30">
+    <link rel="stylesheet" href="styles.css?v=31">
     <link rel="manifest" href="manifest.json">
     <!-- Chart.js for Progress Charts -->
     <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
@@ -5086,6 +5094,28 @@
         <div class="wo-saved-toast" id="wo-saved-msg" style="display:none">
             Session saved! Check the Wearables tab on your computer.
         </div>
+    </div>
+
+    <!-- PWA Install Banner -->
+    <div id="pwa-banner" class="pwa-banner" style="display:none" role="banner" aria-label="Install app">
+        <div class="pwa-banner-logo">
+            <svg viewBox="0 0 24 24" fill="none" stroke="#c9a962" stroke-width="1.8" width="22" height="22"><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></svg>
+        </div>
+        <div class="pwa-banner-text">
+            <span class="pwa-banner-title">Install FiX-it</span>
+            <span class="pwa-banner-sub" id="pwa-banner-sub">Add to your home screen for the full app experience</span>
+        </div>
+        <button class="pwa-install-btn" id="pwa-install-btn">Install</button>
+        <button class="pwa-dismiss-btn" id="pwa-dismiss-btn" aria-label="Dismiss">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" width="14" height="14"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+        </button>
+    </div>
+
+    <!-- iOS install tooltip -->
+    <div id="pwa-ios-tip" class="pwa-ios-tip" style="display:none">
+        <div class="pwa-ios-tip-arrow"></div>
+        <p>Tap <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="14" height="14" style="vertical-align:middle"><path d="M4 12v8a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-8"/><polyline points="16 6 12 2 8 6"/><line x1="12" y1="2" x2="12" y2="15"/></svg> <strong>Share</strong> then <strong>Add to Home Screen</strong></p>
+        <button class="pwa-ios-tip-close" id="pwa-ios-tip-close">Got it</button>
     </div>
 </body>
 </html>
