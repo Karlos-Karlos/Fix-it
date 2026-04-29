@@ -16253,7 +16253,7 @@ Please try again with a different photo.`;
                         legend: { display: false },
                         tooltip: {
                             backgroundColor: '#1e1c18',
-                            titleColor: '#c9a962',
+                            titleColor: '#4da6ff',
                             bodyColor: '#ccc',
                             borderColor: '#333',
                             borderWidth: 1,
