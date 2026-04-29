@@ -16070,10 +16070,25 @@ Please try again with a different photo.`;
                         overflow.style.strokeDashoffset = (CIRCUMFERENCE * (1 - overflowPct)).toFixed(2);
                         overflow.setAttribute('stroke', successColor);
                         overflow.style.display = '';
+
+                        const tipArrow = document.getElementById('wr-tip-arrow');
+                        if (tipArrow) {
+                            const visualPct = Math.max(overflowPct, 0.025);
+                            const angle = -Math.PI / 2 + visualPct * 2 * Math.PI;
+                            const tx = (120 + 88 * Math.cos(angle)).toFixed(1);
+                            const ty = (120 + 88 * Math.sin(angle)).toFixed(1);
+                            const rotateDeg = (visualPct * 360).toFixed(1);
+                            tipArrow.setAttribute('x', tx);
+                            tipArrow.setAttribute('y', ty);
+                            tipArrow.setAttribute('transform', `rotate(${rotateDeg}, ${tx}, ${ty})`);
+                            tipArrow.style.display = '';
+                        }
                     }
                 } else {
                     arc.setAttribute('stroke', 'url(#wr-grad)');
                     if (overflow) overflow.style.display = 'none';
+                    const tipArrow = document.getElementById('wr-tip-arrow');
+                    if (tipArrow) tipArrow.style.display = 'none';
                 }
             }
         }
