@@ -16120,7 +16120,8 @@
 /* Goal bar */
 .wr-goal-wrap { display: flex; flex-direction: column; gap: 7px; }
 .wr-goal-meta { display: flex; justify-content: space-between; font-size: 0.75rem; color: var(--text-tertiary); }
-.wr-goal-pct { color: #c9a962; font-weight: 700; }
+.wr-goal-pct { color: #ffffff; font-weight: 700; }
+[data-theme="light"] .wr-goal-pct { color: #1f2328; }
 .wr-goal-track { height: 6px; background: var(--border-subtle); border-radius: 10px; overflow: hidden; }
 .wr-goal-fill {
     height: 100%; width: 0%;
