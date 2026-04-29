@@ -15553,7 +15553,7 @@ Please try again with a different photo.`;
                 const pct = Math.min(wearableState.steps / GOAL, 1);
                 arc.style.strokeDashoffset = (534.07 * (1 - pct)).toFixed(2);
                 if (wearableState.steps >= GOAL) {
-                    const successColor = getComputedStyle(document.documentElement).getPropertyValue('--accent-success').trim() || '#7d9a78';
+                    const successColor = '#46b846';
                     arc.setAttribute('stroke', successColor);
                     if (overflow) {
                         const overflowPct = Math.min((wearableState.steps / GOAL) - 1, 1);
@@ -16063,7 +16063,7 @@ Please try again with a different photo.`;
             if (arc) {
                 arc.style.strokeDashoffset = (CIRCUMFERENCE * (1 - pct)).toFixed(2);
                 if (steps >= GOAL) {
-                    const successColor = getComputedStyle(document.documentElement).getPropertyValue('--accent-success').trim() || '#7d9a78';
+                    const successColor = '#46b846';
                     arc.setAttribute('stroke', successColor);
                     if (overflow) {
                         const overflowPct = Math.min((steps / GOAL) - 1, 1);
@@ -16219,7 +16219,7 @@ Please try again with a different photo.`;
                 const s = byDate[key];
                 const steps = s ? Number(s.steps || 0) : 0;
                 stepsData.push(steps);
-                colors.push(steps >= GOAL ? 'rgba(125,154,120,0.85)' : steps > 0 ? 'rgba(201,169,98,0.75)' : 'rgba(255,255,255,0.06)');
+                colors.push(steps >= GOAL ? 'rgba(70,184,70,0.85)' : steps > 0 ? 'rgba(201,169,98,0.75)' : 'rgba(255,255,255,0.06)');
             }
 
             if (_wrStepChartInstance) { _wrStepChartInstance.destroy(); _wrStepChartInstance = null; }
