@@ -16213,7 +16213,7 @@ Please try again with a different photo.`;
                 const s = byDate[key];
                 const steps = s ? Number(s.steps || 0) : 0;
                 stepsData.push(steps);
-                colors.push(steps >= GOAL ? 'rgba(70,184,70,0.85)' : steps > 0 ? 'rgba(201,169,98,0.75)' : 'rgba(255,255,255,0.06)');
+                colors.push(steps >= GOAL ? 'rgba(70,184,70,0.85)' : steps > 0 ? 'rgba(77,166,255,0.75)' : 'rgba(255,255,255,0.06)');
             }
 
             if (_wrStepChartInstance) { _wrStepChartInstance.destroy(); _wrStepChartInstance = null; }
