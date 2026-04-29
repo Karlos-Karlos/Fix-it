@@ -16072,7 +16072,11 @@ Please try again with a different photo.`;
                         overflow.style.display = '';
 
                         const pill = document.getElementById('wr-overflow-pill');
-                        if (pill) pill.style.display = '';
+                        if (pill) {
+                            const pillText = document.getElementById('wr-pill-text');
+                            if (pillText) pillText.textContent = `+${Math.round(overflowPct * 100)}%`;
+                            pill.style.display = '';
+                        }
                     }
                 } else {
                     arc.setAttribute('stroke', 'url(#wr-grad)');
