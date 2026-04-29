@@ -16073,14 +16073,10 @@ Please try again with a different photo.`;
 
                         const tipArrow = document.getElementById('wr-tip-arrow');
                         if (tipArrow) {
-                            const visualPct = Math.max(overflowPct, 0.025);
-                            const angle = -Math.PI / 2 + visualPct * 2 * Math.PI;
-                            const tx = (120 + 88 * Math.cos(angle)).toFixed(1);
-                            const ty = (120 + 88 * Math.sin(angle)).toFixed(1);
-                            const rotateDeg = (visualPct * 360).toFixed(1);
-                            tipArrow.setAttribute('x', tx);
-                            tipArrow.setAttribute('y', ty);
-                            tipArrow.setAttribute('transform', `rotate(${rotateDeg}, ${tx}, ${ty})`);
+                            // Fixed at 12 o'clock (start of ring): x=120, y=120-88=32
+                            tipArrow.setAttribute('x', '120');
+                            tipArrow.setAttribute('y', '32');
+                            tipArrow.removeAttribute('transform');
                             tipArrow.style.display = '';
                         }
                     }
