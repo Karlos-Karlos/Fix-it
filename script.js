@@ -16071,20 +16071,14 @@ Please try again with a different photo.`;
                         overflow.setAttribute('stroke', successColor);
                         overflow.style.display = '';
 
-                        const tipArrow = document.getElementById('wr-tip-arrow');
-                        if (tipArrow) {
-                            // Fixed at 12 o'clock (start of ring): x=120, y=120-88=32
-                            tipArrow.setAttribute('x', '120');
-                            tipArrow.setAttribute('y', '32');
-                            tipArrow.removeAttribute('transform');
-                            tipArrow.style.display = '';
-                        }
+                        const pill = document.getElementById('wr-overflow-pill');
+                        if (pill) pill.style.display = '';
                     }
                 } else {
                     arc.setAttribute('stroke', 'url(#wr-grad)');
                     if (overflow) overflow.style.display = 'none';
-                    const tipArrow = document.getElementById('wr-tip-arrow');
-                    if (tipArrow) tipArrow.style.display = 'none';
+                    const pill = document.getElementById('wr-overflow-pill');
+                    if (pill) pill.style.display = 'none';
                 }
             }
         }
