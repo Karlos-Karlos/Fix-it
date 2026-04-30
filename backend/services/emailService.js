@@ -53,7 +53,8 @@ async function sendVerificationEmail(to, code) {
 }
 
 async function sendPasswordResetEmail(to, token) {
-  const base = process.env.FRONTEND_URL || 'http://localhost:3000';
+  const base = process.env.FRONTEND_URL
+    || (process.env.RAILWAY_PUBLIC_DOMAIN ? `https://${process.env.RAILWAY_PUBLIC_DOMAIN}` : 'http://localhost:3000');
   const link = `${base}?reset_token=${token}`;
   const transport = getTransporter();
 
