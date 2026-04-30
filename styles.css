@@ -15378,6 +15378,37 @@
     }
 }
 
+@media (max-width: 480px) {
+    /* Fix metric header overflow — stack label and value on narrow screens */
+    .metric-header {
+        flex-direction: column;
+        align-items: flex-start;
+        gap: 6px;
+    }
+
+    .metric-value {
+        font-size: 1.1rem;
+        word-break: break-word;
+    }
+
+    /* Ensure result cards don't overflow */
+    .res-metrics-grid {
+        grid-template-columns: 1fr;
+    }
+
+    /* Fix app container padding on mobile */
+    .app-container {
+        padding: 12px 16px;
+        padding-bottom: calc(80px + env(safe-area-inset-bottom));
+    }
+
+    /* Prevent any screen content from overflowing */
+    .screen.active {
+        overflow-x: hidden;
+        width: 100%;
+    }
+}
+
 /* ══════════════════════════════════════════════════════════════
    WEARABLE SCREEN (desktop)
 ══════════════════════════════════════════════════════════════ */
