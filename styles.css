@@ -3182,6 +3182,45 @@
             }
         }
 
+        @media (max-width: 480px) {
+            /* Simulator: fix right-side cut-off */
+            .avatar-comparison {
+                padding: 18px;
+            }
+
+            .simulator-grid {
+                gap: 14px;
+                margin-top: 16px;
+            }
+
+            .simulator-content {
+                margin-top: 20px;
+                overflow-x: clip;
+                width: 100%;
+            }
+
+            .avatar-container {
+                gap: 20px;
+                flex-direction: column;
+                align-items: center;
+            }
+
+            .avatar-body {
+                width: 120px;
+                height: 240px;
+            }
+
+            .comparison-arrow {
+                transform: rotate(90deg);
+                margin: 4px 0;
+            }
+
+            .scenarios-grid .scenario-card {
+                flex: 1 1 100%;
+                min-width: 0;
+            }
+        }
+
         /* Scenario cards */
         .scenario-card {
             cursor: pointer;
