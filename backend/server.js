@@ -278,21 +278,41 @@ async function runMigrations() {
     }
   }
 
-  // Promote ADMIN_EMAIL to admin role and ensure email is verified
+  // Ensure admin account exists, is verified, and has admin role
   if (process.env.ADMIN_EMAIL) {
-    const result = await db.query(
-      `UPDATE users
-       SET role = 'admin',
-           email_verified = true,
-           email_verified_at = COALESCE(email_verified_at, NOW())
-       WHERE email = $1
-       RETURNING email, role`,
+    const existing = await db.query(
+      'SELECT id FROM users WHERE email = $1',
       [process.env.ADMIN_EMAIL]
     );
-    if (result.rows.length > 0) {
+
+    if (existing.rows.length > 0) {
+      // Promote + verify existing account
+      await db.query(
+        `UPDATE users
+         SET role = 'admin',
+             email_verified = true,
+             email_verified_at = COALESCE(email_verified_at, NOW())
+         WHERE email = $1`,
+        [process.env.ADMIN_EMAIL]
+      );
       console.log(`[migrations] Admin account ensured for ${process.env.ADMIN_EMAIL}`);
+    } else if (process.env.ADMIN_PASSWORD) {
+      // Create admin account from scratch
+      const bcrypt = require('bcrypt');
+      const passwordHash = await bcrypt.hash(process.env.ADMIN_PASSWORD, 12);
+      await db.query(
+        `INSERT INTO users (email, password_hash, display_name, role, email_verified, email_verified_at)
+         VALUES ($1, $2, 'Admin', 'admin', true, NOW())`,
+        [process.env.ADMIN_EMAIL, passwordHash]
+      );
+      // Create required related records
+      const newUser = await db.query('SELECT id FROM users WHERE email = $1', [process.env.ADMIN_EMAIL]);
+      const uid = newUser.rows[0].id;
+      await db.query('INSERT INTO user_preferences (user_id) VALUES ($1) ON CONFLICT DO NOTHING', [uid]);
+      await db.query('INSERT INTO user_gamification (user_id) VALUES ($1) ON CONFLICT DO NOTHING', [uid]);
+      console.log(`[migrations] Admin account created for ${process.env.ADMIN_EMAIL}`);
     } else {
-      console.warn(`[migrations] ADMIN_EMAIL set but no user found with email: ${process.env.ADMIN_EMAIL}`);
+      console.warn('[migrations] ADMIN_EMAIL set but account not found and ADMIN_PASSWORD not set — cannot create admin');
     }
   }
 }
