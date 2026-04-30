@@ -366,6 +366,15 @@
             btn.disabled = loading;
         }
 
+        function showVerifyScreen(email) {
+            window._pendingVerifyEmail = email;
+            document.getElementById('login-form').style.display = 'none';
+            document.getElementById('register-form').style.display = 'none';
+            document.querySelector('.auth-tabs').style.display = 'none';
+            document.getElementById('auth-verify').style.display = 'block';
+            document.getElementById('verify-token').value = '';
+        }
+
         async function handleLogin(e) {
             e.preventDefault();
             hideAuthMessage();
@@ -388,7 +397,13 @@
                     throw new Error('Cannot connect to server. Please make sure the backend is running.');
                 }
                 const data = await res.json().catch(() => ({}));
-                if (!res.ok) throw new Error((data.error && data.error.message) || data.message || 'Login failed');
+                if (!res.ok) {
+                    if (data.error && data.error.code === 'EMAIL_NOT_VERIFIED') {
+                        showVerifyScreen(email);
+                        return;
+                    }
+                    throw new Error((data.error && data.error.message) || data.message || 'Login failed');
+                }
 
                 state.accessToken = data.accessToken;
                 state.refreshToken = data.refreshToken;
@@ -439,10 +454,10 @@
                 if (!res.ok) throw new Error((data.error && data.error.message) || data.message || 'Registration failed');
 
                 // Show verification panel
-                document.getElementById('register-form').style.display = 'none';
-                document.getElementById('auth-verify').style.display = 'block';
-                document.querySelector('.auth-tabs').style.display = 'none';
-                showAuthMessage('Account created! Find the verification token in your backend server terminal.', 'success');
+                showVerifyScreen(email);
+                showAuthMessage(data.emailSent === false
+                    ? 'Account created but we could not send the email. Use "Resend code" to try again.'
+                    : 'Account created! Check your email for the 6-digit verification code.', 'success');
             } catch (err) {
                 showAuthMessage(err.message, 'error');
             } finally {
@@ -685,6 +700,22 @@
                 document.querySelector('.auth-tabs').style.display = 'flex';
                 document.querySelectorAll('.auth-tab').forEach(t => t.classList.toggle('active', t.dataset.tab === 'login'));
                 hideAuthMessage();
+            });
+
+            // Resend verification code
+            document.getElementById('resend-verification-link').addEventListener('click', async () => {
+                const email = window._pendingVerifyEmail;
+                if (!email) return showAuthMessage('Email not found. Please go back and log in again.', 'error');
+                try {
+                    const res = await fetch(API_BASE + '/auth/resend-verification', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ email })
+                    });
+                    showAuthMessage('Verification code resent — check your email.', 'success');
+                } catch {
+                    showAuthMessage('Failed to resend. Please try again.', 'error');
+                }
             });
 
             // Forgot password - show forgot password form
