@@ -301,7 +301,8 @@
         html {
             font-size: 16px;
             scroll-behavior: smooth;
-            overflow-x: hidden;
+            overflow-x: clip;
+            max-width: 100%;
         }
 
         body {
@@ -309,8 +310,9 @@
             background: var(--bg-primary);
             color: var(--text-primary);
             min-height: 100vh;
-            overflow-x: hidden;
+            overflow-x: clip;
             overflow-y: auto;
+            max-width: 100%;
             line-height: 1.6;
             letter-spacing: -0.01em;
             max-width: 100vw;
@@ -16832,9 +16834,9 @@
 @media (max-width: 480px) {
 
     /* ── Global: kill horizontal scroll ── */
-    html { overflow-x: hidden; }
-    body { overflow-x: hidden; }
-    .screen { overflow-x: hidden; width: 100%; }
+    html { overflow-x: clip; max-width: 100%; }
+    body { overflow-x: clip; max-width: 100%; }
+    .screen { overflow-x: clip; width: 100%; max-width: 100%; }
 
     /* ── App container ── */
     .app-container {
