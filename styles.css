@@ -17012,6 +17012,47 @@
     /* ── Input rows: always stack ── */
     .input-row { flex-direction: column !important; gap: 10px; }
     .input-group { width: 100%; }
+
+    /* ══════════════════════════════════════════
+       PADDING STANDARDIZATION
+       Outer gutter : 25px  (app-container)
+       Card internal: 18px  (glass-card, result-card, etc.)
+       Modal        : 24px  (account-modal, admin-modal, auth-card)
+       Menu         : 14px  (user-menu items — compact by design)
+    ══════════════════════════════════════════ */
+
+    /* Cards & boxes */
+    .glass-card,
+    .result-card,
+    .metric-card,
+    .gauge-container,
+    .score-section,
+    .controls-panel,
+    .bento-cell,
+    .upload-zone,
+    .breakdown-section,
+    .section-body,
+    .challenge-card,
+    .progress-card,
+    .wr-ring-card,
+    .wr-stat-tile { padding-left: 18px; padding-right: 18px; }
+
+    /* Modals, overlays, auth */
+    .account-modal,
+    #preferences-modal .account-modal,
+    .auth-card,
+    .admin-modal,
+    .clear-data-container,
+    .comparison-container { padding-left: 24px; padding-right: 24px; }
+
+    /* Header padding matches outer gutter */
+    .header { padding-left: 25px; padding-right: 25px; }
+
+    /* Overview strip inner items */
+    .res-overview-strip .overview-item { padding-left: 14px; padding-right: 14px; }
+
+    /* Progress section */
+    .progress-hero { padding-left: 18px; padding-right: 18px; }
 }
 
 /* ── Small tablet / large phone (481–768px) ── */
