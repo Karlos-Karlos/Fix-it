@@ -998,6 +998,7 @@
         function saveSessionState() {
             try {
                 const sessionData = {
+                    userId: state.user?.id,
                     gender: state.gender,
                     height: state.height,
                     weight: state.weight,
@@ -1033,6 +1034,12 @@
                 if (!saved) return false;
 
                 const sessionData = JSON.parse(saved);
+
+                // Reject session belonging to a different user
+                if (sessionData.userId && state.user?.id && sessionData.userId !== state.user.id) {
+                    clearSessionState();
+                    return false;
+                }
 
                 // Check if session is recent
                 const SESSION_EXPIRY_HOURS = 24;
