@@ -561,54 +561,55 @@
                 return;
             }
 
-            // 2. No session state — check IndexedDB for any previous scans
-            try {
-                const snapshots = await getAllSnapshots();
-                const latest = snapshots.find(s => s.analysisResult);
-                if (latest) {
-                    // Restore most recent scan into state
-                    state.analysisResult = latest.analysisResult;
-                    if (latest.userProfile) {
-                        state.gender        = latest.userProfile.gender  || state.gender;
-                        state.height        = latest.userProfile.height  || state.height;
-                        state.weight        = latest.userProfile.weight  || state.weight;
-                        state.bmi           = latest.userProfile.bmi     || state.bmi;
-                        state.fitnessGoal   = latest.userProfile.goal    || state.fitnessGoal;
-                    }
-                    populateResults();
-                    goToScreen(3);
-                    return;
-                }
-            } catch (e) {
-                // IndexedDB unavailable — fall through
+            // 2. Check server for scans — source of truth for which account owns data
+            let serverScans = [];
+            if (state.accessToken) {
+                try { serverScans = await fetchServerScans(); } catch (e) {}
             }
 
-            // 3. No local data — check server for previous scans (handles cleared browser history)
-            if (state.accessToken) {
+            // 3. Check IndexedDB — only use if server also has scans (prevents stale
+            //    snapshots from a deleted account being restored for a new account)
+            if (serverScans.length > 0) {
                 try {
-                    const serverScans = await fetchServerScans();
-                    if (serverScans.length > 0) {
-                        const latest = serverScans[0];
+                    const snapshots = await getAllSnapshots();
+                    const latest = snapshots.find(s => s.analysisResult);
+                    if (latest) {
                         state.analysisResult = latest.analysisResult;
-                        if (latest.imageData) {
-                            state.imageData = latest.imageData;
-                            state.hasImage = true;
-                        }
                         if (latest.userProfile) {
-                            state.gender      = latest.userProfile.gender || state.gender;
-                            state.height      = latest.userProfile.height || state.height;
-                            state.weight      = latest.userProfile.weight || state.weight;
-                            state.bmi         = latest.userProfile.bmi    || state.bmi;
-                            state.fitnessGoal = latest.userProfile.goal   || state.fitnessGoal;
+                            state.gender        = latest.userProfile.gender  || state.gender;
+                            state.height        = latest.userProfile.height  || state.height;
+                            state.weight        = latest.userProfile.weight  || state.weight;
+                            state.bmi           = latest.userProfile.bmi     || state.bmi;
+                            state.fitnessGoal   = latest.userProfile.goal    || state.fitnessGoal;
                         }
                         populateResults();
                         goToScreen(3);
                         return;
                     }
-                } catch (e) { /* server unavailable or no scans — fall through */ }
+                } catch (e) {}
             }
 
-            // 4. Genuinely new user with no scans anywhere — go to Upload
+            // 4. Use server scan directly if no local snapshot matched
+            if (serverScans.length > 0) {
+                const latest = serverScans[0];
+                state.analysisResult = latest.analysisResult;
+                if (latest.imageData) {
+                    state.imageData = latest.imageData;
+                    state.hasImage = true;
+                }
+                if (latest.userProfile) {
+                    state.gender      = latest.userProfile.gender || state.gender;
+                    state.height      = latest.userProfile.height || state.height;
+                    state.weight      = latest.userProfile.weight || state.weight;
+                    state.bmi         = latest.userProfile.bmi    || state.bmi;
+                    state.fitnessGoal = latest.userProfile.goal   || state.fitnessGoal;
+                }
+                populateResults();
+                goToScreen(3);
+                return;
+            }
+
+            // 5. Genuinely new user with no scans anywhere — go to Upload
             goToScreen(1);
         }
 
@@ -1035,8 +1036,9 @@
 
                 const sessionData = JSON.parse(saved);
 
-                // Reject session belonging to a different user
-                if (sessionData.userId && state.user?.id && sessionData.userId !== state.user.id) {
+                // Reject session that doesn't belong to the current user.
+                // Also rejects old sessions with no userId (saved before this check was added).
+                if (state.user?.id && sessionData.userId !== state.user.id) {
                     clearSessionState();
                     return false;
                 }
@@ -14310,6 +14312,13 @@ Please try again with a different photo.`;
                 // Wipe all local data — scan history, logs, tokens, everything
                 localStorage.clear();
                 sessionStorage.clear();
+                // Also wipe IndexedDB snapshots (not covered by localStorage.clear)
+                try {
+                    const db = await openSnapshotDB();
+                    const tx = db.transaction(SNAPSHOT_STORE, 'readwrite');
+                    tx.objectStore(SNAPSHOT_STORE).clear();
+                    await new Promise((resolve, reject) => { tx.oncomplete = resolve; tx.onerror = reject; });
+                } catch (e) {}
                 handleLogout();
                 showToast('Your account has been deleted.', 'success');
             } catch (err) {
