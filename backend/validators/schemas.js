@@ -268,6 +268,16 @@ const createSplitSchema = z.object({
   is_active: z.boolean().default(true),
 });
 
+// ── Wearable ──
+const wearableSessionSchema = z.object({
+  steps:        z.number().int().min(0).max(100000).default(0),
+  hr_avg:       z.number().int().min(40).max(220).optional().nullable(),
+  hr_readings:  z.array(z.number().min(0).max(300)).max(1440).optional().nullable(),
+  calories:     z.number().min(0).max(10000).optional().nullable(),
+  active_secs:  z.number().int().min(0).max(86400).default(0),
+  session_date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'session_date must be YYYY-MM-DD').optional(),
+});
+
 // ── Pagination query ──
 const paginationSchema = z.object({
   page: z.coerce.number().int().min(1).default(1),
@@ -277,6 +287,7 @@ const paginationSchema = z.object({
 module.exports = {
   passwordSchema,
   adminResetPasswordSchema,
+  wearableSessionSchema,
   registerSchema,
   loginSchema,
   verifyEmailSchema,
