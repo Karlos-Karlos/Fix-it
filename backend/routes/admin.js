@@ -8,9 +8,9 @@ const validate = require('../middleware/validate');
 const { appError, ErrorCodes } = require('../utils/errors');
 const {
   adminUpdateUserSchema,
+  adminResetPasswordSchema,
   uuidParamSchema,
   stringIdParamSchema,
-  passwordSchema,
   createFoodSchema,
   createExerciseSchema,
   createAchievementSchema,
@@ -119,13 +119,9 @@ router.put('/users/:id', validate(uuidParamSchema, 'params'), validate(adminUpda
 const SALT_ROUNDS = 12;
 
 // POST /users/:id/reset-password (admin sets new password)
-router.post('/users/:id/reset-password', validate(uuidParamSchema, 'params'), async (req, res, next) => {
+router.post('/users/:id/reset-password', validate(uuidParamSchema, 'params'), validate(adminResetPasswordSchema), async (req, res, next) => {
   try {
     const { password } = req.body;
-    const pwResult = passwordSchema.safeParse(password);
-    if (!pwResult.success) {
-      throw appError(ErrorCodes.VALIDATION_ERROR, pwResult.error.errors[0].message);
-    }
     const hash = await bcrypt.hash(password, SALT_ROUNDS);
     const result = await db.query(
       'UPDATE users SET password_hash = $1 WHERE id = $2 RETURNING id',

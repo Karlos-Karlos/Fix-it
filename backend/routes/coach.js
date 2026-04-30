@@ -21,7 +21,8 @@ router.post('/message', coachLimiter, validate(coachMessageSchema), async (req, 
     await client.query('BEGIN');
     const { message, persona } = req.body;
     const rawSessionId = req.headers['x-session-id'];
-    const sessionId = (rawSessionId && rawSessionId.length <= 100) ? rawSessionId : crypto.randomUUID();
+    const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+    const sessionId = (rawSessionId && uuidRegex.test(rawSessionId)) ? rawSessionId : crypto.randomUUID();
 
     // Process through coach engine
     const { intent, response } = await processMessage(req.user.id, message, persona);

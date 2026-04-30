@@ -37,18 +37,21 @@ const app = express();
 // Trust Railway's reverse proxy so rate limiting and IP detection work correctly
 app.set('trust proxy', 1);
 
+const isProduction = process.env.NODE_ENV === 'production';
+
 // ── Security headers ──
 app.use((req, res, next) => {
   res.setHeader('X-Content-Type-Options', 'nosniff');
   res.setHeader('X-Frame-Options', 'DENY');
   res.setHeader('X-XSS-Protection', '1; mode=block');
   res.setHeader('Referrer-Policy', 'strict-origin-when-cross-origin');
+  if (isProduction) {
+    res.setHeader('Strict-Transport-Security', 'max-age=31536000; includeSubDomains');
+  }
   next();
 });
 
 // ── CORS ──
-const isProduction = process.env.NODE_ENV === 'production';
-
 app.use(cors({
   origin: function (origin, callback) {
     // Allow server-to-server requests (health checks, Railway internals) — no Origin header

@@ -54,12 +54,20 @@ router.post('/register', authLimiter, validate(registerSchema), async (req, res,
         [user.id, tokenHash]
       );
       await client.query('COMMIT');
+      let emailSent = true;
       try {
         await sendVerificationEmail(email, verificationCode);
       } catch (emailErr) {
+        emailSent = false;
         console.error('[register] Failed to send verification email:', emailErr.message);
       }
-      res.status(201).json({ message: 'Account created. Check your email to verify.', user });
+      res.status(201).json({
+        message: emailSent
+          ? 'Account created. Check your email for your verification code.'
+          : 'Account created but we could not send the verification email. Use "Resend verification" to try again.',
+        user,
+        emailSent,
+      });
     } else {
       await client.query('COMMIT');
       res.status(201).json({ message: 'Account created successfully.', user });

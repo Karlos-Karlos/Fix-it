@@ -186,6 +186,10 @@ const coachMessageSchema = z.object({
 });
 
 // ── Admin ──
+const adminResetPasswordSchema = z.object({
+  password: passwordSchema,
+});
+
 const adminUpdateUserSchema = z.object({
   role: z.enum(['user', 'admin']).optional(),
   email_verified: z.boolean().optional(),
@@ -272,6 +276,7 @@ const paginationSchema = z.object({
 
 module.exports = {
   passwordSchema,
+  adminResetPasswordSchema,
   registerSchema,
   loginSchema,
   verifyEmailSchema,

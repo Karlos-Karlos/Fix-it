@@ -7,7 +7,8 @@ const auth = require('../middleware/auth');
 const validate = require('../middleware/validate');
 const { appError, ErrorCodes } = require('../utils/errors');
 const { updateProfileSchema, updatePreferencesSchema } = require('../validators/schemas');
-const { resendLimiter } = require('../middleware/rateLimiter');
+
+
 
 // All routes require auth
 router.use(auth);
@@ -143,8 +144,8 @@ router.get('/me/gamification', async (req, res, next) => {
   }
 });
 
-// DELETE /me (reuse resendLimiter: 3 req/hour)
-router.delete('/me', resendLimiter, async (req, res, next) => {
+// DELETE /me
+router.delete('/me', async (req, res, next) => {
   try {
     // Gather uploaded files before cascade-deleting
     const scans = (await db.query(

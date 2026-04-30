@@ -19,7 +19,12 @@ router.get('/meals', async (req, res, next) => {
       const diet = row.diet || 'standard';
       if (!grouped[diet]) grouped[diet] = {};
       if (!grouped[diet][row.meal_type]) grouped[diet][row.meal_type] = [];
-      const foods = typeof row.foods === 'string' ? JSON.parse(row.foods) : row.foods;
+      let foods;
+      try {
+        foods = typeof row.foods === 'string' ? JSON.parse(row.foods) : row.foods;
+      } catch {
+        foods = [];
+      }
       grouped[diet][row.meal_type].push({ name: row.name, icon: row.icon, foods });
     }
     res.json(grouped);
