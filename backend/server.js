@@ -258,6 +258,8 @@ async function runMigrations() {
     'CREATE INDEX IF NOT EXISTS idx_analysis_scans_user_id ON analysis_scans(user_id)',
     'CREATE INDEX IF NOT EXISTS idx_food_log_user_id ON food_log(user_id)',
     'CREATE INDEX IF NOT EXISTS idx_user_sessions_user_id ON user_sessions(user_id)',
+    'CREATE INDEX IF NOT EXISTS idx_user_sessions_access_token_hash ON user_sessions(access_token_hash)',
+    'CREATE INDEX IF NOT EXISTS idx_user_sessions_refresh_token_hash ON user_sessions(refresh_token_hash)',
 
     `CREATE TABLE IF NOT EXISTS wearable_sessions (
       id           SERIAL PRIMARY KEY,

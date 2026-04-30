@@ -9,7 +9,7 @@ const db = require('../database/db');
  * @returns {{ data, pagination }}
  */
 async function paginate(baseQuery, countQuery, params = [], { page = 1, limit = 20 } = {}) {
-  page = Math.max(1, parseInt(page, 10) || 1);
+  page = Math.min(10000, Math.max(1, parseInt(page, 10) || 1));
   limit = Math.min(100, Math.max(1, parseInt(limit, 10) || 20));
   const offset = (page - 1) * limit;
 
