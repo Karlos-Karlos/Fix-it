@@ -1895,34 +1895,61 @@
             const postureScore = Math.min(95, Math.max(40, 100 - Math.round(shoulderDiff * 500) - Math.round(Math.abs(headForward) * 100)));
             const symmetryScore = Math.min(98, Math.max(50, 100 - Math.round(shoulderDiff * 300) - Math.round(hipDiff * 300)));
 
-            // Muscle tone estimate (harder to determine from pose alone)
-            const avgConfidence = landmarks.reduce((sum, l) => sum + (l.visibility || 0.5), 0) / landmarks.length;
-            const muscleScore = Math.round(Math.min(bodyCompScore * 0.8, 70) + avgConfidence * 20);
+            // Muscle tone — derived from skeleton geometry and BMI
+            // Key signals: V-taper (hip/shoulder ratio), shoulder width, BMI
 
-            // Determine lean mass estimate based on score
+            // V-taper: low hip/shoulder ratio = wider shoulders vs hips = more muscular
+            // waistHipIndicator = hipWidth / shoulderWidth; muscular ~0.7, average ~0.9, round ~1.1+
+            const vTaperScore = Math.min(40, Math.max(0, (1.1 - waistHipIndicator) * 65));
+
+            // Shoulder development relative to body height
+            const shoulderDevScore = Math.min(25, Math.max(0, (shoulderToHeightRatio - 0.17) * 260));
+
+            // BMI adjustment — leaner = more visible definition
+            let bmiAdjust = 0;
+            if (state.bmi) {
+                if (state.bmi < 18.5)    bmiAdjust = -10;
+                else if (state.bmi < 22) bmiAdjust = 15;
+                else if (state.bmi < 25) bmiAdjust = 8;
+                else if (state.bmi < 30) bmiAdjust = -2;
+                else if (state.bmi < 35) bmiAdjust = -14;
+                else                     bmiAdjust = -22;
+            }
+
+            // Males typically show more visible muscle tone at the same BMI
+            const genderBoost = state.gender === 'male' ? 5 : 0;
+
+            // Small variation so repeated analyses don't give identical scores
+            const toneVariation = Math.round((Math.random() - 0.5) * 8);
+
+            const muscleScore = Math.min(88, Math.max(18, Math.round(
+                38 + vTaperScore + shoulderDevScore + bmiAdjust + genderBoost + toneVariation
+            )));
+
+            // Lean mass estimate based on muscle score
             let leanMassEstimate;
-            if (bodyCompScore >= 75) leanMassEstimate = "High";
-            else if (bodyCompScore >= 60) leanMassEstimate = "Above Average";
-            else if (bodyCompScore >= 45) leanMassEstimate = "Average";
-            else if (bodyCompScore >= 30) leanMassEstimate = "Below Average";
+            if (muscleScore >= 72) leanMassEstimate = "High";
+            else if (muscleScore >= 58) leanMassEstimate = "Above Average";
+            else if (muscleScore >= 44) leanMassEstimate = "Average";
+            else if (muscleScore >= 30) leanMassEstimate = "Below Average";
             else leanMassEstimate = "Low";
 
-            // Upper body assessment
+            // Upper body assessment — uses V-taper + muscle score
             let upperBodyAssessment;
-            if (waistHipIndicator < 0.9 && bodyCompScore >= 65) upperBodyAssessment = "Well Developed";
-            else if (bodyCompScore >= 50) upperBodyAssessment = "Moderate";
+            if (muscleScore >= 68 && waistHipIndicator < 0.92) upperBodyAssessment = "Well Developed";
+            else if (muscleScore >= 48) upperBodyAssessment = "Moderate";
             else upperBodyAssessment = "Needs Development";
 
-            // Core assessment
+            // Core assessment — based on muscle score
             let coreAssessment;
-            if (bodyCompScore >= 70) coreAssessment = "Defined";
-            else if (bodyCompScore >= 50) coreAssessment = "Moderate";
+            if (muscleScore >= 65) coreAssessment = "Defined";
+            else if (muscleScore >= 45) coreAssessment = "Moderate";
             else coreAssessment = "Needs Work";
 
-            // Lower body assessment
+            // Lower body assessment — hip width relative to height
             let lowerBodyAssessment;
             if (hipToHeightRatio < 0.14) lowerBodyAssessment = "Lean";
-            else if (hipToHeightRatio < 0.18) lowerBodyAssessment = "Moderate";
+            else if (hipToHeightRatio < 0.19) lowerBodyAssessment = "Moderate";
             else lowerBodyAssessment = "Heavy";
 
             // Calculate confidence based on multiple input quality factors
