@@ -1082,6 +1082,11 @@
         function clearSessionState() {
             localStorage.removeItem(userKey('fixit-session-state'));
             localStorage.removeItem(userKey('fixit-session-image'));
+            // Also wipe in-memory state so stale results never survive to routeAfterLogin
+            state.analysisResult = null;
+            state.imageData = null;
+            state.hasImage = false;
+            state.landmarks = null;
         }
 
         function restoreUIFromState() {
