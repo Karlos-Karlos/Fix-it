@@ -278,14 +278,21 @@ async function runMigrations() {
     }
   }
 
-  // Promote ADMIN_EMAIL to admin role if set
+  // Promote ADMIN_EMAIL to admin role and ensure email is verified
   if (process.env.ADMIN_EMAIL) {
     const result = await db.query(
-      "UPDATE users SET role = 'admin' WHERE email = $1 AND role != 'admin' RETURNING email",
+      `UPDATE users
+       SET role = 'admin',
+           email_verified = true,
+           email_verified_at = COALESCE(email_verified_at, NOW())
+       WHERE email = $1
+       RETURNING email, role`,
       [process.env.ADMIN_EMAIL]
     );
     if (result.rows.length > 0) {
-      console.log(`[migrations] Promoted ${process.env.ADMIN_EMAIL} to admin`);
+      console.log(`[migrations] Admin account ensured for ${process.env.ADMIN_EMAIL}`);
+    } else {
+      console.warn(`[migrations] ADMIN_EMAIL set but no user found with email: ${process.env.ADMIN_EMAIL}`);
     }
   }
 }
