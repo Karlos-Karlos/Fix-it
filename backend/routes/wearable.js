@@ -10,8 +10,8 @@ router.use(auth);
 router.post('/session', async (req, res, next) => {
   try {
     const { steps = 0, hr_avg, hr_readings, calories, active_secs = 0, session_date } = req.body;
-    if (steps < 0 || steps > 200000) throw appError(ErrorCodes.VALIDATION_ERROR, 'steps out of range');
-    if (hr_avg && (hr_avg < 20 || hr_avg > 300)) throw appError(ErrorCodes.VALIDATION_ERROR, 'hr_avg out of range');
+    if (steps < 0 || steps > 100000) throw appError(ErrorCodes.VALIDATION_ERROR, 'steps out of range (0–100,000)');
+    if (hr_avg && (hr_avg < 40 || hr_avg > 220)) throw appError(ErrorCodes.VALIDATION_ERROR, 'hr_avg out of range (40–220)');
     const dateVal = session_date || new Date().toISOString().split('T')[0];
 
     const result = await db.query(

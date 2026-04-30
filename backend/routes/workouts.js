@@ -7,6 +7,7 @@ const { appError, ErrorCodes } = require('../utils/errors');
 const { generateWorkoutSchema, saveWorkoutPlanSchema, updateWorkoutPlanSchema, logWorkoutSessionSchema } = require('../validators/schemas');
 const { paginate } = require('../utils/pagination');
 const { awardXP, checkAndAwardAchievements, updateStreak, updateChallengeProgress } = require('../services/gamificationEngine');
+const { uploadLimiter } = require('../middleware/rateLimiter');
 
 // ── Public routes ──
 
@@ -79,7 +80,7 @@ router.get('/splits', async (req, res, next) => {
 // ── Authenticated routes ──
 
 // POST /generate
-router.post('/generate', auth, validate(generateWorkoutSchema), async (req, res, next) => {
+router.post('/generate', auth, uploadLimiter, validate(generateWorkoutSchema), async (req, res, next) => {
   try {
     const { split_type, equipment, days_per_week, intensity, fitness_goal, cycle_phase } = req.body;
 

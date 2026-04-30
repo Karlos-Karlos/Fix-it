@@ -7,6 +7,7 @@ const { appError, ErrorCodes } = require('../utils/errors');
 const { recognizeFoodSchema, generateMealPlanSchema, saveMealPlanSchema, logFoodSchema } = require('../validators/schemas');
 const { paginate } = require('../utils/pagination');
 const { awardXP, checkAndAwardAchievements, updateChallengeProgress } = require('../services/gamificationEngine');
+const { uploadLimiter } = require('../middleware/rateLimiter');
 
 // ── Public routes ──
 
@@ -109,7 +110,7 @@ router.post('/foods/recognize', auth, validate(recognizeFoodSchema), async (req,
 });
 
 // POST /meal-plans/generate
-router.post('/meal-plans/generate', auth, validate(generateMealPlanSchema), async (req, res, next) => {
+router.post('/meal-plans/generate', auth, uploadLimiter, validate(generateMealPlanSchema), async (req, res, next) => {
   try {
     const { calorie_target, protein_target, meals_per_day, fitness_goal, preferences } = req.body;
 

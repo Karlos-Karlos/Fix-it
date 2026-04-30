@@ -54,7 +54,8 @@ router.post('/hydration', async (req, res, next) => {
     const dateVal = log_date || new Date().toISOString().split('T')[0];
     const parsed = parseInt(glasses_drunk, 10);
     if (!Number.isFinite(parsed)) throw appError(ErrorCodes.VALIDATION_ERROR, 'glasses_drunk must be a number');
-    const n = Math.max(0, Math.min(parsed, 20));
+    if (parsed < 0 || parsed > 20) throw appError(ErrorCodes.VALIDATION_ERROR, 'glasses_drunk must be between 0 and 20');
+    const n = parsed;
 
     const result = await db.query(
       `INSERT INTO hydration_logs (user_id, log_date, glasses_drunk)
