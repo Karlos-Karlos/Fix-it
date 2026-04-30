@@ -1,6 +1,7 @@
 const express = require('express');
 const multer = require('multer');
 const path = require('path');
+const crypto = require('crypto');
 const router = express.Router();
 const db = require('../database/db');
 const auth = require('../middleware/auth');
@@ -15,8 +16,8 @@ const { uploadLimiter } = require('../middleware/rateLimiter');
 const storage = multer.diskStorage({
   destination: (req, file, cb) => cb(null, path.join(__dirname, '..', 'uploads')),
   filename: (req, file, cb) => {
-    const ext = path.extname(file.originalname);
-    cb(null, `${req.user.id}-${Date.now()}${ext}`);
+    const ext = path.extname(file.originalname).toLowerCase();
+    cb(null, `${crypto.randomBytes(16).toString('hex')}${ext}`);
   },
 });
 
@@ -89,10 +90,15 @@ router.post('/scans', validate(createScanSchema), async (req, res, next) => {
 
     await client.query('COMMIT');
 
-    // Post-transaction gamification
-    await awardXP(req.user.id, 30);
-    await updateChallengeProgress(req.user.id, 'total_analyses', 1);
-    const newAchievements = await checkAndAwardAchievements(req.user.id);
+    // Post-transaction gamification (non-critical — scan already saved)
+    let newAchievements = [];
+    try {
+      await awardXP(req.user.id, 30);
+      await updateChallengeProgress(req.user.id, 'total_analyses', 1);
+      newAchievements = await checkAndAwardAchievements(req.user.id);
+    } catch (gamErr) {
+      console.warn('[gamification] Post-scan update failed:', gamErr.message);
+    }
 
     res.status(201).json({ scan, newAchievements });
   } catch (err) {
