@@ -14319,8 +14319,9 @@ Please try again with a different photo.`;
                     tx.objectStore(SNAPSHOT_STORE).clear();
                     await new Promise((resolve, reject) => { tx.oncomplete = resolve; tx.onerror = reject; });
                 } catch (e) {}
-                handleLogout();
+                // Hard reload to guarantee all in-memory state and SW caches are fully reset
                 showToast('Your account has been deleted.', 'success');
+                setTimeout(() => { window.location.reload(); }, 800);
             } catch (err) {
                 showToast(err.message, 'error');
             }

@@ -1,4 +1,4 @@
-const CACHE = 'fixit-pwa-v3';
+const CACHE = 'fixit-pwa-v4';
 const PRECACHE = ['./index.html', './manifest.json'];
 
 // API path prefixes — never intercept these
