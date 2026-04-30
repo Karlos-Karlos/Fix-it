@@ -142,10 +142,43 @@
             }
         }
 
-        // Fire-and-forget API save â€” silently skips when offline or unauthenticated
+        // Offline / online indicator
+        function updateOfflineBanner() {
+            const banner = document.getElementById('offline-banner');
+            if (!banner) return;
+            if (!navigator.onLine) {
+                banner.textContent = 'You are offline — some features may not work';
+                banner.style.display = 'block';
+            } else {
+                banner.style.display = 'none';
+            }
+        }
+        window.addEventListener('online',  updateOfflineBanner);
+        window.addEventListener('offline', updateOfflineBanner);
+        updateOfflineBanner();
+
+        // Proactively refresh token when user returns to the tab after >10 min away
+        let _lastActiveAt = Date.now();
+        document.addEventListener('visibilitychange', () => {
+            if (document.visibilityState === 'visible') {
+                const awayMs = Date.now() - _lastActiveAt;
+                if (awayMs > 10 * 60 * 1000 && state.refreshToken) {
+                    tryRefreshToken().catch(() => {});
+                }
+            } else {
+                _lastActiveAt = Date.now();
+            }
+        });
+
+        // Fire-and-forget API save with 2 retries on failure
         function _apiSave(path, body, method = 'POST') {
             if (!state.accessToken) return;
-            apiFetch(path, { method, body: JSON.stringify(body) }).catch(() => {});
+            const attempt = (retriesLeft) => {
+                apiFetch(path, { method, body: JSON.stringify(body) })
+                    .then(res => { if (!res.ok && retriesLeft > 0) setTimeout(() => attempt(retriesLeft - 1), 2000); })
+                    .catch(() => { if (retriesLeft > 0) setTimeout(() => attempt(retriesLeft - 1), 2000); });
+            };
+            attempt(2);
         }
 
         // Fetch all tracking history from the server and seed localStorage
@@ -2654,31 +2687,36 @@
 
         // Show error when no human body is detected
         function showNoHumanDetectedError() {
-            // Only show error if still on analysis-related screens (1, 2, or 3)
-            if (state.currentScreen > 3) {
-                return;
-            }
+            if (state.currentScreen > 3) return;
 
-            const errorMessage = `No Human Body Detected
-
-The AI could not detect a human body in your photo.
-
-Please ensure:
-â€¢ Your FULL BODY is visible (head to feet)
-â€¢ You are facing the camera
-â€¢ Good lighting with minimal shadows
-â€¢ Plain background if possible
-â€¢ Photo is not blurry
-
-Please try again with a different photo.`;
-
-            showToast(errorMessage, 'error');
-
-            // Reset state and return to upload screen
             state.humanDetected = false;
             state.analysisResult = null;
             state.landmarks = null;
             goToScreen(1);
+
+            // Show an inline tip banner on the upload screen instead of a toast
+            const banner = document.createElement('div');
+            banner.className = 'analysis-error-banner';
+            banner.innerHTML = `
+                <div class="analysis-error-icon">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="22" height="22">
+                        <circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/>
+                    </svg>
+                </div>
+                <div class="analysis-error-body">
+                    <strong>Body not detected</strong>
+                    <ul>
+                        <li>Full body must be visible — head to feet</li>
+                        <li>Face the camera directly</li>
+                        <li>Use good lighting, avoid shadows</li>
+                        <li>Plain background works best</li>
+                    </ul>
+                </div>
+                <button class="analysis-error-close" aria-label="Dismiss">&times;</button>`;
+            banner.querySelector('.analysis-error-close').addEventListener('click', () => banner.remove());
+            const screen = document.getElementById('screen-upload');
+            if (screen) screen.insertBefore(banner, screen.firstChild);
+            setTimeout(() => banner.remove(), 8000);
         }
 
         // Show goal recommendation modal after analysis (if applicable)
