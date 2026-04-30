@@ -3631,12 +3631,19 @@
         }
 
         @media (max-width: 768px) {
+            /* Stack filters and experience selector vertically */
+            .workout-header {
+                flex-direction: column;
+                align-items: stretch;
+                gap: 12px;
+            }
+
             .experience-selector {
                 flex-direction: column;
                 align-items: flex-start;
                 gap: 10px;
-                padding-left: 0;
-                padding-right: 0;
+                width: 100%;
+                box-sizing: border-box;
             }
 
             .experience-levels {
@@ -3648,7 +3655,7 @@
                 flex: 1 1 auto;
                 min-width: 80px;
                 justify-content: center;
-                padding: 10px 10px;
+                padding: 10px 12px;
             }
         }
 
