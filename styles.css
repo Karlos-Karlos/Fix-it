@@ -3255,14 +3255,29 @@
                 grid-column: span 1;
                 width: 100%;
                 max-width: 100%;
-                flex-direction: column;
+                flex-wrap: wrap;
+                gap: 10px;
             }
 
             .scenarios-grid .scenario-card {
-                flex: 1 1 100%;
-                width: 100%;
+                flex: 1 1 calc(50% - 5px);
+                width: calc(50% - 5px);
                 min-width: 0;
-                max-width: 100%;
+                max-width: calc(50% - 5px);
+            }
+
+            /* Compact detail rows inside each scenario card */
+            .scenario-detail {
+                padding: 6px 8px;
+            }
+
+            .scenario-header {
+                margin-bottom: 8px;
+            }
+
+            .scenario-icon {
+                width: 32px;
+                height: 32px;
             }
         }
 
