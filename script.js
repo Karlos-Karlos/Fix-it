@@ -336,6 +336,18 @@
                 }
             } catch (_) {}
 
+            try {
+                // Coach persona — server is source of truth across devices
+                const prefRes = await apiFetch('/users/me/preferences');
+                if (prefRes.ok) {
+                    const prefs = await prefRes.json();
+                    if (prefs && prefs.coach_persona) {
+                        state.coachPersona = prefs.coach_persona;
+                        localStorage.setItem(userKey('fixit-coach-persona'), prefs.coach_persona);
+                    }
+                }
+            } catch (_) {}
+
             // Re-render after sync
             try { renderGoalWeight(); } catch (_) {}
             try { renderSleepTracker(); } catch (_) {}
@@ -7116,6 +7128,8 @@ Please try again with a different photo.`;
             state.coachPersona = persona;
             state.coachRecentResponses = {};
             localStorage.setItem(userKey('fixit-coach-persona'), persona);
+            // Persist to server so it survives device changes
+            _apiSave('/users/me/preferences', { coach_persona: persona }, 'PUT');
 
             // Track unique personas for gamification
             let usedPersonas;
