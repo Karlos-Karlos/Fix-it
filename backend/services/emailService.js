@@ -23,16 +23,18 @@ function getNodemailer() {
 }
 
 async function sendMail({ to, subject, html }) {
+  // SMTP takes priority when configured (Gmail etc.)
+  const transport = getNodemailer();
+  if (transport) {
+    await transport.sendMail({ from: process.env.SMTP_USER, to, subject, html });
+    return;
+  }
+
+  // Resend as fallback (free plan — only delivers to account owner email without verified domain)
   const resend = getResend();
   if (resend) {
     const { error } = await resend.emails.send({ from: FROM_ADDRESS, to, subject, html });
     if (error) throw new Error(`Resend error: ${error.message}`);
-    return;
-  }
-
-  const transport = getNodemailer();
-  if (transport) {
-    await transport.sendMail({ from: process.env.SMTP_USER, to, subject, html });
     return;
   }
 

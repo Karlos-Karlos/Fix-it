@@ -291,15 +291,16 @@ async function runMigrations() {
     );
 
     if (existing.rows.length > 0) {
-      // Promote + verify existing account
-      await db.query(
-        `UPDATE users
-         SET role = 'admin',
-             email_verified = true,
-             email_verified_at = COALESCE(email_verified_at, NOW())
-         WHERE email = $1`,
-        [process.env.ADMIN_EMAIL]
-      );
+      // Promote + verify + sync password from env
+      const bcrypt = require('bcrypt');
+      const updates = [`role = 'admin'`, `email_verified = true`, `email_verified_at = COALESCE(email_verified_at, NOW())`];
+      const params = [process.env.ADMIN_EMAIL];
+      if (process.env.ADMIN_PASSWORD) {
+        const hash = await bcrypt.hash(process.env.ADMIN_PASSWORD, 12);
+        updates.push(`password_hash = $${params.length + 1}`);
+        params.push(hash);
+      }
+      await db.query(`UPDATE users SET ${updates.join(', ')} WHERE email = $1`, params);
       console.log(`[migrations] Admin account ensured for ${process.env.ADMIN_EMAIL}`);
     } else if (process.env.ADMIN_PASSWORD) {
       // Create admin account from scratch
