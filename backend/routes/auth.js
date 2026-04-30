@@ -54,7 +54,11 @@ router.post('/register', authLimiter, validate(registerSchema), async (req, res,
         [user.id, tokenHash]
       );
       await client.query('COMMIT');
-      await sendVerificationEmail(email, verificationCode);
+      try {
+        await sendVerificationEmail(email, verificationCode);
+      } catch (emailErr) {
+        console.error('[register] Failed to send verification email:', emailErr.message);
+      }
       res.status(201).json({ message: 'Account created. Check your email to verify.', user });
     } else {
       await client.query('COMMIT');
@@ -113,7 +117,11 @@ router.post('/resend-verification', resendLimiter, validate(resendVerificationSc
         [user.id, tokenHash]
       );
 
-      await sendVerificationEmail(req.body.email, verificationCode);
+      try {
+        await sendVerificationEmail(req.body.email, verificationCode);
+      } catch (emailErr) {
+        console.error('[resend] Failed to send verification email:', emailErr.message);
+      }
     }
 
     // Always 200 to prevent email enumeration
@@ -263,7 +271,11 @@ router.post('/forgot-password', authLimiter, validate(forgotPasswordSchema), asy
         [user.id, hashToken(rawToken)]
       );
 
-      await sendPasswordResetEmail(req.body.email, rawToken);
+      try {
+        await sendPasswordResetEmail(req.body.email, rawToken);
+      } catch (emailErr) {
+        console.error('[forgot-password] Failed to send reset email:', emailErr.message);
+      }
     }
 
     // Always 200
