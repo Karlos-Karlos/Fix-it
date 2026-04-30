@@ -11558,8 +11558,57 @@
 
         @media (max-width: 480px) {
             .auth-card {
-                padding: 24px 20px;
-                margin: 0 4px;
+                padding: 20px 16px;
+                margin: 0;
+                border-radius: 14px;
+            }
+
+            /* Auth screen: fit in one viewport, no scrolling */
+            #screen-auth {
+                min-height: calc(100dvh - 80px);
+                display: flex;
+                flex-direction: column;
+                justify-content: center;
+                gap: 16px;
+                padding-bottom: 16px;
+            }
+
+            /* Shrink the hero so card has room */
+            #screen-auth .s1-hero {
+                margin-bottom: 0;
+                text-align: center;
+            }
+
+            #screen-auth .s1-title {
+                font-size: 1.6rem;
+                margin-bottom: 4px;
+            }
+
+            #screen-auth .s1-subtitle {
+                font-size: 0.85rem;
+                margin-bottom: 0;
+            }
+
+            #screen-auth .s1-hero-badge {
+                margin-bottom: 8px;
+            }
+
+            /* Tighter form spacing */
+            .auth-tabs {
+                margin-bottom: 16px;
+            }
+
+            .auth-form {
+                gap: 2px;
+            }
+
+            .auth-input {
+                padding: 10px 14px;
+            }
+
+            .auth-submit-btn {
+                padding: 12px 0;
+                margin-top: 8px;
             }
         }
 
