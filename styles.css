@@ -16852,10 +16852,11 @@
         background: rgba(20,18,17,0.96);
         backdrop-filter: blur(14px);
         -webkit-backdrop-filter: blur(14px);
-        margin: 0 -14px;
-        width: calc(100% + 28px);
+        margin: 0;
+        width: 100%;
         padding: 10px 14px 6px;
         border-bottom: 1px solid rgba(255,255,255,0.06);
+        box-sizing: border-box;
         /* Grid: logo top-left, avatar top-right, nav full-width below */
         display: grid;
         grid-template-areas: "logo usermenu" "nav nav";
@@ -16927,10 +16928,19 @@
 
     /* ── User-menu dropdown: compact, anchored top-right ── */
     .user-menu-dropdown {
-        width: 260px;
+        width: 220px;
         right: 0;
         left: auto;
-        border-radius: 14px;
+        border-radius: 12px;
+    }
+
+    .user-menu-hero {
+        padding: 14px 14px 12px;
+    }
+
+    .user-menu-item {
+        padding: 10px 14px;
+        font-size: 0.85rem;
     }
 
     /* ── Wearables insights: 3-column wrap instead of 5-in-a-row ── */
