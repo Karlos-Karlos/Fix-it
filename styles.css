@@ -11564,7 +11564,7 @@
             }
 
             /* Auth screen: fit in one viewport, no scrolling */
-            #screen-auth {
+            #screen-auth.active {
                 min-height: calc(100dvh - 80px);
                 display: flex;
                 flex-direction: column;
