@@ -2781,8 +2781,10 @@
         /* Responsive */
         @media (max-width: 768px) {
             .header {
-                flex-direction: column;
-                gap: 20px;
+                flex-direction: row;
+                gap: 12px;
+                justify-content: space-between;
+                align-items: center;
             }
 
             .upload-section {
