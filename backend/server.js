@@ -277,6 +277,17 @@ async function runMigrations() {
       console.warn('Migration notice:', err.message);
     }
   }
+
+  // Promote ADMIN_EMAIL to admin role if set
+  if (process.env.ADMIN_EMAIL) {
+    const result = await db.query(
+      "UPDATE users SET role = 'admin' WHERE email = $1 AND role != 'admin' RETURNING email",
+      [process.env.ADMIN_EMAIL]
+    );
+    if (result.rows.length > 0) {
+      console.log(`[migrations] Promoted ${process.env.ADMIN_EMAIL} to admin`);
+    }
+  }
 }
 
 // ── Exercise how-to seed data ──
