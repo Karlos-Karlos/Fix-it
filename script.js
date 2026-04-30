@@ -2758,6 +2758,9 @@
                 _wearablePollInterval = null;
             }
 
+            // Scroll to top on every screen transition
+            window.scrollTo({ top: 0, behavior: 'instant' });
+
             // Hide all screens
             Object.values(screens).forEach(s => s.classList.remove('active'));
 
