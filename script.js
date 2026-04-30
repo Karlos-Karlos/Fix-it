@@ -14269,6 +14269,9 @@ Please try again with a different photo.`;
                     throw new Error((data.error && data.error.message) || data.message || 'Failed to delete account');
                 }
                 closeAccountModal();
+                // Wipe all local data — scan history, logs, tokens, everything
+                localStorage.clear();
+                sessionStorage.clear();
                 handleLogout();
                 showToast('Your account has been deleted.', 'success');
             } catch (err) {
