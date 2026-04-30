@@ -3184,25 +3184,40 @@
 
         @media (max-width: 480px) {
             /* Simulator: fix right-side cut-off */
-            .avatar-comparison {
-                padding: 18px;
-            }
-
-            .simulator-grid {
-                gap: 14px;
-                margin-top: 16px;
+            #screen-simulator {
+                overflow-x: clip;
+                width: 100%;
             }
 
             .simulator-content {
                 margin-top: 20px;
                 overflow-x: clip;
                 width: 100%;
+                max-width: 100%;
+            }
+
+            .simulator-grid {
+                grid-template-columns: 1fr;
+                width: 100%;
+                max-width: 100%;
+                gap: 14px;
+                margin-top: 16px;
+            }
+
+            .avatar-comparison {
+                padding: 18px;
+                grid-column: span 1;
+                width: 100%;
+                max-width: 100%;
+                box-sizing: border-box;
             }
 
             .avatar-container {
                 gap: 20px;
                 flex-direction: column;
                 align-items: center;
+                width: 100%;
+                overflow-x: clip;
             }
 
             .avatar-body {
@@ -3215,9 +3230,39 @@
                 margin: 4px 0;
             }
 
+            .visual-age-display {
+                flex-direction: column;
+                align-items: flex-start;
+                gap: 12px;
+                width: 100%;
+            }
+
+            .age-benefit {
+                border-left: none;
+                border-top: 1px solid var(--border-subtle);
+                padding-top: 10px;
+                width: 100%;
+            }
+
+            .timeline-inline {
+                padding: 14px;
+                margin: 16px 0;
+                width: 100%;
+                box-sizing: border-box;
+            }
+
+            .scenarios-grid {
+                grid-column: span 1;
+                width: 100%;
+                max-width: 100%;
+                flex-direction: column;
+            }
+
             .scenarios-grid .scenario-card {
                 flex: 1 1 100%;
+                width: 100%;
                 min-width: 0;
+                max-width: 100%;
             }
         }
 
