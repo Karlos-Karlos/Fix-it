@@ -1135,7 +1135,6 @@
             updateAnalyzeButton();
         }
 
-        // Data Export Function - Generates PDF Report
         async function exportUserData() {
             try {
                 const { jsPDF } = window.jspdf;
@@ -11569,44 +11568,8 @@ Please try again with a different photo.`;
             }).join('');
         }
 
-        // Data Management Setup (Export Data, Clear Data, API Key Settings)
+        // Data Management Setup (Clear Data, API Key Settings)
         function setupDataManagement() {
-            // Export PDF button (on Results screen)
-            document.getElementById('export-data-btn')?.addEventListener('click', async () => {
-                const btn = document.getElementById('export-data-btn');
-                if (!btn) return;
-                const originalHTML = btn.innerHTML;
-                btn.innerHTML = `<svg viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                    <circle cx="12" cy="12" r="10"/>
-                    <path d="M12 6v6l4 2"/>
-                </svg> Generating...`;
-                btn.style.pointerEvents = 'none';
-                btn.style.opacity = '0.7';
-                try {
-                    await exportUserData();
-                    btn.innerHTML = `<svg viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                        <path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/>
-                        <polyline points="22 4 12 14.01 9 11.01"/>
-                    </svg> Downloaded!`;
-                    setTimeout(() => {
-                        btn.innerHTML = originalHTML;
-                        btn.style.pointerEvents = '';
-                        btn.style.opacity = '';
-                    }, 2000);
-                } catch (e) {
-                    btn.innerHTML = `<svg viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                        <circle cx="12" cy="12" r="10"/>
-                        <line x1="15" y1="9" x2="9" y2="15"/>
-                        <line x1="9" y1="9" x2="15" y2="15"/>
-                    </svg> Failed`;
-                    setTimeout(() => {
-                        btn.innerHTML = originalHTML;
-                        btn.style.pointerEvents = '';
-                        btn.style.opacity = '';
-                    }, 2000);
-                }
-            });
-
             // Clear All Data button
             document.getElementById('clear-data-btn')?.addEventListener('click', () => {
                 const modal = document.getElementById('clear-data-modal');
