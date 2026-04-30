@@ -1,44 +1,26 @@
-const FROM_ADDRESS = process.env.EMAIL_FROM || 'FiX-it <onboarding@resend.dev>';
-
-// ── Resend (preferred for cloud deployments) ──
-function getResend() {
-  if (!process.env.RESEND_API_KEY) return null;
-  const { Resend } = require('resend');
-  return new Resend(process.env.RESEND_API_KEY);
-}
-
-// ── Nodemailer fallback (SMTP / local dev) ──
-let _nodemailerTransport = null;
-function getNodemailer() {
-  if (_nodemailerTransport) return _nodemailerTransport;
+// ── Nodemailer (SMTP — Gmail or any provider) ──
+let _transport = null;
+function getTransport() {
+  if (_transport) return _transport;
   if (!process.env.SMTP_HOST) return null;
   const nodemailer = require('nodemailer');
-  _nodemailerTransport = nodemailer.createTransport({
+  _transport = nodemailer.createTransport({
     host: process.env.SMTP_HOST,
     port: parseInt(process.env.SMTP_PORT, 10) || 587,
     secure: false,
     auth: { user: process.env.SMTP_USER, pass: process.env.SMTP_PASS },
   });
-  return _nodemailerTransport;
+  return _transport;
 }
 
 async function sendMail({ to, subject, html }) {
-  // SMTP takes priority when configured (Gmail etc.)
-  const transport = getNodemailer();
+  const transport = getTransport();
   if (transport) {
     await transport.sendMail({ from: process.env.SMTP_USER, to, subject, html });
     return;
   }
 
-  // Resend as fallback (free plan — only delivers to account owner email without verified domain)
-  const resend = getResend();
-  if (resend) {
-    const { error } = await resend.emails.send({ from: FROM_ADDRESS, to, subject, html });
-    if (error) throw new Error(`Resend error: ${error.message}`);
-    return;
-  }
-
-  // No transport configured — log to console (dev only)
+  // No SMTP configured — log to console (dev only)
   console.log('──────────────────────────────────────');
   console.log(`EMAIL: ${subject}`);
   console.log(`TO:    ${to}`);
