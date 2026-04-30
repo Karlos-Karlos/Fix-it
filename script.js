@@ -142,10 +142,43 @@
             }
         }
 
-        // Fire-and-forget API save â€” silently skips when offline or unauthenticated
+        // Offline / online indicator
+        function updateOfflineBanner() {
+            const banner = document.getElementById('offline-banner');
+            if (!banner) return;
+            if (!navigator.onLine) {
+                banner.textContent = 'You are offline — some features may not work';
+                banner.style.display = 'block';
+            } else {
+                banner.style.display = 'none';
+            }
+        }
+        window.addEventListener('online',  updateOfflineBanner);
+        window.addEventListener('offline', updateOfflineBanner);
+        updateOfflineBanner();
+
+        // Proactively refresh token when user returns after >10 min away
+        let _lastActiveAt = Date.now();
+        document.addEventListener('visibilitychange', () => {
+            if (document.visibilityState === 'visible') {
+                const awayMs = Date.now() - _lastActiveAt;
+                if (awayMs > 10 * 60 * 1000 && state.refreshToken) {
+                    tryRefreshToken().catch(() => {});
+                }
+            } else {
+                _lastActiveAt = Date.now();
+            }
+        });
+
+        // Fire-and-forget API save with 2 retries on failure
         function _apiSave(path, body, method = 'POST') {
             if (!state.accessToken) return;
-            apiFetch(path, { method, body: JSON.stringify(body) }).catch(() => {});
+            const attempt = (retriesLeft) => {
+                apiFetch(path, { method, body: JSON.stringify(body) })
+                    .then(res => { if (!res.ok && retriesLeft > 0) setTimeout(() => attempt(retriesLeft - 1), 2000); })
+                    .catch(() => { if (retriesLeft > 0) setTimeout(() => attempt(retriesLeft - 1), 2000); });
+            };
+            attempt(2);
         }
 
         // Fetch all tracking history from the server and seed localStorage
