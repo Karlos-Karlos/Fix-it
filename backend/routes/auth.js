@@ -28,9 +28,9 @@ router.post('/register', authLimiter, validate(registerSchema), async (req, res,
 
     const passwordHash = await bcrypt.hash(password, SALT_ROUNDS);
 
-    // Auto-verify when SMTP is not configured (no email service available)
-    const smtpConfigured = !!process.env.SMTP_HOST;
-    const autoVerify = !smtpConfigured;
+    // Auto-verify only when neither Resend nor SMTP is configured
+    const emailConfigured = !!(process.env.RESEND_API_KEY || process.env.SMTP_HOST);
+    const autoVerify = !emailConfigured;
 
     const userResult = await client.query(
       `INSERT INTO users (email, password_hash, display_name, gender, height, weight, age_range, activity_level, fitness_goal, experience_level, email_verified, email_verified_at)
