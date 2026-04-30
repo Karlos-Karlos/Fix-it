@@ -16925,11 +16925,12 @@
         align-items: flex-end;
     }
 
-    /* ── User-menu dropdown: clamp to viewport ── */
+    /* ── User-menu dropdown: compact, anchored top-right ── */
     .user-menu-dropdown {
-        width: calc(100vw - 28px);
-        right: -14px;
-        border-radius: 16px;
+        width: 260px;
+        right: 0;
+        left: auto;
+        border-radius: 14px;
     }
 
     /* ── Wearables insights: 3-column wrap instead of 5-in-a-row ── */
