@@ -17314,10 +17314,20 @@ body.has-bottom-nav .coach-panel {
     bottom: calc(94px + env(safe-area-inset-bottom, 0px));
 }
 
+/* Mobile: panel is a bottom sheet — must fully clear the nav and fit on screen */
 @media (max-width: 480px) {
     body.has-bottom-nav .coach-panel {
         bottom: calc(94px + env(safe-area-inset-bottom, 0px));
+        /* Limit height so panel stays within the visible area above the nav */
+        max-height: calc(100vh - 180px);
         border-radius: 16px;
+        /* Prevent clipping of internal content */
+        overflow: hidden;
+    }
+
+    body.has-bottom-nav .coach-messages {
+        max-height: calc(100vh - 430px);
+        min-height: 80px;
     }
 }
 
