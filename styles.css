@@ -17310,6 +17310,22 @@ body.has-bottom-nav .screen.active {
     .bnav-item { padding: 8px 2px; }
 }
 
+/* Lift coach FAB and panel above the bottom nav */
+body.has-bottom-nav .coach-fab {
+    bottom: calc(76px + env(safe-area-inset-bottom, 0px));
+}
+
+body.has-bottom-nav .coach-panel {
+    bottom: calc(76px + env(safe-area-inset-bottom, 0px));
+}
+
+@media (max-width: 480px) {
+    body.has-bottom-nav .coach-panel {
+        bottom: calc(72px + env(safe-area-inset-bottom, 0px));
+        border-radius: 16px;
+    }
+}
+
 /* ── Offline banner ── */
 #offline-banner {
     position: fixed;
