@@ -17230,7 +17230,10 @@
     background: var(--bg-card);
     border-top: 1px solid var(--border-subtle);
     box-shadow: 0 -4px 24px rgba(0, 0, 0, 0.35);
-    padding: 10px 16px calc(10px + env(safe-area-inset-bottom, 0px));
+    padding-top: 10px;
+    padding-right: 20px;
+    padding-left: 20px;
+    padding-bottom: calc(10px + env(safe-area-inset-bottom, 0px));
     gap: 2px;
     justify-content: stretch;
     align-items: stretch;
@@ -17293,6 +17296,9 @@
 .bnav-item.bnav-new.active {
     opacity: 1;
 }
+
+.bnav-item:first-child { margin-left: 4px; }
+.bnav-item:last-child  { margin-right: 4px; }
 
 /* Screen padding to avoid content hiding behind the nav */
 body.has-bottom-nav .screen.active {
