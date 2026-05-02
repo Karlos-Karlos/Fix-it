@@ -17230,7 +17230,7 @@
     background: var(--bg-card);
     border-top: 1px solid var(--border-subtle);
     box-shadow: 0 -4px 24px rgba(0, 0, 0, 0.35);
-    padding: 10px max(8px, env(safe-area-inset-right, 8px)) calc(10px + env(safe-area-inset-bottom, 0px)) max(8px, env(safe-area-inset-left, 8px));
+    padding: 10px 16px calc(10px + env(safe-area-inset-bottom, 0px));
     gap: 2px;
     justify-content: stretch;
     align-items: stretch;
