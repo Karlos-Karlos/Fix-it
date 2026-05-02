@@ -1,4 +1,4 @@
-        // Debug mode: set to true during development for console output
+﻿        // Debug mode: set to true during development for console output
         const DEBUG = location.hostname === 'localhost' || location.hostname === '127.0.0.1';
         const dbg = {
             log: (...args) => DEBUG && console.log(...args),
@@ -27,7 +27,7 @@
             });
         }
 
-        // Application State â€” exposed on window so inline scripts can access it
+        // Application State — exposed on window so inline scripts can access it
         const state = window.__state = {
             currentScreen: 1,
             hasImage: false,
@@ -63,7 +63,7 @@
             age: null
         };
 
-        // localStorage key helper â€” always uses a stable device ID so that
+        // localStorage key helper — always uses a stable device ID so that
         // saves and loads use the SAME key regardless of whether backend auth
         // has completed. Server user ID changes mid-session cause key mismatches;
         // the device ID never changes within a browser profile.
@@ -115,7 +115,7 @@
                     headers['Authorization'] = 'Bearer ' + state.accessToken;
                     res = await doFetch();
                 } else {
-                    // Refresh failed â€” force logout
+                    // Refresh failed — force logout
                     handleLogout();
                     throw new Error('Session expired. Please log in again.');
                 }
@@ -182,7 +182,7 @@
         }
 
         // Fetch all tracking history from the server and seed localStorage
-        // Called once after login â€” server is the source of truth for history
+        // Called once after login — server is the source of truth for history
         async function syncTrackingDataFromServer() {
             if (!state.accessToken) return;
             try {
@@ -341,7 +341,7 @@
             } catch (_) {}
 
             try {
-                // Gamification XP â€” use server value if higher than local
+                // Gamification XP — use server value if higher than local
                 const gamRes = await apiFetch('/users/me/gamification');
                 if (gamRes.ok) {
                     const gam = await gamRes.json();
@@ -354,7 +354,7 @@
             } catch (_) {}
 
             try {
-                // Food / calorie log for today â€” not stored persistently like other logs,
+                // Food / calorie log for today — not stored persistently like other logs,
                 // so we fetch it here so the Nutrition habit shows correctly on the progress screen
                 const today = new Date().toISOString().split('T')[0];
                 const foodRes = await apiFetch('/nutrition/food-log/daily?date=' + today);
@@ -548,7 +548,7 @@
         }
 
         function handleLogout() {
-            // Revoke the session on the server (fire-and-forget â€” don't block UI on network failure)
+            // Revoke the session on the server (fire-and-forget — don't block UI on network failure)
             if (state.accessToken) {
                 apiFetch('/auth/logout', { method: 'POST' }).catch(() => {});
             }
@@ -599,20 +599,20 @@
             // Wait until all setup*() functions in init() have run before routing.
             await setupDonePromise;
 
-            // 1. Session state already loaded â€” go straight to Results
+            // 1. Session state already loaded — go straight to Results
             if (state.analysisResult) {
                 populateResults();
                 goToScreen(3);
                 return;
             }
 
-            // 2. Check server for scans â€” source of truth for which account owns data
+            // 2. Check server for scans — source of truth for which account owns data
             let serverScans = [];
             if (state.accessToken) {
                 try { serverScans = await fetchServerScans(); } catch (e) {}
             }
 
-            // 3. Check IndexedDB â€” only use if server also has scans (prevents stale
+            // 3. Check IndexedDB — only use if server also has scans (prevents stale
             //    snapshots from a deleted account being restored for a new account)
             if (serverScans.length > 0) {
                 try {
@@ -654,7 +654,7 @@
                 return;
             }
 
-            // 5. Genuinely new user with no scans anywhere â€” go to Upload
+            // 5. Genuinely new user with no scans anywhere — go to Upload
             goToScreen(1);
         }
 
@@ -665,7 +665,7 @@
             const initials = getInitials(name);
             const avatarUrl = (user && user.avatar_url) || null;
 
-            // Trigger button â€” avatar only
+            // Trigger button — avatar only
             setAvatarContent('user-avatar', initials, avatarUrl);
 
             // Dropdown greeting + header
@@ -758,7 +758,7 @@
                         headers: { 'Content-Type': 'application/json' },
                         body: JSON.stringify({ email })
                     });
-                    showAuthMessage('Verification code resent â€” check your email.', 'success');
+                    showAuthMessage('Verification code resent — check your email.', 'success');
                 } catch {
                     showAuthMessage('Failed to resend. Please try again.', 'error');
                 }
@@ -933,7 +933,7 @@
                         handleLogout();
                     }
                 }).catch(() => {
-                    // Server unreachable â€” restore user from cache so userKey() works offline
+                    // Server unreachable — restore user from cache so userKey() works offline
                     try {
                         const cached = localStorage.getItem('fixit-user');
                         if (cached) state.user = JSON.parse(cached);
@@ -948,53 +948,53 @@
 
         // ========== PRE-BACKEND UTILITIES ==========
 
-        // Local Food Database Fallback (for offline/API failure â€” gets replaced by API data on load)
+        // Local Food Database Fallback (for offline/API failure — gets replaced by API data on load)
         let LOCAL_FOOD_DATABASE = [
-            { name: 'Chicken Breast', calories: 165, protein: 31, carbs: 0, fats: 4, portion: '100g serving', icon: 'ðŸ—' },
-            { name: 'Salmon', calories: 208, protein: 20, carbs: 0, fats: 13, portion: '100g serving', icon: 'ðŸŸ' },
-            { name: 'Brown Rice', calories: 112, protein: 2, carbs: 24, fats: 1, portion: '100g serving', icon: 'ðŸš' },
-            { name: 'White Rice', calories: 130, protein: 3, carbs: 28, fats: 0, portion: '100g serving', icon: 'ðŸš' },
-            { name: 'Eggs', calories: 155, protein: 13, carbs: 1, fats: 11, portion: '100g (2 eggs)', icon: 'ðŸ¥š' },
-            { name: 'Scrambled Eggs', calories: 149, protein: 10, carbs: 2, fats: 11, portion: '100g serving', icon: 'ðŸ¥š' },
-            { name: 'Boiled Eggs', calories: 155, protein: 13, carbs: 1, fats: 11, portion: '100g (2 eggs)', icon: 'ðŸ¥š' },
-            { name: 'Oatmeal', calories: 68, protein: 2, carbs: 12, fats: 1, portion: '100g serving', icon: 'ðŸ¥£' },
-            { name: 'Greek Yogurt', calories: 97, protein: 9, carbs: 4, fats: 5, portion: '100g serving', icon: 'ðŸ¥›' },
-            { name: 'Banana', calories: 89, protein: 1, carbs: 23, fats: 0, portion: '1 medium', icon: 'ðŸŒ' },
-            { name: 'Apple', calories: 52, protein: 0, carbs: 14, fats: 0, portion: '1 medium', icon: 'ðŸŽ' },
-            { name: 'Broccoli', calories: 34, protein: 3, carbs: 7, fats: 0, portion: '100g serving', icon: 'ðŸ¥¦' },
-            { name: 'Sweet Potato', calories: 86, protein: 2, carbs: 20, fats: 0, portion: '100g serving', icon: 'ðŸ ' },
-            { name: 'Potato', calories: 77, protein: 2, carbs: 17, fats: 0, portion: '100g serving', icon: 'ðŸ¥”' },
-            { name: 'Beef Steak', calories: 271, protein: 26, carbs: 0, fats: 18, portion: '100g serving', icon: 'ðŸ¥©' },
-            { name: 'Ground Beef', calories: 250, protein: 26, carbs: 0, fats: 15, portion: '100g serving', icon: 'ðŸ¥©' },
-            { name: 'Turkey Breast', calories: 135, protein: 30, carbs: 0, fats: 1, portion: '100g serving', icon: 'ðŸ—' },
-            { name: 'Tuna', calories: 132, protein: 28, carbs: 0, fats: 1, portion: '100g serving', icon: 'ðŸŸ' },
-            { name: 'Shrimp', calories: 85, protein: 20, carbs: 0, fats: 0, portion: '100g serving', icon: 'ðŸ¦' },
-            { name: 'Pasta', calories: 131, protein: 5, carbs: 25, fats: 1, portion: '100g serving', icon: 'ðŸ' },
-            { name: 'Bread', calories: 265, protein: 9, carbs: 49, fats: 3, portion: '100g (2-3 slices)', icon: 'ðŸž' },
-            { name: 'Whole Wheat Bread', calories: 247, protein: 13, carbs: 41, fats: 3, portion: '100g serving', icon: 'ðŸž' },
-            { name: 'Avocado', calories: 160, protein: 2, carbs: 9, fats: 15, portion: '100g serving', icon: 'ðŸ¥‘' },
-            { name: 'Almonds', calories: 579, protein: 21, carbs: 22, fats: 50, portion: '100g serving', icon: 'ðŸ¥œ' },
-            { name: 'Peanut Butter', calories: 588, protein: 25, carbs: 20, fats: 50, portion: '100g serving', icon: 'ðŸ¥œ' },
-            { name: 'Milk', calories: 42, protein: 3, carbs: 5, fats: 1, portion: '100ml', icon: 'ðŸ¥›' },
-            { name: 'Cheese', calories: 402, protein: 25, carbs: 1, fats: 33, portion: '100g serving', icon: 'ðŸ§€' },
-            { name: 'Cottage Cheese', calories: 98, protein: 11, carbs: 3, fats: 4, portion: '100g serving', icon: 'ðŸ§€' },
-            { name: 'Pizza', calories: 266, protein: 11, carbs: 33, fats: 10, portion: '1 slice (100g)', icon: 'ðŸ•' },
-            { name: 'Burger', calories: 295, protein: 17, carbs: 24, fats: 14, portion: '1 patty with bun', icon: 'ðŸ”' },
-            { name: 'Salad', calories: 20, protein: 2, carbs: 3, fats: 0, portion: '100g serving', icon: 'ðŸ¥—' },
-            { name: 'Orange', calories: 47, protein: 1, carbs: 12, fats: 0, portion: '1 medium', icon: 'ðŸŠ' },
-            { name: 'Grapes', calories: 69, protein: 1, carbs: 18, fats: 0, portion: '100g serving', icon: 'ðŸ‡' },
-            { name: 'Strawberries', calories: 32, protein: 1, carbs: 8, fats: 0, portion: '100g serving', icon: 'ðŸ“' },
-            { name: 'Spinach', calories: 23, protein: 3, carbs: 4, fats: 0, portion: '100g serving', icon: 'ðŸ¥¬' },
-            { name: 'Carrots', calories: 41, protein: 1, carbs: 10, fats: 0, portion: '100g serving', icon: 'ðŸ¥•' },
-            { name: 'Corn', calories: 86, protein: 3, carbs: 19, fats: 1, portion: '100g serving', icon: 'ðŸŒ½' },
-            { name: 'Beans', calories: 127, protein: 9, carbs: 23, fats: 0, portion: '100g serving', icon: 'ðŸ«˜' },
-            { name: 'Lentils', calories: 116, protein: 9, carbs: 20, fats: 0, portion: '100g serving', icon: 'ðŸ«˜' },
-            { name: 'Tofu', calories: 76, protein: 8, carbs: 2, fats: 5, portion: '100g serving', icon: 'ðŸ§ˆ' },
-            { name: 'Quinoa', calories: 120, protein: 4, carbs: 21, fats: 2, portion: '100g serving', icon: 'ðŸŒ¾' },
-            { name: 'Coffee', calories: 2, protein: 0, carbs: 0, fats: 0, portion: '1 cup (240ml)', icon: 'â˜•' },
-            { name: 'Orange Juice', calories: 45, protein: 1, carbs: 10, fats: 0, portion: '100ml', icon: 'ðŸŠ' },
-            { name: 'Protein Shake', calories: 120, protein: 25, carbs: 3, fats: 1, portion: '1 scoop (30g)', icon: 'ðŸ¥¤' },
-            { name: 'Whey Protein', calories: 120, protein: 24, carbs: 3, fats: 2, portion: '1 scoop (30g)', icon: 'ðŸ¥¤' }
+            { name: 'Chicken Breast', calories: 165, protein: 31, carbs: 0, fats: 4, portion: '100g serving', icon: '🍗' },
+            { name: 'Salmon', calories: 208, protein: 20, carbs: 0, fats: 13, portion: '100g serving', icon: '🐟' },
+            { name: 'Brown Rice', calories: 112, protein: 2, carbs: 24, fats: 1, portion: '100g serving', icon: '🍚' },
+            { name: 'White Rice', calories: 130, protein: 3, carbs: 28, fats: 0, portion: '100g serving', icon: '🍚' },
+            { name: 'Eggs', calories: 155, protein: 13, carbs: 1, fats: 11, portion: '100g (2 eggs)', icon: '🥚' },
+            { name: 'Scrambled Eggs', calories: 149, protein: 10, carbs: 2, fats: 11, portion: '100g serving', icon: '🥚' },
+            { name: 'Boiled Eggs', calories: 155, protein: 13, carbs: 1, fats: 11, portion: '100g (2 eggs)', icon: '🥚' },
+            { name: 'Oatmeal', calories: 68, protein: 2, carbs: 12, fats: 1, portion: '100g serving', icon: '🥣' },
+            { name: 'Greek Yogurt', calories: 97, protein: 9, carbs: 4, fats: 5, portion: '100g serving', icon: '🥛' },
+            { name: 'Banana', calories: 89, protein: 1, carbs: 23, fats: 0, portion: '1 medium', icon: '🍌' },
+            { name: 'Apple', calories: 52, protein: 0, carbs: 14, fats: 0, portion: '1 medium', icon: '🍎' },
+            { name: 'Broccoli', calories: 34, protein: 3, carbs: 7, fats: 0, portion: '100g serving', icon: '🥦' },
+            { name: 'Sweet Potato', calories: 86, protein: 2, carbs: 20, fats: 0, portion: '100g serving', icon: '🍠' },
+            { name: 'Potato', calories: 77, protein: 2, carbs: 17, fats: 0, portion: '100g serving', icon: '🥔' },
+            { name: 'Beef Steak', calories: 271, protein: 26, carbs: 0, fats: 18, portion: '100g serving', icon: '🥩' },
+            { name: 'Ground Beef', calories: 250, protein: 26, carbs: 0, fats: 15, portion: '100g serving', icon: '🥩' },
+            { name: 'Turkey Breast', calories: 135, protein: 30, carbs: 0, fats: 1, portion: '100g serving', icon: '🍗' },
+            { name: 'Tuna', calories: 132, protein: 28, carbs: 0, fats: 1, portion: '100g serving', icon: '🐟' },
+            { name: 'Shrimp', calories: 85, protein: 20, carbs: 0, fats: 0, portion: '100g serving', icon: '🦐' },
+            { name: 'Pasta', calories: 131, protein: 5, carbs: 25, fats: 1, portion: '100g serving', icon: '🍝' },
+            { name: 'Bread', calories: 265, protein: 9, carbs: 49, fats: 3, portion: '100g (2-3 slices)', icon: '🍞' },
+            { name: 'Whole Wheat Bread', calories: 247, protein: 13, carbs: 41, fats: 3, portion: '100g serving', icon: '🍞' },
+            { name: 'Avocado', calories: 160, protein: 2, carbs: 9, fats: 15, portion: '100g serving', icon: '🥑' },
+            { name: 'Almonds', calories: 579, protein: 21, carbs: 22, fats: 50, portion: '100g serving', icon: '🥜' },
+            { name: 'Peanut Butter', calories: 588, protein: 25, carbs: 20, fats: 50, portion: '100g serving', icon: '🥜' },
+            { name: 'Milk', calories: 42, protein: 3, carbs: 5, fats: 1, portion: '100ml', icon: '🥛' },
+            { name: 'Cheese', calories: 402, protein: 25, carbs: 1, fats: 33, portion: '100g serving', icon: '🧀' },
+            { name: 'Cottage Cheese', calories: 98, protein: 11, carbs: 3, fats: 4, portion: '100g serving', icon: '🧀' },
+            { name: 'Pizza', calories: 266, protein: 11, carbs: 33, fats: 10, portion: '1 slice (100g)', icon: '🍕' },
+            { name: 'Burger', calories: 295, protein: 17, carbs: 24, fats: 14, portion: '1 patty with bun', icon: '🍔' },
+            { name: 'Salad', calories: 20, protein: 2, carbs: 3, fats: 0, portion: '100g serving', icon: '🥗' },
+            { name: 'Orange', calories: 47, protein: 1, carbs: 12, fats: 0, portion: '1 medium', icon: '🍊' },
+            { name: 'Grapes', calories: 69, protein: 1, carbs: 18, fats: 0, portion: '100g serving', icon: '🍇' },
+            { name: 'Strawberries', calories: 32, protein: 1, carbs: 8, fats: 0, portion: '100g serving', icon: '🍓' },
+            { name: 'Spinach', calories: 23, protein: 3, carbs: 4, fats: 0, portion: '100g serving', icon: '🥬' },
+            { name: 'Carrots', calories: 41, protein: 1, carbs: 10, fats: 0, portion: '100g serving', icon: '🥕' },
+            { name: 'Corn', calories: 86, protein: 3, carbs: 19, fats: 1, portion: '100g serving', icon: '🌽' },
+            { name: 'Beans', calories: 127, protein: 9, carbs: 23, fats: 0, portion: '100g serving', icon: '🫘' },
+            { name: 'Lentils', calories: 116, protein: 9, carbs: 20, fats: 0, portion: '100g serving', icon: '🫘' },
+            { name: 'Tofu', calories: 76, protein: 8, carbs: 2, fats: 5, portion: '100g serving', icon: '🧈' },
+            { name: 'Quinoa', calories: 120, protein: 4, carbs: 21, fats: 2, portion: '100g serving', icon: '🌾' },
+            { name: 'Coffee', calories: 2, protein: 0, carbs: 0, fats: 0, portion: '1 cup (240ml)', icon: '☕' },
+            { name: 'Orange Juice', calories: 45, protein: 1, carbs: 10, fats: 0, portion: '100ml', icon: '🍊' },
+            { name: 'Protein Shake', calories: 120, protein: 25, carbs: 3, fats: 1, portion: '1 scoop (30g)', icon: '🥤' },
+            { name: 'Whey Protein', calories: 120, protein: 24, carbs: 3, fats: 2, portion: '1 scoop (30g)', icon: '🥤' }
         ];
 
         let _foodDbLoaded = false;
@@ -1013,7 +1013,7 @@
                         carbs: r.carbs,
                         fats: r.fats,
                         portion: r.portion || '100g serving',
-                        icon: r.icon || 'ðŸ½ï¸',
+                        icon: r.icon || '🍽️',
                     }));
                     _foodDbLoaded = true;
                 }
@@ -1198,7 +1198,7 @@
                     if (uid) {
                         if (key.endsWith('-' + uid)) keysToRemove.push(key);
                     } else {
-                        // No user context â€” remove unscoped keys only
+                        // No user context — remove unscoped keys only
                         keysToRemove.push(key);
                     }
                 }
@@ -1956,12 +1956,12 @@
             let confidenceScore = 0;
             const confidenceFactors = [];
 
-            // Factor 1: BMI data provided (height + weight) â€” strongest signal
+            // Factor 1: BMI data provided (height + weight) — strongest signal
             if (state.bmi) {
                 confidenceScore += 40;
                 confidenceFactors.push('Height & weight provided');
             } else {
-                confidenceFactors.push('No height/weight â€” relying on skeleton only');
+                confidenceFactors.push('No height/weight — relying on skeleton only');
             }
 
             // Factor 2: Key landmark visibility quality
@@ -1975,7 +1975,7 @@
                 confidenceFactors.push('Good pose visibility');
             } else {
                 confidenceScore += 5;
-                confidenceFactors.push('Low pose visibility â€” try better lighting');
+                confidenceFactors.push('Low pose visibility — try better lighting');
             }
 
             // Factor 3: Full body detected (ankles visible)
@@ -1984,7 +1984,7 @@
                 confidenceScore += 15;
                 confidenceFactors.push('Full body visible');
             } else {
-                confidenceFactors.push('Feet not fully visible â€” stand further back');
+                confidenceFactors.push('Feet not fully visible — stand further back');
             }
 
             // Factor 4: Gender provided (affects body comp norms)
@@ -2065,7 +2065,7 @@
             } else if (goal === 'recomp') {
                 recs.push("Eat at maintenance calories with high protein (1g per lb bodyweight)");
                 recs.push("Combine heavy strength training with moderate cardio for body recomposition");
-                recs.push("Be patient â€” recomposition is gradual but builds a lean, strong physique");
+                recs.push("Be patient — recomposition is gradual but builds a lean, strong physique");
             } else {
                 // Fallback: category-based if no goal set
                 if (category === 'Overweight' || category === 'Above Average Weight') {
@@ -2157,9 +2157,9 @@
 
             // Attach all UI event listeners BEFORE loading the AI model.
             // MediaPipe WASM compilation can block the main thread for several
-            // seconds â€” having listeners ready first means the page is interactive
+            // seconds — having listeners ready first means the page is interactive
             // immediately and routeAfterLogin() can navigate without waiting.
-            // initCoachModel() intentionally omitted â€” TF.js training (600+ phrases,
+            // initCoachModel() intentionally omitted — TF.js training (600+ phrases,
             // large vocab) blocks the main thread even with epoch-level yields.
             // detectIntent() uses keyword matching as primary path and only falls back
             // to the neural net when coachModel is non-null, so the coach works fully
@@ -2221,7 +2221,7 @@
             setupGenderSelector();
             setupGoalSelector();
 
-            // Age-range change listener â€” update state.age live
+            // Age-range change listener — update state.age live
             document.getElementById('age-range')?.addEventListener('change', e => {
                 state.age = ageRangeToMidpoint(e.target.value);
             });
@@ -2244,7 +2244,7 @@
             window.addEventListener('beforeunload', saveSessionState);
             setInterval(saveSessionState, 60000); // Auto-save every minute
 
-            // All event listeners are attached â€” routeAfterLogin() can now navigate.
+            // All event listeners are attached — routeAfterLogin() can now navigate.
             _setupDoneResolve();
 
             // Load MediaPipe after UI is ready. WASM compilation may block the
@@ -2424,9 +2424,9 @@
                 if (err.name === 'NotAllowedError' || err.name === 'PermissionDeniedError') {
                     errorMessage += 'Camera permission was denied.\n\n';
                     errorMessage += 'To fix this:\n';
-                    errorMessage += 'â€¢ iPhone/iPad: Go to Settings > Safari > Camera, set to "Allow"\n';
-                    errorMessage += 'â€¢ Android: Tap the lock icon in the address bar and allow camera\n';
-                    errorMessage += 'â€¢ Then refresh this page and try again';
+                    errorMessage += '• iPhone/iPad: Go to Settings > Safari > Camera, set to "Allow"\n';
+                    errorMessage += '• Android: Tap the lock icon in the address bar and allow camera\n';
+                    errorMessage += '• Then refresh this page and try again';
                 } else if (err.name === 'NotFoundError' || err.name === 'DevicesNotFoundError') {
                     errorMessage += 'No camera found on this device.';
                 } else if (err.name === 'NotReadableError' || err.name === 'TrackStartError') {
@@ -2724,11 +2724,11 @@
 The AI could not detect a human body in your photo.
 
 Please ensure:
-â€¢ Your FULL BODY is visible (head to feet)
-â€¢ You are facing the camera
-â€¢ Good lighting with minimal shadows
-â€¢ Plain background if possible
-â€¢ Photo is not blurry
+• Your FULL BODY is visible (head to feet)
+• You are facing the camera
+• Good lighting with minimal shadows
+• Plain background if possible
+• Photo is not blurry
 
 Please try again with a different photo.`;
 
@@ -2837,7 +2837,7 @@ Please try again with a different photo.`;
             const switchBtn = document.getElementById('goal-rec-action-modal');
             const keepBtn = document.getElementById('goal-rec-dismiss-modal');
 
-            // Goal button clicks â€” store selection on modal dataset
+            // Goal button clicks — store selection on modal dataset
             document.querySelectorAll('.modal-goal-btn').forEach(btn => {
                 btn.addEventListener('click', () => {
                     // Store the new goal on the modal element
@@ -2850,7 +2850,7 @@ Please try again with a different photo.`;
                 });
             });
 
-            // Switch Goal button â€” show options and auto-select recommended goal
+            // Switch Goal button — show options and auto-select recommended goal
             switchBtn.addEventListener('click', () => {
                 goalSwitcher.classList.toggle('active');
 
@@ -2868,14 +2868,14 @@ Please try again with a different photo.`;
                 }
             });
 
-            // Keep Goal button â€” hide options and clear selection
+            // Keep Goal button — hide options and clear selection
             keepBtn.addEventListener('click', () => {
                 goalSwitcher.classList.remove('active');
                 delete modal.dataset.switchedGoal;
                 document.querySelectorAll('.modal-goal-btn').forEach(b => b.classList.remove('active-goal'));
             });
 
-            // Close button â€” dismiss modal without changes
+            // Close button — dismiss modal without changes
             document.getElementById('gender-confirm-close')?.addEventListener('click', () => {
                 modal.classList.remove('active');
                 delete modal.dataset.switchedGoal;
@@ -2883,7 +2883,7 @@ Please try again with a different photo.`;
                 goToScreen(3);
             });
 
-            // Continue to Results â€” apply switched goal if any
+            // Continue to Results — apply switched goal if any
             proceedBtn.addEventListener('click', () => {
                 // If user switched the goal, apply it now
                 if (modal.dataset.switchedGoal) {
@@ -2911,7 +2911,7 @@ Please try again with a different photo.`;
 
         // Position zone dots on the body photo using MediaPipe landmark coordinates.
         // The photo uses width:100% height:auto so it fills the container with no
-        // letterboxing â€” normalised landmark coords map directly to % positions.
+        // letterboxing — normalised landmark coords map directly to % positions.
         function positionZoneDots(landmarks) {
             const container = document.querySelector('.body-photo-wrap');
             const img = document.getElementById('body-result-photo');
@@ -2919,7 +2919,7 @@ Please try again with a different photo.`;
             if (!img.naturalWidth || !img.naturalHeight) return;
             if (!container.clientWidth || !container.clientHeight) return;
 
-            // Direct mapping: lx/ly (0â€“1) â†’ left%/top% with clamping
+            // Direct mapping: lx/ly (0–1) → left%/top% with clamping
             function toContainerPct(lx, ly) {
                 return {
                     left: Math.min(Math.max(lx * 100, 2), 85),
@@ -2943,16 +2943,16 @@ Please try again with a different photo.`;
             // out running-pose hip/shoulder rotation that skews midX left or right
             const bodyMidX = (lShoulder.x + rShoulder.x + lHip.x + rHip.x) / 4;
 
-            // â”€â”€ Zone 1: Shoulders â€” midpoint between both shoulders (robust to mirroring)
+            // â”€â”€ Zone 1: Shoulders — midpoint between both shoulders (robust to mirroring)
             const shoulderPt = toContainerPct(shoulderMidX, shoulderMidY);
 
-            // â”€â”€ Zone 2: Upper Body â€” body centerline, 22% down from shoulders
+            // â”€â”€ Zone 2: Upper Body — body centerline, 22% down from shoulders
             const chestPt = toContainerPct(bodyMidX, shoulderMidY + torsoLen * 0.22);
 
-            // â”€â”€ Zone 3: Core â€” body centerline, 62% down from shoulders (navel area)
+            // â”€â”€ Zone 3: Core — body centerline, 62% down from shoulders (navel area)
             const corePt = toContainerPct(bodyMidX, shoulderMidY + torsoLen * 0.62);
 
-            // â”€â”€ Zone 4: Legs â€” use knee Y for height but hipMidX for horizontal so
+            // â”€â”€ Zone 4: Legs — use knee Y for height but hipMidX for horizontal so
             //    the dot stays on the body even when legs are spread in a running pose
             let legPt;
             const lKnee = L[25], rKnee = L[26];
@@ -3022,7 +3022,7 @@ Please try again with a different photo.`;
                 confText.textContent = labels[level] || 'Low Confidence';
 
                 if (result.confidenceFactors && result.confidenceFactors.length) {
-                    confDesc.textContent = result.confidenceFactors.join(' Â· ');
+                    confDesc.textContent = result.confidenceFactors.join(' · ');
                 } else {
                     confDesc.textContent = 'Analysis based on AI skeleton detection and user input.';
                 }
@@ -3412,7 +3412,7 @@ Please try again with a different photo.`;
             const goal = state.fitnessGoal || 'maintain';
 
             if (!weight) {
-                // No data yet â€” leave card in placeholder state
+                // No data yet — leave card in placeholder state
                 return;
             }
 
@@ -3447,8 +3447,8 @@ Please try again with a different photo.`;
             // Update formula text
             const formulaEl = document.getElementById('bmr-formula-text');
             if (formulaEl && height) {
-                const genderConst = gender === 'male' ? '+5' : 'âˆ’161';
-                formulaEl.textContent = `10Ã—${weight} + 6.25Ã—${height} âˆ’ 5Ã—${age} ${genderConst} = ${bmr} kcal`;
+                const genderConst = gender === 'male' ? '+5' : '−161';
+                formulaEl.textContent = `10×${weight} + 6.25×${height} − 5×${age} ${genderConst} = ${bmr} kcal`;
             }
 
             // Show card
@@ -4419,7 +4419,7 @@ Please try again with a different photo.`;
                 upNextContainer.innerHTML = `
                     <div class="up-next-info">
                         <span class="up-next-name">${escapeHtml(next.name)}</span>
-                        <span class="up-next-details">${parseInt(next.sets) || 0} sets â€¢ ${escapeHtml(String(next.reps))} reps</span>
+                        <span class="up-next-details">${parseInt(next.sets) || 0} sets • ${escapeHtml(String(next.reps))} reps</span>
                     </div>
                     ${next.isWeak ? '<span class="up-next-tag">Focus Area</span>' : ''}
                 `;
@@ -4641,7 +4641,7 @@ Please try again with a different photo.`;
             const minutes = Math.floor(elapsedTime / 60);
             const seconds = elapsedTime % 60;
 
-            // Estimate calories burned â€” MET Ã— weight Ã— hours
+            // Estimate calories burned — MET × weight × hours
             const EXERCISE_METS = { home: 3.8, gym: 5.5, hiit: 8.0 };
             const exList = workoutPlayerState.exercises;
             const avgMET = exList.length
@@ -4657,7 +4657,7 @@ Please try again with a different photo.`;
             const calEl = document.getElementById('complete-calories');
             if (calEl) calEl.textContent = caloriesBurned;
 
-            // Update streak â€” date-based: once per day, resets if a day is missed
+            // Update streak — date-based: once per day, resets if a day is missed
             const today = new Date().toISOString().split('T')[0];
             const lastWorkoutDay = localStorage.getItem(userKey('fixit-last-workout-day')) || '';
             let streak = parseInt(localStorage.getItem(userKey('fixit-workout-streak')) || '0');
@@ -4803,7 +4803,7 @@ Please try again with a different photo.`;
         };
 
         // Exercise database by muscle group
-        // How-to guide â€” loaded from backend on workout screen init
+        // How-to guide — loaded from backend on workout screen init
         let exerciseHowTo = {};
 
         async function loadExerciseHowTo() {
@@ -5264,7 +5264,7 @@ Please try again with a different photo.`;
                 const cyclePhase = weeklyRoutineData.currentConfig.cyclePhase;
 
                 // Moon phase icons for cycle phases
-                const cycleIcons = { menstrual: 'ðŸŒ‘', follicular: 'ðŸŒ’', ovulatory: 'ðŸŒ•', luteal: 'ðŸŒ˜' };
+                const cycleIcons = { menstrual: '🌑', follicular: '🌒', ovulatory: '🌕', luteal: '🌘' };
                 const currentCycleIcon = cycleIcons[cyclePhase] || 'â—';
 
                 listContainer.innerHTML = dayData.exercises.map((ex, index) => {
@@ -5285,7 +5285,7 @@ Please try again with a different photo.`;
                         <span class="exercise-number">${index + 1}</span>
                         <div class="exercise-item-info">
                             <div class="exercise-item-name">${escapeHtml(ex.name)}${ex.cycleAdjusted ? `<span class="cycle-badge" title="Adjusted for cycle phase">${currentCycleIcon}</span>` : ''}</div>
-                            <div class="exercise-item-details">${parseInt(ex.sets) || 0} sets Ã— ${escapeHtml(String(ex.reps))} reps</div>
+                            <div class="exercise-item-details">${parseInt(ex.sets) || 0} sets × ${escapeHtml(String(ex.reps))} reps</div>
                             ${stepsHtml}
                         </div>
                         <div class="exercise-item-muscles">
@@ -5490,7 +5490,7 @@ Please try again with a different photo.`;
                         type: 'gym'
                     }));
                     const dayLabel = day.charAt(0).toUpperCase() + day.slice(1);
-                    workoutPlayerState.label = `${dayLabel} Â· ${dayPlan.focus || 'Workout'}`;
+                    workoutPlayerState.label = `${dayLabel} · ${dayPlan.focus || 'Workout'}`;
                     closeWeeklyRoutineModal();
                     setTimeout(() => {
                         workoutPlayerState.currentExerciseIndex = 0;
@@ -5778,7 +5778,7 @@ Please try again with a different photo.`;
             const mealTypes = ['breakfast', 'lunch', 'dinner', 'snack', 'snack2', 'snack3'];
             const mealNames = ['Breakfast', 'Lunch', 'Dinner', 'Morning Snack', 'Afternoon Snack', 'Evening Snack'];
             const mealTimes = ['7:00 AM', '12:30 PM', '7:00 PM', '10:00 AM', '3:30 PM', '9:00 PM'];
-            const mealIcons = ['ðŸŒ…', 'â˜€ï¸', 'ðŸŒ™', 'ðŸŽ', 'ðŸ¥¤', 'ðŸŒ°'];
+            const mealIcons = ['🌅', '☀️', '🌙', '🍎', '🥤', '🌰'];
 
             for (let i = 0; i < config.mealsPerDay; i++) {
                 const mealType = mealTypes[i];
@@ -5866,71 +5866,71 @@ Please try again with a different photo.`;
             // Hardcoded fallback (used when API is unavailable)
             const standardMeals = {
                 breakfast: [
-                    { name: 'Greek Yogurt Parfait', icon: 'ðŸ¥£', foods: [
-                        { name: 'Greek Yogurt', portion: '200g', icon: 'ðŸ¥›', protein: 20, carbs: 8, fats: 5, calories: 157 },
-                        { name: 'Mixed Berries', portion: '100g', icon: 'ðŸ“', protein: 1, carbs: 14, fats: 0, calories: 57 },
-                        { name: 'Granola', portion: '40g', icon: 'ðŸŒ¾', protein: 4, carbs: 28, fats: 6, calories: 180 }
+                    { name: 'Greek Yogurt Parfait', icon: '🥣', foods: [
+                        { name: 'Greek Yogurt', portion: '200g', icon: '🥛', protein: 20, carbs: 8, fats: 5, calories: 157 },
+                        { name: 'Mixed Berries', portion: '100g', icon: '🍓', protein: 1, carbs: 14, fats: 0, calories: 57 },
+                        { name: 'Granola', portion: '40g', icon: '🌾', protein: 4, carbs: 28, fats: 6, calories: 180 }
                     ]},
-                    { name: 'Protein Oatmeal Bowl', icon: 'ðŸ¥£', foods: [
-                        { name: 'Oatmeal', portion: '80g dry', icon: 'ðŸ¥£', protein: 10, carbs: 54, fats: 6, calories: 304 },
-                        { name: 'Banana', portion: '1 medium', icon: 'ðŸŒ', protein: 1, carbs: 27, fats: 0, calories: 105 },
-                        { name: 'Almond Butter', portion: '2 tbsp', icon: 'ðŸ¥œ', protein: 7, carbs: 6, fats: 18, calories: 196 }
+                    { name: 'Protein Oatmeal Bowl', icon: '🥣', foods: [
+                        { name: 'Oatmeal', portion: '80g dry', icon: '🥣', protein: 10, carbs: 54, fats: 6, calories: 304 },
+                        { name: 'Banana', portion: '1 medium', icon: '🍌', protein: 1, carbs: 27, fats: 0, calories: 105 },
+                        { name: 'Almond Butter', portion: '2 tbsp', icon: '🥜', protein: 7, carbs: 6, fats: 18, calories: 196 }
                     ]},
-                    { name: 'Eggs & Avocado Toast', icon: 'ðŸ³', foods: [
-                        { name: 'Scrambled Eggs', portion: '3 large', icon: 'ðŸ¥š', protein: 18, carbs: 2, fats: 15, calories: 210 },
-                        { name: 'Whole Grain Toast', portion: '2 slices', icon: 'ðŸž', protein: 8, carbs: 26, fats: 2, calories: 160 },
-                        { name: 'Avocado', portion: 'Â½ medium', icon: 'ðŸ¥‘', protein: 2, carbs: 6, fats: 15, calories: 160 }
+                    { name: 'Eggs & Avocado Toast', icon: '🍳', foods: [
+                        { name: 'Scrambled Eggs', portion: '3 large', icon: '🥚', protein: 18, carbs: 2, fats: 15, calories: 210 },
+                        { name: 'Whole Grain Toast', portion: '2 slices', icon: '🍞', protein: 8, carbs: 26, fats: 2, calories: 160 },
+                        { name: 'Avocado', portion: '½ medium', icon: '🥑', protein: 2, carbs: 6, fats: 15, calories: 160 }
                     ]}
                 ],
                 lunch: [
-                    { name: 'Grilled Chicken Salad', icon: 'ðŸ¥—', foods: [
-                        { name: 'Grilled Chicken Breast', portion: '150g', icon: 'ðŸ—', protein: 46, carbs: 0, fats: 5, calories: 248 },
-                        { name: 'Mixed Greens', portion: '100g', icon: 'ðŸ¥¬', protein: 2, carbs: 4, fats: 0, calories: 20 },
-                        { name: 'Olive Oil Dressing', portion: '2 tbsp', icon: 'ðŸ«’', protein: 0, carbs: 0, fats: 28, calories: 240 },
-                        { name: 'Cherry Tomatoes', portion: '80g', icon: 'ðŸ…', protein: 1, carbs: 4, fats: 0, calories: 18 }
+                    { name: 'Grilled Chicken Salad', icon: '🥗', foods: [
+                        { name: 'Grilled Chicken Breast', portion: '150g', icon: '🍗', protein: 46, carbs: 0, fats: 5, calories: 248 },
+                        { name: 'Mixed Greens', portion: '100g', icon: '🥬', protein: 2, carbs: 4, fats: 0, calories: 20 },
+                        { name: 'Olive Oil Dressing', portion: '2 tbsp', icon: '🫒', protein: 0, carbs: 0, fats: 28, calories: 240 },
+                        { name: 'Cherry Tomatoes', portion: '80g', icon: '🍅', protein: 1, carbs: 4, fats: 0, calories: 18 }
                     ]},
-                    { name: 'Salmon Rice Bowl', icon: 'ðŸ±', foods: [
-                        { name: 'Grilled Salmon', portion: '140g', icon: 'ðŸŸ', protein: 28, carbs: 0, fats: 18, calories: 290 },
-                        { name: 'Brown Rice', portion: '150g cooked', icon: 'ðŸš', protein: 4, carbs: 36, fats: 2, calories: 168 },
-                        { name: 'Steamed Broccoli', portion: '100g', icon: 'ðŸ¥¦', protein: 3, carbs: 7, fats: 0, calories: 34 }
+                    { name: 'Salmon Rice Bowl', icon: '🍱', foods: [
+                        { name: 'Grilled Salmon', portion: '140g', icon: '🐟', protein: 28, carbs: 0, fats: 18, calories: 290 },
+                        { name: 'Brown Rice', portion: '150g cooked', icon: '🍚', protein: 4, carbs: 36, fats: 2, calories: 168 },
+                        { name: 'Steamed Broccoli', portion: '100g', icon: '🥦', protein: 3, carbs: 7, fats: 0, calories: 34 }
                     ]},
-                    { name: 'Turkey Wrap', icon: 'ðŸŒ¯', foods: [
-                        { name: 'Turkey Breast', portion: '120g', icon: 'ðŸ¦ƒ', protein: 36, carbs: 0, fats: 2, calories: 162 },
-                        { name: 'Whole Wheat Wrap', portion: '1 large', icon: 'ðŸ«“', protein: 6, carbs: 36, fats: 4, calories: 200 },
-                        { name: 'Hummus', portion: '40g', icon: 'ðŸ¥£', protein: 3, carbs: 6, fats: 4, calories: 66 },
-                        { name: 'Mixed Vegetables', portion: '80g', icon: 'ðŸ¥’', protein: 2, carbs: 8, fats: 0, calories: 35 }
+                    { name: 'Turkey Wrap', icon: '🌯', foods: [
+                        { name: 'Turkey Breast', portion: '120g', icon: '🦃', protein: 36, carbs: 0, fats: 2, calories: 162 },
+                        { name: 'Whole Wheat Wrap', portion: '1 large', icon: '🫓', protein: 6, carbs: 36, fats: 4, calories: 200 },
+                        { name: 'Hummus', portion: '40g', icon: '🥣', protein: 3, carbs: 6, fats: 4, calories: 66 },
+                        { name: 'Mixed Vegetables', portion: '80g', icon: '🥒', protein: 2, carbs: 8, fats: 0, calories: 35 }
                     ]}
                 ],
                 dinner: [
-                    { name: 'Steak & Sweet Potato', icon: 'ðŸ¥©', foods: [
-                        { name: 'Lean Beef Steak', portion: '180g', icon: 'ðŸ¥©', protein: 50, carbs: 0, fats: 14, calories: 330 },
-                        { name: 'Sweet Potato', portion: '200g', icon: 'ðŸ ', protein: 4, carbs: 40, fats: 0, calories: 172 },
-                        { name: 'Asparagus', portion: '100g', icon: 'ðŸŒ¿', protein: 2, carbs: 4, fats: 0, calories: 20 }
+                    { name: 'Steak & Sweet Potato', icon: '🥩', foods: [
+                        { name: 'Lean Beef Steak', portion: '180g', icon: '🥩', protein: 50, carbs: 0, fats: 14, calories: 330 },
+                        { name: 'Sweet Potato', portion: '200g', icon: '🍠', protein: 4, carbs: 40, fats: 0, calories: 172 },
+                        { name: 'Asparagus', portion: '100g', icon: '🌿', protein: 2, carbs: 4, fats: 0, calories: 20 }
                     ]},
-                    { name: 'Chicken Stir-Fry', icon: 'ðŸ³', foods: [
-                        { name: 'Chicken Thigh', portion: '160g', icon: 'ðŸ—', protein: 38, carbs: 0, fats: 12, calories: 264 },
-                        { name: 'Jasmine Rice', portion: '150g cooked', icon: 'ðŸš', protein: 4, carbs: 45, fats: 1, calories: 195 },
-                        { name: 'Stir-Fry Vegetables', portion: '150g', icon: 'ðŸ¥¦', protein: 4, carbs: 12, fats: 2, calories: 60 },
-                        { name: 'Teriyaki Sauce', portion: '30ml', icon: 'ðŸ¥¢', protein: 1, carbs: 8, fats: 0, calories: 35 }
+                    { name: 'Chicken Stir-Fry', icon: '🍳', foods: [
+                        { name: 'Chicken Thigh', portion: '160g', icon: '🍗', protein: 38, carbs: 0, fats: 12, calories: 264 },
+                        { name: 'Jasmine Rice', portion: '150g cooked', icon: '🍚', protein: 4, carbs: 45, fats: 1, calories: 195 },
+                        { name: 'Stir-Fry Vegetables', portion: '150g', icon: '🥦', protein: 4, carbs: 12, fats: 2, calories: 60 },
+                        { name: 'Teriyaki Sauce', portion: '30ml', icon: '🥢', protein: 1, carbs: 8, fats: 0, calories: 35 }
                     ]},
-                    { name: 'Baked Fish & Quinoa', icon: 'ðŸŸ', foods: [
-                        { name: 'Baked Cod', portion: '170g', icon: 'ðŸŸ', protein: 35, carbs: 0, fats: 2, calories: 160 },
-                        { name: 'Quinoa', portion: '150g cooked', icon: 'ðŸŒ¾', protein: 6, carbs: 30, fats: 3, calories: 180 },
-                        { name: 'Roasted Vegetables', portion: '150g', icon: 'ðŸ¥•', protein: 3, carbs: 18, fats: 5, calories: 120 }
+                    { name: 'Baked Fish & Quinoa', icon: '🐟', foods: [
+                        { name: 'Baked Cod', portion: '170g', icon: '🐟', protein: 35, carbs: 0, fats: 2, calories: 160 },
+                        { name: 'Quinoa', portion: '150g cooked', icon: '🌾', protein: 6, carbs: 30, fats: 3, calories: 180 },
+                        { name: 'Roasted Vegetables', portion: '150g', icon: '🥕', protein: 3, carbs: 18, fats: 5, calories: 120 }
                     ]}
                 ],
                 snack: [
-                    { name: 'Protein Shake', icon: 'ðŸ¥¤', foods: [
-                        { name: 'Whey Protein', portion: '1 scoop', icon: 'ðŸ¥›', protein: 25, carbs: 3, fats: 2, calories: 130 },
-                        { name: 'Banana', portion: '1 small', icon: 'ðŸŒ', protein: 1, carbs: 20, fats: 0, calories: 80 }
+                    { name: 'Protein Shake', icon: '🥤', foods: [
+                        { name: 'Whey Protein', portion: '1 scoop', icon: '🥛', protein: 25, carbs: 3, fats: 2, calories: 130 },
+                        { name: 'Banana', portion: '1 small', icon: '🍌', protein: 1, carbs: 20, fats: 0, calories: 80 }
                     ]},
-                    { name: 'Nuts & Fruit', icon: 'ðŸ¥œ', foods: [
-                        { name: 'Mixed Nuts', portion: '30g', icon: 'ðŸŒ°', protein: 6, carbs: 6, fats: 16, calories: 180 },
-                        { name: 'Apple', portion: '1 medium', icon: 'ðŸŽ', protein: 0, carbs: 25, fats: 0, calories: 95 }
+                    { name: 'Nuts & Fruit', icon: '🥜', foods: [
+                        { name: 'Mixed Nuts', portion: '30g', icon: '🌰', protein: 6, carbs: 6, fats: 16, calories: 180 },
+                        { name: 'Apple', portion: '1 medium', icon: '🍎', protein: 0, carbs: 25, fats: 0, calories: 95 }
                     ]},
-                    { name: 'Cottage Cheese Bowl', icon: 'ðŸ§€', foods: [
-                        { name: 'Cottage Cheese', portion: '150g', icon: 'ðŸ§€', protein: 17, carbs: 5, fats: 6, calories: 147 },
-                        { name: 'Pineapple', portion: '80g', icon: 'ðŸ', protein: 0, carbs: 11, fats: 0, calories: 40 }
+                    { name: 'Cottage Cheese Bowl', icon: '🧀', foods: [
+                        { name: 'Cottage Cheese', portion: '150g', icon: '🧀', protein: 17, carbs: 5, fats: 6, calories: 147 },
+                        { name: 'Pineapple', portion: '80g', icon: '🍍', protein: 0, carbs: 11, fats: 0, calories: 40 }
                     ]}
                 ]
             };
@@ -5938,18 +5938,18 @@ Please try again with a different photo.`;
             // Modify based on diet preference
             if (diet === 'vegetarian') {
                 standardMeals.lunch = [
-                    { name: 'Buddha Bowl', icon: 'ðŸ¥—', foods: [
-                        { name: 'Chickpeas', portion: '150g', icon: 'ðŸ«˜', protein: 15, carbs: 40, fats: 4, calories: 246 },
-                        { name: 'Quinoa', portion: '150g cooked', icon: 'ðŸŒ¾', protein: 6, carbs: 30, fats: 3, calories: 180 },
-                        { name: 'Roasted Vegetables', portion: '150g', icon: 'ðŸ¥•', protein: 3, carbs: 18, fats: 5, calories: 120 },
-                        { name: 'Tahini Dressing', portion: '30g', icon: 'ðŸ¥œ', protein: 3, carbs: 3, fats: 9, calories: 100 }
+                    { name: 'Buddha Bowl', icon: '🥗', foods: [
+                        { name: 'Chickpeas', portion: '150g', icon: '🫘', protein: 15, carbs: 40, fats: 4, calories: 246 },
+                        { name: 'Quinoa', portion: '150g cooked', icon: '🌾', protein: 6, carbs: 30, fats: 3, calories: 180 },
+                        { name: 'Roasted Vegetables', portion: '150g', icon: '🥕', protein: 3, carbs: 18, fats: 5, calories: 120 },
+                        { name: 'Tahini Dressing', portion: '30g', icon: '🥜', protein: 3, carbs: 3, fats: 9, calories: 100 }
                     ]}
                 ];
                 standardMeals.dinner = [
-                    { name: 'Tofu Stir-Fry', icon: 'ðŸ³', foods: [
-                        { name: 'Firm Tofu', portion: '200g', icon: 'ðŸ§ˆ', protein: 20, carbs: 4, fats: 12, calories: 190 },
-                        { name: 'Brown Rice', portion: '150g cooked', icon: 'ðŸš', protein: 4, carbs: 36, fats: 2, calories: 168 },
-                        { name: 'Mixed Vegetables', portion: '200g', icon: 'ðŸ¥¦', protein: 6, carbs: 16, fats: 2, calories: 80 }
+                    { name: 'Tofu Stir-Fry', icon: '🍳', foods: [
+                        { name: 'Firm Tofu', portion: '200g', icon: '🧈', protein: 20, carbs: 4, fats: 12, calories: 190 },
+                        { name: 'Brown Rice', portion: '150g cooked', icon: '🍚', protein: 4, carbs: 36, fats: 2, calories: 168 },
+                        { name: 'Mixed Vegetables', portion: '200g', icon: '🥦', protein: 6, carbs: 16, fats: 2, calories: 80 }
                     ]}
                 ];
             }
@@ -6396,24 +6396,24 @@ Please try again with a different photo.`;
             // Get appropriate food icon based on name
             function getFoodIcon(foodName) {
                 const name = foodName.toLowerCase();
-                if (name.includes('egg')) return 'ðŸ¥š';
-                if (name.includes('chicken')) return 'ðŸ—';
-                if (name.includes('beef') || name.includes('steak')) return 'ðŸ¥©';
-                if (name.includes('fish') || name.includes('salmon')) return 'ðŸŸ';
-                if (name.includes('rice')) return 'ðŸš';
-                if (name.includes('bread')) return 'ðŸž';
-                if (name.includes('salad')) return 'ðŸ¥—';
-                if (name.includes('fruit') || name.includes('apple')) return 'ðŸŽ';
-                if (name.includes('banana')) return 'ðŸŒ';
-                if (name.includes('orange')) return 'ðŸŠ';
-                if (name.includes('vegetable') || name.includes('broccoli')) return 'ðŸ¥¦';
-                if (name.includes('pizza')) return 'ðŸ•';
-                if (name.includes('burger')) return 'ðŸ”';
-                if (name.includes('pasta') || name.includes('spaghetti')) return 'ðŸ';
-                if (name.includes('soup')) return 'ðŸœ';
-                if (name.includes('coffee')) return 'â˜•';
-                if (name.includes('milk')) return 'ðŸ¥›';
-                return 'ðŸ½ï¸';
+                if (name.includes('egg')) return '🥚';
+                if (name.includes('chicken')) return '🍗';
+                if (name.includes('beef') || name.includes('steak')) return '🥩';
+                if (name.includes('fish') || name.includes('salmon')) return '🐟';
+                if (name.includes('rice')) return '🍚';
+                if (name.includes('bread')) return '🍞';
+                if (name.includes('salad')) return '🥗';
+                if (name.includes('fruit') || name.includes('apple')) return '🍎';
+                if (name.includes('banana')) return '🍌';
+                if (name.includes('orange')) return '🍊';
+                if (name.includes('vegetable') || name.includes('broccoli')) return '🥦';
+                if (name.includes('pizza')) return '🍕';
+                if (name.includes('burger')) return '🍔';
+                if (name.includes('pasta') || name.includes('spaghetti')) return '🍝';
+                if (name.includes('soup')) return '🍜';
+                if (name.includes('coffee')) return '☕';
+                if (name.includes('milk')) return '🥛';
+                return '🍽️';
             }
 
             function setFoodInputMode(mode) {
@@ -6462,9 +6462,9 @@ Please try again with a different photo.`;
                     if (err.name === 'NotAllowedError' || err.name === 'PermissionDeniedError') {
                         errorMessage += 'Camera permission was denied.\n\n';
                         errorMessage += 'To fix this:\n';
-                        errorMessage += 'â€¢ iPhone/iPad: Go to Settings > Safari > Camera, set to "Allow"\n';
-                        errorMessage += 'â€¢ Android: Tap the lock icon in the address bar and allow camera\n';
-                        errorMessage += 'â€¢ Then refresh this page and try again';
+                        errorMessage += '• iPhone/iPad: Go to Settings > Safari > Camera, set to "Allow"\n';
+                        errorMessage += '• Android: Tap the lock icon in the address bar and allow camera\n';
+                        errorMessage += '• Then refresh this page and try again';
                     } else if (err.name === 'NotFoundError' || err.name === 'DevicesNotFoundError') {
                         errorMessage += 'No camera found on this device.';
                     } else if (err.name === 'NotReadableError' || err.name === 'TrackStartError') {
@@ -6569,7 +6569,7 @@ Please try again with a different photo.`;
                 detectedFoodName = topFood.name || 'Unknown Food'; // Store name for API search
 
                 // Update confirmation UI
-                suggestionIcon.textContent = topFood.icon || 'ðŸ½ï¸';
+                suggestionIcon.textContent = topFood.icon || '🍽️';
                 suggestionName.textContent = detectedFoodName;
 
                 // Set confidence badge
@@ -6632,7 +6632,7 @@ Please try again with a different photo.`;
                     showFoodConfirmation({
                         foods: [{
                             name: 'Unknown Food',
-                            icon: 'ðŸ½ï¸',
+                            icon: '🍽️',
                             confidence: 0
                         }],
                         confidence: 'low'
@@ -6893,11 +6893,11 @@ Please try again with a different photo.`;
                         `Nutrition framework:\n- BMR/TDEE Calculator: Mifflin-St Jeor formula -- set activity level & goal, click Recalculate & Apply\n- Calorie Balance: tracks calories in vs. calories out (MET-based workout burn)\n- Macro Targets: protein, carb, fat goals calibrated to ${GOAL_LABELS[c.goal] || 'your goal'}\n- Hydration History: 30-day heatmap, goal = 8 glasses/day\n- Meal Plan: generate full weekly plan by dietary preference and meal frequency\n\nPriority: hit protein target first, then total calories.`
                     ],
                     progress: (c) => [
-                        `Progress dashboard modules:\n- Daily Habits: 5 habits tracked (workout, hydration, sleep, nutrition, check-in) with score ring and per-habit streaks\n- Weekly Report Card: A-F grade across workouts, calories, sleep, hydration -- resets Monday\n- Sleep & Recovery: nightly log â†’ 7-day bar chart + recovery score 0-100\n- Smart Insights: AI-derived observations from 7-day behavior data\n- Progress Charts: calorie, weight, sleep, workout, hydration trend graphs\n- Streaks, Badges, XP, Challenges, Scan History: gamification layer\n\nFocus: maintain Daily Habits score at 5/5, review Report Card weekly.`,
+                        `Progress dashboard modules:\n- Daily Habits: 5 habits tracked (workout, hydration, sleep, nutrition, check-in) with score ring and per-habit streaks\n- Weekly Report Card: A-F grade across workouts, calories, sleep, hydration -- resets Monday\n- Sleep & Recovery: nightly log → 7-day bar chart + recovery score 0-100\n- Smart Insights: AI-derived observations from 7-day behavior data\n- Progress Charts: calorie, weight, sleep, workout, hydration trend graphs\n- Streaks, Badges, XP, Challenges, Scan History: gamification layer\n\nFocus: maintain Daily Habits score at 5/5, review Report Card weekly.`,
                         `Progress tracking status:\n- Goal: ${GOAL_LABELS[c.goal] || 'Not set'}\n- Recommended actions:\n  1. Check Daily Habits ring -- which of the 5 are incomplete?\n  2. Review Weekly Report Card and lowest-scoring category\n  3. Log last night's sleep if not already done\n  4. Check Smart Insights for behavioral patterns\n  5. Complete weekly challenges for XP\n\nConsistency across all 5 daily habits is the highest-leverage action.`
                     ],
                     wearable: (c) => [
-                        `Activity Hub overview:\n- Step Ring: today's steps (${c.todaySteps.toLocaleString()}) vs. goal (${c.stepGoal.toLocaleString()})\n- Metrics: calories burned, active minutes, avg BPM\n- Mobile: tap "Start Count" â†’ runs in background while you use other apps\n- HR: camera-based heart rate measurement (~30 sec)\n- Save: records session to history log\n- Chart: 7/14/30-day step history with goal line\n\nAction: save at least one session per day to build your history. On desktop, scan the QR code with your phone to connect.`
+                        `Activity Hub overview:\n- Step Ring: today's steps (${c.todaySteps.toLocaleString()}) vs. goal (${c.stepGoal.toLocaleString()})\n- Metrics: calories burned, active minutes, avg BPM\n- Mobile: tap "Start Count" → runs in background while you use other apps\n- HR: camera-based heart rate measurement (~30 sec)\n- Save: records session to history log\n- Chart: 7/14/30-day step history with goal line\n\nAction: save at least one session per day to build your history. On desktop, scan the QR code with your phone to connect.`
                     ],
                     _default: (c) => [
                         `Current status: Screen ${state.currentScreen}/9 | Body Score: ${c.bodyScore} | Goal: ${GOAL_LABELS[c.goal] || 'Not set'}. Let me know how I can help you plan your next step.`
@@ -6925,10 +6925,10 @@ Please try again with a different photo.`;
                     ],
                     _default: (c) => [
                         `Technical overview: The analysis uses MediaPipe Pose to detect 33 body landmarks. Key ratios (shoulder width, hip width, torso length) are computed and compared against population norms to estimate body composition.`,
-                        `Data pipeline:\n1. Image input â†’ MediaPipe Pose detection\n2. 33 landmark coordinates extracted\n3. Body ratios calculated\n4. Composition score derived from ratio analysis\n5. Results categorized and graded`
+                        `Data pipeline:\n1. Image input → MediaPipe Pose detection\n2. 33 landmark coordinates extracted\n3. Body ratios calculated\n4. Composition score derived from ratio analysis\n5. Results categorized and graded`
                     ],
                     progress: (c) => [
-                        `Progress system architecture:\n- Daily Habits: 5 habits auto-detected from existing logs (workout, 8+ glasses hydration, 7+ hours sleep, nutrition log) + manual check-in. Score ring fills proportionally.\n- Weekly Report Card: weighted average of 4 categories â†’ letter grade A-F. Resets Monday.\n- Sleep & Recovery: nightly log (hours + quality) â†’ 7-day bar chart, average hours, recovery score 0-100.\n- Smart Insights: scans 7-day logs for patterns, surfaces 2-4 actionable observations.\n- Progress Charts: calorie, weight, sleep, workout, hydration data rendered as trend graphs.\n- Streaks: Consecutive workout days. Heatmap: 14-day activity grid. Badges: milestone unlocks. Challenges: weekly XP-rewarded goals. Levels: cumulative XP thresholds.`
+                        `Progress system architecture:\n- Daily Habits: 5 habits auto-detected from existing logs (workout, 8+ glasses hydration, 7+ hours sleep, nutrition log) + manual check-in. Score ring fills proportionally.\n- Weekly Report Card: weighted average of 4 categories → letter grade A-F. Resets Monday.\n- Sleep & Recovery: nightly log (hours + quality) → 7-day bar chart, average hours, recovery score 0-100.\n- Smart Insights: scans 7-day logs for patterns, surfaces 2-4 actionable observations.\n- Progress Charts: calorie, weight, sleep, workout, hydration data rendered as trend graphs.\n- Streaks: Consecutive workout days. Heatmap: 14-day activity grid. Badges: milestone unlocks. Challenges: weekly XP-rewarded goals. Levels: cumulative XP thresholds.`
                     ]
                 }
             },
@@ -6956,7 +6956,7 @@ Please try again with a different photo.`;
                         `Your progress dashboard integrates multiple behavioral science frameworks: Self-Determination Theory (XP + competence), Loss Aversion (streak protection), Variable Reinforcement (badges), Implementation Intentions (Daily Habits tracking), Metacognitive Review (Weekly Report Card), Sleep Debt Quantification (Sleep Tracker), and Objective Self-Quantification (Progress Charts + Smart Insights). Evidence-based motivation architecture at scale.`
                     ],
                     wearable: (c) => [
-                        `The Activity Hub applies continuous activity monitoring -- a principle from exercise science showing that NEAT (Non-Exercise Activity Thermogenesis) accounts for 15-30% of daily energy expenditure. The 10,000 steps goal derives from a 1960s Japanese pedometer marketing campaign ("manpo-kei"), but research (Tudor-Locke et al.) has since validated it as a reasonable target associated with improved cardiovascular markers. Distance is estimated via steps Ã— 0.76m (average stride). The HR reader uses photoplethysmography (PPG) -- your camera detects color changes in your fingertip caused by blood pulsing through capillaries, the same principle as clinical pulse oximeters!`,
+                        `The Activity Hub applies continuous activity monitoring -- a principle from exercise science showing that NEAT (Non-Exercise Activity Thermogenesis) accounts for 15-30% of daily energy expenditure. The 10,000 steps goal derives from a 1960s Japanese pedometer marketing campaign ("manpo-kei"), but research (Tudor-Locke et al.) has since validated it as a reasonable target associated with improved cardiovascular markers. Distance is estimated via steps × 0.76m (average stride). The HR reader uses photoplethysmography (PPG) -- your camera detects color changes in your fingertip caused by blood pulsing through capillaries, the same principle as clinical pulse oximeters!`,
                         `Step count science: daily step goals are associated with reduced all-cause mortality risk (Paluch et al., 2022 -- each additional 1,000 steps/day is linked to a ~15% mortality risk reduction up to ~12,000 steps). Your current goal of ${c.stepGoal.toLocaleString()} steps is ${c.stepGoal >= 8000 ? 'well within the research-validated range for health benefits' : 'a good starting point -- research suggests 8,000+ steps/day for optimal health benefits'}. The camera-based HR reader uses photoplethysmography (PPG), the same optical principle as clinical pulse oximeters.`
                     ],
                     _default: (c) => [
@@ -7005,8 +7005,8 @@ Please try again with a different photo.`;
             humorous: {
                 greet: {
                     results: (c) => [
-                        `The AI has spoken! Body score: ${c.bodyScore}. Overall: ${c.grade}. Category: "${c.category}." Don't worry, I score on a curve... and the curve is shaped like a dumbbell. ðŸ‹ï¸`,
-                        `Results are in! You scored ${c.bodyScore}/100. Before you panic -- remember, this is AI estimation, not a final exam. Though if it were, at least there's no student debt involved! ðŸ˜„`
+                        `The AI has spoken! Body score: ${c.bodyScore}. Overall: ${c.grade}. Category: "${c.category}." Don't worry, I score on a curve... and the curve is shaped like a dumbbell. 🏋️`,
+                        `Results are in! You scored ${c.bodyScore}/100. Before you panic -- remember, this is AI estimation, not a final exam. Though if it were, at least there's no student debt involved! 😄`
                     ],
                     breakdown: (c) => [
                         `Time for the play-by-play! Muscle tone: ${c.muscleScore}%, Posture: ${c.postureScore}. Think of this as your character stats screen -- time to level up those attributes!`,
@@ -7018,7 +7018,7 @@ Please try again with a different photo.`;
                         `Workout time! Your muscles are about to file a complaint with HR. Don't worry -- they'll thank you later... in about 48 hours when the soreness kicks in.`,
                     ],
                     nutrition: (c) => [
-                        `Let's talk food -- and science! Your BMR/TDEE Calculator tells you exactly how many calories your body burns just to exist (spoiler: more than you'd think). Calorie Balance shows if your workout actually "earned" that slice of pizza. And the Hydration History heatmap silently judges your water intake across 30 days without saying a word -- the passive-aggressive friend you never asked for. Welcome to Nutrition! ðŸ•âž¡ï¸ðŸ¥—`,
+                        `Let's talk food -- and science! Your BMR/TDEE Calculator tells you exactly how many calories your body burns just to exist (spoiler: more than you'd think). Calorie Balance shows if your workout actually "earned" that slice of pizza. And the Hydration History heatmap silently judges your water intake across 30 days without saying a word -- the passive-aggressive friend you never asked for. Welcome to Nutrition! 🍕➡️🥗`,
                     ],
                     progress: (c) => [
                         `Welcome to the trophy room -- which we expanded! Daily Habits ring (fill all 5, it turns green, very satisfying), Weekly Report Card (A-F, no parent signature needed), Sleep Tracker (because "I'll sleep when I'm dead" is medically inadvisable), Smart Insights (the AI noticing patterns you hoped nobody noticed), Progress Charts (graphs that tell the truth). Plus all your classic streaks, badges, XP, and scan history. The final boss is still your own laziness. But now you have way more weapons.`,
@@ -7057,7 +7057,7 @@ Please try again with a different photo.`;
                 },
                 explain: {
                     results: (c) => [
-                        `So how does this work? The AI plays connect-the-dots with your skeleton -- 33 dots to be exact. Then it measures proportions like a really nerdy tailor. "Hmm, yes, your shoulder-to-hip ratio is quite distinguished." ðŸ§`,
+                        `So how does this work? The AI plays connect-the-dots with your skeleton -- 33 dots to be exact. Then it measures proportions like a really nerdy tailor. "Hmm, yes, your shoulder-to-hip ratio is quite distinguished." 🧐`,
                         `Your score of ${c.bodyScore} comes from skeletal math. The AI basically measured your bones and went "I can work with this." The ${c.confidence} confidence means it's ${c.confidence === 'high' ? 'pretty sure about its homework' : 'kind of squinting -- try adding your height and weight for better results'}.`
                     ],
                     progress: (c) => [
@@ -7935,7 +7935,7 @@ Please try again with a different photo.`;
                 localStorage.setItem('coach-vocab', JSON.stringify(vocab));
                 localStorage.setItem('coach-model-version', String(COACH_TRAINING_DATA_VERSION));
             } catch (e) {
-                // Caching failed â€” model still works for this session
+                // Caching failed — model still works for this session
             }
 
             coachVocab = vocab;
@@ -7967,7 +7967,7 @@ Please try again with a different photo.`;
                     await trainCoachModel();
                 }
             } catch (e) {
-                // Model init failed â€” detectIntent will return null and fallback responses will be used
+                // Model init failed — detectIntent will return null and fallback responses will be used
             }
         }
 
@@ -7983,10 +7983,10 @@ Please try again with a different photo.`;
                 let score = 0;
                 for (const phrase of entry.phrases) {
                     if (lower === phrase) {
-                        // Exact match â€” highest priority
+                        // Exact match — highest priority
                         score += 10;
                     } else if (lower.includes(phrase)) {
-                        // Substring match â€” score by phrase length (longer = more specific)
+                        // Substring match — score by phrase length (longer = more specific)
                         score += phrase.split(' ').length * 2;
                     } else if (phrase.includes(lower)) {
                         // Input is a substring of a phrase
@@ -8006,7 +8006,7 @@ Please try again with a different photo.`;
             const lower = text.toLowerCase().trim();
             if (!lower) return null;
 
-            // Keyword matching runs FIRST â€” deterministic, exact-phrase matching is always reliable
+            // Keyword matching runs FIRST — deterministic, exact-phrase matching is always reliable
             const keywordResult = detectIntentKeyword(lower);
             if (keywordResult) return keywordResult;
 
@@ -8118,7 +8118,7 @@ Please try again with a different photo.`;
                     ];
                 },
                 cycle_for_other: (ctx) => [
-                    `Of course! Here's the cycle-aware workout guide you can share with your partner:\n\n**ðŸŒ‘ Menstrual Phase (Days 1-5):**\n- Focus: Rest & gentle movement\n- Recommended exercises:\n  - Gentle yoga (child's pose, cat-cow)\n  - Light walking (20-30 min)\n  - Swimming or water aerobics\n  - Foam rolling and stretching\n- Avoid: heavy lifts, intense ab work, HIIT\n\n**ðŸŒ’ Follicular Phase (Days 6-14):**\n- Focus: Peak performance time!\n- Recommended exercises:\n  - Heavy compound lifts (squats, deadlifts)\n  - HIIT or circuit training\n  - Plyometrics (box jumps, burpees)\n  - Great time for PRs!\n\n**ðŸŒ• Ovulatory Phase (Days 14-16):**\n- Focus: High energy, prioritize warm-up\n- Recommended exercises:\n  - Strength training\n  - Group fitness classes\n  - Cardio sessions\n\n**ðŸŒ˜ Luteal Phase (Days 17-28):**\n- Focus: Moderate intensity, self-care\n- Recommended exercises:\n  - Moderate strength (3x10-12 reps)\n  - Steady-state cardio (walking, cycling)\n  - Pilates, barre, yoga flow\n\nTell your partner: movement often helps with cramps and mood, but rest days are totally valid too!`
+                    `Of course! Here's the cycle-aware workout guide you can share with your partner:\n\n**🌑 Menstrual Phase (Days 1-5):**\n- Focus: Rest & gentle movement\n- Recommended exercises:\n  - Gentle yoga (child's pose, cat-cow)\n  - Light walking (20-30 min)\n  - Swimming or water aerobics\n  - Foam rolling and stretching\n- Avoid: heavy lifts, intense ab work, HIIT\n\n**🌒 Follicular Phase (Days 6-14):**\n- Focus: Peak performance time!\n- Recommended exercises:\n  - Heavy compound lifts (squats, deadlifts)\n  - HIIT or circuit training\n  - Plyometrics (box jumps, burpees)\n  - Great time for PRs!\n\n**🌕 Ovulatory Phase (Days 14-16):**\n- Focus: High energy, prioritize warm-up\n- Recommended exercises:\n  - Strength training\n  - Group fitness classes\n  - Cardio sessions\n\n**🌘 Luteal Phase (Days 17-28):**\n- Focus: Moderate intensity, self-care\n- Recommended exercises:\n  - Moderate strength (3x10-12 reps)\n  - Steady-state cardio (walking, cycling)\n  - Pilates, barre, yoga flow\n\nTell your partner: movement often helps with cramps and mood, but rest days are totally valid too!`
                 ],
                 workout_frequency: (ctx) => [
                     `For ${GOAL_LABELS[ctx.goal] || 'fitness'}, 3-5 training days per week works well for most people. Beginners can start with 3, intermediate lifters aim for 4, and advanced can handle 5-6. Rest days are when growth happens!`,
@@ -8177,7 +8177,7 @@ Please try again with a different photo.`;
                     `Your Workout screen is like having a personal trainer! It tailors exercise recommendations to your body type (${ctx.bodyType}), score (${ctx.bodyScore}), and goal. You'll find structured workout routines with a built-in player that guides you through each exercise with timers and rep tracking!`
                 ],
                 explain_nutrition_screen: (ctx) => [
-                    `The Nutrition screen is your complete dietary command center! It includes:\n- Daily Macro Targets (personalized calories, protein, carbs, fats)\n- Metabolic Rate card: BMR â†’ TDEE â†’ Target using Mifflin-St Jeor formula\n- Calorie Balance: calories burned vs. eaten, net balance for the day\n- Food log with meal tracking and food recognition\n- Hydration tracker with a 14-day history heatmap and streak\n- Meal suggestions tailored to your ${GOAL_LABELS[ctx.goal] || 'fitness'} goal\n\nEverything is personalized to your body data. Nutrition is where 80% of results happen!`,
+                    `The Nutrition screen is your complete dietary command center! It includes:\n- Daily Macro Targets (personalized calories, protein, carbs, fats)\n- Metabolic Rate card: BMR → TDEE → Target using Mifflin-St Jeor formula\n- Calorie Balance: calories burned vs. eaten, net balance for the day\n- Food log with meal tracking and food recognition\n- Hydration tracker with a 14-day history heatmap and streak\n- Meal suggestions tailored to your ${GOAL_LABELS[ctx.goal] || 'fitness'} goal\n\nEverything is personalized to your body data. Nutrition is where 80% of results happen!`,
                     `Nutrition has leveled up! You'll find your personalized macro targets, a Metabolic Rate card showing your BMR and TDEE (calculated via Mifflin-St Jeor), a Calorie Balance tracker showing burned vs. eaten, a food log with snap-your-meal AI, a hydration tracker with a full 14-day heatmap, and goal-specific meal guidance. It's your complete nutrition toolkit for ${GOAL_LABELS[ctx.goal] || 'your goal'}!`
                 ],
                 explain_progress_screen: (ctx) => [
@@ -8285,20 +8285,20 @@ Please try again with a different photo.`;
                     `The Coach Personas let you pick the coaching style that resonates with you! There's Encouraging (hi, that's me -- your cheerleader!), Structured (organized and data-driven), Educational (science and research focused), and Humorous (funny and casual). Same helpful information, totally different delivery. You can switch anytime -- find the voice that keeps you coming back!`
                 ],
                 explain_bmr_tdee: (ctx) => [
-                    `The Metabolic Rate card on the Nutrition screen calculates your BMR and TDEE using the Mifflin-St Jeor formula -- the gold standard for metabolic rate estimation!\n\n- BMR: calories your body burns at complete rest just to stay alive\n- TDEE = BMR Ã— your activity level multiplier (1.2â€“1.9)\n- Target = TDEE adjusted for your fitness goal\n\nChange your activity level and goal in the card, then hit "Recalculate & Apply" to update all your macro targets instantly. It even shows the formula with your actual numbers -- nutrition science made visible!`,
-                    `The Metabolic Rate card on Nutrition shows BMR â†’ TDEE â†’ Target, all calculated from your height, weight, age, and gender using Mifflin-St Jeor. Adjust activity level or goal, hit Recalculate & Apply, and your macro targets update. It's like having a dietitian's calculation right in your pocket -- and you can see exactly how the formula works!`
+                    `The Metabolic Rate card on the Nutrition screen calculates your BMR and TDEE using the Mifflin-St Jeor formula -- the gold standard for metabolic rate estimation!\n\n- BMR: calories your body burns at complete rest just to stay alive\n- TDEE = BMR × your activity level multiplier (1.2–1.9)\n- Target = TDEE adjusted for your fitness goal\n\nChange your activity level and goal in the card, then hit "Recalculate & Apply" to update all your macro targets instantly. It even shows the formula with your actual numbers -- nutrition science made visible!`,
+                    `The Metabolic Rate card on Nutrition shows BMR → TDEE → Target, all calculated from your height, weight, age, and gender using Mifflin-St Jeor. Adjust activity level or goal, hit Recalculate & Apply, and your macro targets update. It's like having a dietitian's calculation right in your pocket -- and you can see exactly how the formula works!`
                 ],
                 explain_daily_habits: (ctx) => [
-                    `The Daily Habits Tracker on the Progress screen is one of my favorite features! It tracks 5 key habits every single day:\n\nðŸ’ª Workout -- auto-detected from your workout log\nðŸ’§ Hydration -- auto-detected if you hit 8+ glasses today\nðŸ˜´ Sleep -- auto-detected if you logged 7+ hours last night\nðŸ¥— Nutrition -- auto-detected if you logged food today\nðŸŽ¯ Check-In -- tap manually to mark done\n\nThe animated score ring shows your completion (X/5), turning green when you hit 5/5! Each habit also shows its streak. It's your daily accountability hub!`,
+                    `The Daily Habits Tracker on the Progress screen is one of my favorite features! It tracks 5 key habits every single day:\n\n💪 Workout -- auto-detected from your workout log\n💧 Hydration -- auto-detected if you hit 8+ glasses today\n😴 Sleep -- auto-detected if you logged 7+ hours last night\n🥗 Nutrition -- auto-detected if you logged food today\n🎯 Check-In -- tap manually to mark done\n\nThe animated score ring shows your completion (X/5), turning green when you hit 5/5! Each habit also shows its streak. It's your daily accountability hub!`,
                     `Daily Habits on Progress tracks 5 wellness habits automatically! Workout, Hydration, Sleep, and Nutrition are auto-detected from your existing logs -- the app just knows. Tap the Check-In tile manually for your fifth. The score ring fills and turns green at 5/5. Each habit shows its consecutive-day streak so you can see your patterns. Fill that ring every day and watch your streaks compound!`
                 ],
                 explain_sleep_tracker: (ctx) => [
-                    `The Sleep & Recovery Tracker is a card on the Progress screen! It shows:\n- A 7-day bar chart of your sleep hours\n- Average sleep, a good-nights streak, and a Recovery Score (0-100%)\n\nThe Recovery Score blends sleep hours (50%), sleep quality rating (30%), and workout balance (20%) into one wellness metric.\n\nTo log: tap Log Sleep, enter your hours and quality (Rough â†’ Excellent), hit Save. Your history and recovery score update instantly. Sleep is when your body actually rebuilds -- log it and give it the respect it deserves!`,
+                    `The Sleep & Recovery Tracker is a card on the Progress screen! It shows:\n- A 7-day bar chart of your sleep hours\n- Average sleep, a good-nights streak, and a Recovery Score (0-100%)\n\nThe Recovery Score blends sleep hours (50%), sleep quality rating (30%), and workout balance (20%) into one wellness metric.\n\nTo log: tap Log Sleep, enter your hours and quality (Rough → Excellent), hit Save. Your history and recovery score update instantly. Sleep is when your body actually rebuilds -- log it and give it the respect it deserves!`,
                     `Sleep tracking lives on the Progress screen! Each night, log your hours and quality -- you get a 7-day bar chart, average hours, recovery score, and a streak for consecutive good nights. The recovery score is a holistic blend of sleep quantity, quality, and training balance. Better sleep scores = better workouts, recovery, and results. It's the metric most people overlook!`
                 ],
                 explain_weekly_report: (ctx) => [
-                    `The Weekly Report Card on Progress gives you a letter grade for each week! It evaluates:\n- Workouts completed this week\n- Average sleep hours\n- Weight change\n- Your workout streak\n\nAll four factors combine into a score â†’ letter grade (A+ through D). The card shows the date range, your stats, and a personalized message based on performance. Aim for that A+! And if the week was rough, the next one starts fresh -- you've totally got this!`,
-                    `Your Weekly Report Card synthesizes everything into a grade! Every Sundayâ€“Saturday window tallies your workouts, averages your sleep, checks your weight trend, and factors in your streak. It's your weekly fitness GPA -- A+ means you crushed it across the board. The message adapts to motivate you based on how you did. Every week is a fresh start!`
+                    `The Weekly Report Card on Progress gives you a letter grade for each week! It evaluates:\n- Workouts completed this week\n- Average sleep hours\n- Weight change\n- Your workout streak\n\nAll four factors combine into a score → letter grade (A+ through D). The card shows the date range, your stats, and a personalized message based on performance. Aim for that A+! And if the week was rough, the next one starts fresh -- you've totally got this!`,
+                    `Your Weekly Report Card synthesizes everything into a grade! Every Sunday–Saturday window tallies your workouts, averages your sleep, checks your weight trend, and factors in your streak. It's your weekly fitness GPA -- A+ means you crushed it across the board. The message adapts to motivate you based on how you did. Every week is a fresh start!`
                 ],
                 explain_smart_insights: (ctx) => [
                     `Smart Insights on the Progress screen analyzes ALL your logged data and generates personalized observations! It runs 8 engines every time you visit:\n- Streak pattern analysis\n- Favorite training days\n- Sleep vs. workout correlation\n- 2-week weight trend\n- Calorie vs. goal adherence\n- Sleep quality patterns\n- Measurement trends\n- Recovery score status\n\nInsights are color-coded: green = positive, terracotta = watch out, gold = neutral. Up to 6 show at once. The more you log, the smarter and more personalized they get!`,
@@ -8309,7 +8309,7 @@ Please try again with a different photo.`;
                     `Calorie Balance lives on the Nutrition screen -- it's the burned vs. eaten tracker that shows whether you're in a deficit or surplus today. Workout calories are estimated from MET values (standardized exercise intensity scores), food calories from your log. The net number is your day's energy story in one figure. Log everything and this card becomes your most honest daily check-in!`
                 ],
                 explain_hydration_history: (ctx) => [
-                    `The Hydration History section on the Nutrition screen shows your water habits over time! You'll see:\n- A 14-day heatmap (darker = more water)\n- 7-day average glasses per day\n- Current goal streak (consecutive days hitting 8 glasses)\n- Best 30-day streak\n\nThe heatmap goes from empty â†’ partial (2+ glasses) â†’ half (5+) â†’ full (8+). It makes your hydration patterns visible at a glance. Keep hitting that daily goal and watch your streak grow -- your body will thank you!`,
+                    `The Hydration History section on the Nutrition screen shows your water habits over time! You'll see:\n- A 14-day heatmap (darker = more water)\n- 7-day average glasses per day\n- Current goal streak (consecutive days hitting 8 glasses)\n- Best 30-day streak\n\nThe heatmap goes from empty → partial (2+ glasses) → half (5+) → full (8+). It makes your hydration patterns visible at a glance. Keep hitting that daily goal and watch your streak grow -- your body will thank you!`,
                     `Hydration History is a 14-day heatmap right under the water tracker on Nutrition. Each cell = one day, colored by how much you drank. You also see your 7-day average, current goal streak, and best streak over 30 days. The visual makes it unmistakable when you're consistent vs. slipping. Try to keep the heatmap dark -- it means you're hydrated and your metabolism is humming!`
                 ],
                 explain_progress_charts: (ctx) => [
@@ -8317,76 +8317,76 @@ Please try again with a different photo.`;
                     `Progress Charts shows any of your health metrics as a beautiful visualization! Tabs: Weight, Sleep, Activity, Calories, and scan-based data (Score, BMI, Muscle). The Calories tab includes a dashed goal line for easy reference. Every tab pulls from a different log, so the more consistently you track, the richer the charts become. Your progress has a story -- let the charts tell it!`
                 ],
                 explain_challenges: (ctx) => [
-                    `Weekly Challenges keep your training fresh and rewarding! Each week brings rotating objectives â€” log 5 workouts, hit hydration every day, complete a full habit streak. Finish them for bonus XP and the deep satisfaction of a progress bar hitting 100%. Check the Challenges section on the Progress screen. Small wins like these stack into lasting results â€” keep going!`,
-                    `Challenges are your weekly mini-goals â€” rotating objectives that give you specific targets beyond just "work out more." Complete them to earn XP and feel the momentum of consistent progress. Find this week's active challenges on the Progress screen. Every challenge you finish is proof you showed up!`
+                    `Weekly Challenges keep your training fresh and rewarding! Each week brings rotating objectives — log 5 workouts, hit hydration every day, complete a full habit streak. Finish them for bonus XP and the deep satisfaction of a progress bar hitting 100%. Check the Challenges section on the Progress screen. Small wins like these stack into lasting results — keep going!`,
+                    `Challenges are your weekly mini-goals — rotating objectives that give you specific targets beyond just "work out more." Complete them to earn XP and feel the momentum of consistent progress. Find this week's active challenges on the Progress screen. Every challenge you finish is proof you showed up!`
                 ],
                 explain_levels_xp: (ctx) => [
-                    `XP (Experience Points) is how the app rewards your consistency! Log workouts, track meals, complete habits and challenges â€” each earns you XP that accumulates into levels and rank titles. Check your level and progress bar on the Progress screen. Your level is a real reflection of your effort over time. You're building something that compounds â€” keep stacking those points!`,
-                    `The Level & XP system turns your daily habits into visible progress! Every healthy action earns XP, and enough XP levels you up to a new rank. It's designed to make consistency feel rewarding, because it IS rewarding. Watch your rank grow as your lifestyle improves. You're not just getting fitter â€” you're leveling up in every sense!`
+                    `XP (Experience Points) is how the app rewards your consistency! Log workouts, track meals, complete habits and challenges — each earns you XP that accumulates into levels and rank titles. Check your level and progress bar on the Progress screen. Your level is a real reflection of your effort over time. You're building something that compounds — keep stacking those points!`,
+                    `The Level & XP system turns your daily habits into visible progress! Every healthy action earns XP, and enough XP levels you up to a new rank. It's designed to make consistency feel rewarding, because it IS rewarding. Watch your rank grow as your lifestyle improves. You're not just getting fitter — you're leveling up in every sense!`
                 ],
                 explain_weight_log: (ctx) => [
-                    `The Weight Log lets you record your body weight daily right in the Goal Weight card on the Progress screen. Type your kg and tap Log â€” it saves automatically with the date. Over time you'll see a sparkline trend chart that shows exactly how your body is responding. The trend is what matters most, not any single number. Log consistently and trust the data!`,
-                    `Logging your weight regularly is one of the most powerful habits you can build! Each entry gets stored with a date, builds a trend chart, and improves the accuracy of your goal ETA calculation. Daily fluctuations are totally normal â€” the trend over time is your real progress signal. Even on tough days, log it. The data is always on your side.`
+                    `The Weight Log lets you record your body weight daily right in the Goal Weight card on the Progress screen. Type your kg and tap Log — it saves automatically with the date. Over time you'll see a sparkline trend chart that shows exactly how your body is responding. The trend is what matters most, not any single number. Log consistently and trust the data!`,
+                    `Logging your weight regularly is one of the most powerful habits you can build! Each entry gets stored with a date, builds a trend chart, and improves the accuracy of your goal ETA calculation. Daily fluctuations are totally normal — the trend over time is your real progress signal. Even on tough days, log it. The data is always on your side.`
                 ],
                 explain_goal_weight: (ctx) => [
-                    `The Goal Weight card on the Progress screen is your journey tracker! Set a target, and it shows your start vs. target, a progress bar with your current position marked, kg remaining, estimated weeks to goal, and your weekly pace â€” calculated from your real logged trend! Tap "Edit Goal" any time to adjust. You're closer than you think â€” keep logging and watch that bar move!`,
-                    `Set your target weight once and the Goal Weight card does all the math! It uses your actual weight log trend (not a guess) to estimate weekly pace and weeks remaining. The more entries you log, the more accurate the estimate. Progress bar, real numbers, honest timeline â€” everything you need to stay motivated and on track!`
+                    `The Goal Weight card on the Progress screen is your journey tracker! Set a target, and it shows your start vs. target, a progress bar with your current position marked, kg remaining, estimated weeks to goal, and your weekly pace — calculated from your real logged trend! Tap "Edit Goal" any time to adjust. You're closer than you think — keep logging and watch that bar move!`,
+                    `Set your target weight once and the Goal Weight card does all the math! It uses your actual weight log trend (not a guess) to estimate weekly pace and weeks remaining. The more entries you log, the more accurate the estimate. Progress bar, real numbers, honest timeline — everything you need to stay motivated and on track!`
                 ],
                 explain_food_log: (ctx) => [
-                    `The Food Log on the Nutrition screen is your daily intake tracker! Use Quick Add to log any food with calories and macros, or tap one of the preset chips for instant one-tap logging of common foods like chicken breast, eggs, or rice. Every entry feeds your Calorie Balance card in real time. Awareness is the first step to change â€” and you've got this!`,
-                    `Logging your food is the fastest way to understand why your body is or isn't changing! The Food Log captures every meal with full macros. The Quick Food Presets (pre-filled chips) let you log in seconds. Totals update your Calorie Balance card live. Small entries add up to big awareness â€” and big results!`
+                    `The Food Log on the Nutrition screen is your daily intake tracker! Use Quick Add to log any food with calories and macros, or tap one of the preset chips for instant one-tap logging of common foods like chicken breast, eggs, or rice. Every entry feeds your Calorie Balance card in real time. Awareness is the first step to change — and you've got this!`,
+                    `Logging your food is the fastest way to understand why your body is or isn't changing! The Food Log captures every meal with full macros. The Quick Food Presets (pre-filled chips) let you log in seconds. Totals update your Calorie Balance card live. Small entries add up to big awareness — and big results!`
                 ],
                 explain_workout_splits: (ctx) => [
-                    `A training split is how you divide muscle groups across the week! Options include: Full Body (3x/week, great for starting out), Upper/Lower (4x/week, balanced), Push/Pull/Legs (6x/week, advanced), or Bro Split (one group per day). Your recommended split on the Workout screen is tailored to your body analysis â€” if your lower body scores low, expect more leg days. Trust the plan and be consistent!`,
-                    `Your workout split determines which muscles get trained on which days â€” and muscles need 48-72 hours to recover after training. The app's workout plan is already structured as a split based on your analysis and goal. You can adjust frequency in the exercise filter panel. The best split is the one you'll actually stick to â€” and you're already doing it!`
+                    `A training split is how you divide muscle groups across the week! Options include: Full Body (3x/week, great for starting out), Upper/Lower (4x/week, balanced), Push/Pull/Legs (6x/week, advanced), or Bro Split (one group per day). Your recommended split on the Workout screen is tailored to your body analysis — if your lower body scores low, expect more leg days. Trust the plan and be consistent!`,
+                    `Your workout split determines which muscles get trained on which days — and muscles need 48-72 hours to recover after training. The app's workout plan is already structured as a split based on your analysis and goal. You can adjust frequency in the exercise filter panel. The best split is the one you'll actually stick to — and you're already doing it!`
                 ],
                 explain_body_recomp: (ctx) => [
-                    `Body recomposition â€” losing fat while gaining muscle simultaneously â€” is absolutely achievable, especially if you're newer to training or returning after a break! The keys: eat near maintenance calories, get high protein (1.6-2.2g/kg), do progressive resistance training, and be patient. It's slower than a pure cut or bulk, but the results are incredible. Use Scan History to track your body score trending up while weight stays stable!`,
-                    `Recomposition is the fitness goal of having it all â€” and the app's body score helps you measure it! If your muscle tone score rises while your weight barely moves, you're recomping. It takes high protein, consistent lifting, and time. Check your progress in Scan History. Slow and steady wins the recomp race, and you have every tool you need right here!`
+                    `Body recomposition — losing fat while gaining muscle simultaneously — is absolutely achievable, especially if you're newer to training or returning after a break! The keys: eat near maintenance calories, get high protein (1.6-2.2g/kg), do progressive resistance training, and be patient. It's slower than a pure cut or bulk, but the results are incredible. Use Scan History to track your body score trending up while weight stays stable!`,
+                    `Recomposition is the fitness goal of having it all — and the app's body score helps you measure it! If your muscle tone score rises while your weight barely moves, you're recomping. It takes high protein, consistent lifting, and time. Check your progress in Scan History. Slow and steady wins the recomp race, and you have every tool you need right here!`
                 ],
                 explain_maintenance: (ctx) => [
-                    `Maintenance means keeping what you've built â€” eating at your TDEE to hold your weight, continuing to train to preserve muscle, and sustaining the habits that got you here. Use the BMR/TDEE Calculator on Nutrition to find your maintenance calories, and the Calorie Balance card to stay near it. The Daily Habits ring keeps your routines consistent. Maintenance isn't the finish line â€” it's mastery!`,
-                    `Holding your results is an achievement in itself! Your maintenance calories (TDEE) keep weight stable, while continued training preserves the muscle you've earned. Use the Calorie Balance card to check your intake vs. output, and the Weekly Report Card to monitor habit consistency. You did the hard work â€” now let's make it permanent!`
+                    `Maintenance means keeping what you've built — eating at your TDEE to hold your weight, continuing to train to preserve muscle, and sustaining the habits that got you here. Use the BMR/TDEE Calculator on Nutrition to find your maintenance calories, and the Calorie Balance card to stay near it. The Daily Habits ring keeps your routines consistent. Maintenance isn't the finish line — it's mastery!`,
+                    `Holding your results is an achievement in itself! Your maintenance calories (TDEE) keep weight stable, while continued training preserves the muscle you've earned. Use the Calorie Balance card to check your intake vs. output, and the Weekly Report Card to monitor habit consistency. You did the hard work — now let's make it permanent!`
                 ],
                 explain_workout_history: (ctx) => [
                     `Workout History logs every session you complete in the app! See your past workouts, how many sets and reps you did, and track consistency over time. Every logged session is progress documented!`,
-                    `Your Workout History is on the Progress screen â€” it shows every training session you've completed with full details. Seeing that list grow is one of the best motivators to keep showing up!`
+                    `Your Workout History is on the Progress screen — it shows every training session you've completed with full details. Seeing that list grow is one of the best motivators to keep showing up!`
                 ],
                 explain_personal_records: (ctx) => [
-                    `Personal Records track your best lifts for each exercise â€” your heaviest set, most reps, or estimated 1-rep max. Every time you beat a previous record, it updates automatically. Watch them climb as you get stronger!`,
-                    `Your PRs are in the Progress screen! They track your strongest performance for each exercise. Hitting a new PR is one of the best feelings in training â€” keep pushing those numbers up!`
+                    `Personal Records track your best lifts for each exercise — your heaviest set, most reps, or estimated 1-rep max. Every time you beat a previous record, it updates automatically. Watch them climb as you get stronger!`,
+                    `Your PRs are in the Progress screen! They track your strongest performance for each exercise. Hitting a new PR is one of the best feelings in training — keep pushing those numbers up!`
                 ],
                 explain_body_measurements: (ctx) => [
                     `Body Measurements lets you log your chest, waist, hips, and arms over time. Even when the scale doesn't move, shrinking waist and growing arm measurements tell the real story. Log every 2-4 weeks for the best trends!`,
-                    `The Body Measurements tracker is on the Progress screen â€” log your circumference measurements regularly and see how your body shape is actually changing. The tape measure often tells a better story than the scale!`
+                    `The Body Measurements tracker is on the Progress screen — log your circumference measurements regularly and see how your body shape is actually changing. The tape measure often tells a better story than the scale!`
                 ],
                 explain_account: (ctx) => [
                     `Your My Account section is in the user menu (tap your name or avatar in the top right)! You can update your display name, email, fitness profile details (height, weight, gender, goal, activity level, and more), change your password, or delete your account. Keeping your fitness details accurate helps me give you better recommendations!`,
-                    `Head to the user menu (top right) and tap "My Account" â€” update everything there: display name, email, fitness stats like height/weight/goal, plus change your password. Stay updated, stay optimized!`
+                    `Head to the user menu (top right) and tap "My Account" — update everything there: display name, email, fitness stats like height/weight/goal, plus change your password. Stay updated, stay optimized!`
                 ],
                 explain_optional_measurements: (ctx) => [
                     `The optional measurements on the upload screen (chest, waist, hips, arms in cm) are absolutely worth filling in! They give the AI real body proportion data to complement the photo analysis, making your results much more accurate. Just grab a soft tape measure and measure relaxed at the widest point for each area!`,
                     `Filling in those optional measurements really pays off! The AI uses chest, waist, hips, and arm circumferences to better understand your body shape beyond what the camera alone can see. Takes less than 2 minutes and noticeably improves your analysis accuracy!`
                 ],
                 explain_export: (ctx) => [
-                    `On the Results screen, tap "Export Data" to save your full analysis report, or "Share Card" to generate a gorgeous shareable summary card â€” perfect for documenting progress or sharing with friends! After a workout in the Player, "Share Workout" lets you share your session summary too. Show the world your hard work!`,
+                    `On the Results screen, tap "Export Data" to save your full analysis report, or "Share Card" to generate a gorgeous shareable summary card — perfect for documenting progress or sharing with friends! After a workout in the Player, "Share Workout" lets you share your session summary too. Show the world your hard work!`,
                     `You've got great sharing options! "Export Data" on the Results screen saves your full stats as a file. "Share Card" creates a shareable visual of your results. After finishing a workout, "Share Workout" captures your session achievements. Great for tracking and accountability!`
                 ],
                 explain_comparison: (ctx) => [
-                    `The scan comparison feature is so motivating! Head to the Progress screen, scroll down to Scan History, select any two scans, and tap Compare. You'll see a side-by-side view of your body score, muscle tone, posture, and more â€” with clear change indicators. Watching those improvements is incredibly rewarding!`,
-                    `Progress comparison is in the Progress screen â†’ Scan History! Pick two scans from different dates, hit Compare, and get a full side-by-side breakdown of every metric â€” body score, muscle tone, posture alignment â€” plus change percentages. The best way to see your actual progress!`
+                    `The scan comparison feature is so motivating! Head to the Progress screen, scroll down to Scan History, select any two scans, and tap Compare. You'll see a side-by-side view of your body score, muscle tone, posture, and more — with clear change indicators. Watching those improvements is incredibly rewarding!`,
+                    `Progress comparison is in the Progress screen → Scan History! Pick two scans from different dates, hit Compare, and get a full side-by-side breakdown of every metric — body score, muscle tone, posture alignment — plus change percentages. The best way to see your actual progress!`
                 ],
                 explain_live_posture: (ctx) => [
-                    `The Live Posture Check on the Workout screen is fantastic! Tap "Start Live Posture Check" and your camera activates for real-time posture feedback â€” it detects shoulder, spine, and hip alignment and shows correction cues live as you exercise. Amazing for perfecting form and preventing injury!`,
+                    `The Live Posture Check on the Workout screen is fantastic! Tap "Start Live Posture Check" and your camera activates for real-time posture feedback — it detects shoulder, spine, and hip alignment and shows correction cues live as you exercise. Amazing for perfecting form and preventing injury!`,
                     `Live Posture Check uses your camera to give real-time form feedback during workouts! On the Workout screen, tap "Start Live Posture Check" and it monitors your shoulder, spine, and hip alignment with live correction cues. Great for making sure every rep counts!`
                 ],
                 explain_data_management: (ctx) => [
-                    `The Data Management card is at the bottom of the Upload screen! It shows how much local storage the app is using and has a "Clear All Data" button to remove locally stored session data, scan history, and logs. Perfect for a fresh start! Note: this only clears local data â€” your account info on the server stays safe.`,
-                    `Find Data Management at the bottom of the Upload screen â€” it shows your local storage usage and lets you clear all local data. Your account and server data stay intact, so no worries there. Perfect for when you want a clean slate!`
+                    `The Data Management card is at the bottom of the Upload screen! It shows how much local storage the app is using and has a "Clear All Data" button to remove locally stored session data, scan history, and logs. Perfect for a fresh start! Note: this only clears local data — your account info on the server stays safe.`,
+                    `Find Data Management at the bottom of the Upload screen — it shows your local storage usage and lets you clear all local data. Your account and server data stay intact, so no worries there. Perfect for when you want a clean slate!`
                 ],
                 explain_auth: (ctx) => [
                     `Creating an account is quick and easy! Click "Sign Up", enter your email, choose a password, add your display name, and you're in. Check your email for a verification link, confirm it, and you're ready! Already registered? Just log in. Forgot your password? Use "Forgot Password" to reset via email. Accounts keep your progress synced across sessions!`,
-                    `Signing up is super straightforward â€” email, password, display name, verify your email, done! Already have an account? Just log in. For password issues, "Forgot Password" sends a reset email in seconds. Having an account means your scan history, progress, and data all sync properly!`
+                    `Signing up is super straightforward — email, password, display name, verify your email, done! Already have an account? Just log in. For password issues, "Forgot Password" sends a reset email in seconds. Having an account means your scan history, progress, and data all sync properly!`
                 ],
                 _fallback: (ctx) => [
                     `I'm not sure I understood that. I can help with:\n- Body score & analysis results\n- Muscle tone & posture\n- Workouts, reps & frequency\n- Nutrition, protein & calories\n- How the AI works\n- Explaining any screen or feature\n\nTry asking about one of these topics!`,
@@ -8503,13 +8503,13 @@ Please try again with a different photo.`;
                     `Workout screen components:\n- Exercise recommendations: tailored to ${GOAL_LABELS[ctx.goal] || 'fitness'} goal\n- Program structure: sets, reps, rest periods per exercise\n- Workout player: guided real-time session with timers\n- Progress tracking: rep counting, exercise completion\n- Personalization: based on body score (${ctx.bodyScore}), type (${ctx.bodyType})`,
                 ],
                 explain_nutrition_screen: (ctx) => [
-                    `Nutrition screen modules:\n- Daily Macro Targets: calorie + protein/carb/fat targets (personalized)\n- Metabolic Rate card: BMR via Mifflin-St Jeor â†’ TDEE â†’ Goal target\n- Calorie Balance: burned (MET-based) vs. eaten (food log) â†’ net\n- Food log: meal entry via food search or AI food recognition\n- Hydration tracker: daily glass count + 14-day heatmap + goal streak\n- Meal guidance: goal-specific suggestions for ${GOAL_LABELS[ctx.goal] || 'fitness'}\n- Interactive recalculation: adjust activity + goal â†’ apply updated targets`,
+                    `Nutrition screen modules:\n- Daily Macro Targets: calorie + protein/carb/fat targets (personalized)\n- Metabolic Rate card: BMR via Mifflin-St Jeor → TDEE → Goal target\n- Calorie Balance: burned (MET-based) vs. eaten (food log) → net\n- Food log: meal entry via food search or AI food recognition\n- Hydration tracker: daily glass count + 14-day heatmap + goal streak\n- Meal guidance: goal-specific suggestions for ${GOAL_LABELS[ctx.goal] || 'fitness'}\n- Interactive recalculation: adjust activity + goal → apply updated targets`,
                 ],
                 explain_progress_screen: (ctx) => [
-                    `Progress screen modules:\n- Streak Tracker: consecutive workout days + best streak\n- Activity Heatmap: 14-day visual grid\n- Daily Habits Tracker: 5 habits (Workout/Hydration/Sleep/Nutrition/Check-In), auto-detected, score ring\n- Weekly Report Card: letter grade (A+â†’D) from workout + sleep + recovery + streak scores\n- Sleep & Recovery Tracker: 7-day bar chart, recovery score (hours/quality/workouts), streak\n- Smart Insights: 8-engine analysis of logged data â†’ up to 6 personalized observations\n- Progress Charts: Weight/Sleep/Activity/Calories/Score/BMI/Muscle tabs (Chart.js)\n- Achievement Badges: milestone-based unlocks\n- Weekly Challenges: 3 rotating objectives with XP rewards\n- Level System: cumulative XP â†’ level â†’ rank progression\n- Scan History: IndexedDB snapshots with side-by-side metric comparison`,
+                    `Progress screen modules:\n- Streak Tracker: consecutive workout days + best streak\n- Activity Heatmap: 14-day visual grid\n- Daily Habits Tracker: 5 habits (Workout/Hydration/Sleep/Nutrition/Check-In), auto-detected, score ring\n- Weekly Report Card: letter grade (A+→D) from workout + sleep + recovery + streak scores\n- Sleep & Recovery Tracker: 7-day bar chart, recovery score (hours/quality/workouts), streak\n- Smart Insights: 8-engine analysis of logged data → up to 6 personalized observations\n- Progress Charts: Weight/Sleep/Activity/Calories/Score/BMI/Muscle tabs (Chart.js)\n- Achievement Badges: milestone-based unlocks\n- Weekly Challenges: 3 rotating objectives with XP rewards\n- Level System: cumulative XP → level → rank progression\n- Scan History: IndexedDB snapshots with side-by-side metric comparison`,
                 ],
                 explain_wearable_screen: (ctx) => [
-                    `Activity Hub specification:\n- Step Ring: SVG arc showing today's steps vs. daily goal (default 10,000, configurable)\n- Live Metrics: calories (steps Ã— 0.04 kcal/step estimate), active minutes, avg BPM\n- Step Counter (mobile): DeviceMotion API + accelerometer-based step detection, runs in background via Page Visibility API + Wake Lock API\n- Heart Rate Reader: camera-based PPG (photoplethysmography) -- 30-second measurement via rear camera\n- Step History Chart: Chart.js bar chart, 7/14/30-day view, daily totals aggregated across sessions\n- Sessions Log: each saved session stored with date, steps, distance (km), duration, calories, HR\n- Desktop: QR code to open tracker URL on phone\n- Sync: sessions upload to backend when authenticated, fall back to localStorage\n\nCurrent today: ${ctx.todaySteps ? ctx.todaySteps.toLocaleString() + ' steps logged' : 'No sessions saved yet'}.`
+                    `Activity Hub specification:\n- Step Ring: SVG arc showing today's steps vs. daily goal (default 10,000, configurable)\n- Live Metrics: calories (steps × 0.04 kcal/step estimate), active minutes, avg BPM\n- Step Counter (mobile): DeviceMotion API + accelerometer-based step detection, runs in background via Page Visibility API + Wake Lock API\n- Heart Rate Reader: camera-based PPG (photoplethysmography) -- 30-second measurement via rear camera\n- Step History Chart: Chart.js bar chart, 7/14/30-day view, daily totals aggregated across sessions\n- Sessions Log: each saved session stored with date, steps, distance (km), duration, calories, HR\n- Desktop: QR code to open tracker URL on phone\n- Sync: sessions upload to backend when authenticated, fall back to localStorage\n\nCurrent today: ${ctx.todaySteps ? ctx.todaySteps.toLocaleString() + ' steps logged' : 'No sessions saved yet'}.`
                 ],
                 explain_scan_history: (ctx) => [
                     `Scan History feature specification:\n- Storage: IndexedDB (fixit-db, snapshots store)\n- Auto-save: triggered after each analysis completion\n- Data stored: thumbnail (150x200), full image, all metrics, user profile\n- UI: horizontal scrollable timeline of thumbnail cards\n- Selection: tap cards to select (max 2)\n- Comparison view: side-by-side photos + metric deltas with directional arrows\n- Metrics compared: body composition, muscle tone, posture, fitness index, visual age, symmetry, regional tone\n- XP: 10 per snapshot saved, 20 for first comparison`,
@@ -8533,13 +8533,13 @@ Please try again with a different photo.`;
                     `Fitness Index:\n- Current value: ${ctx.fitnessIndex}\n- Components: body composition + muscle tone + posture\n- Scale: composite score combining all analysis metrics\n- Purpose: single-metric overview of overall fitness level\n- Tracking: monitor changes over time as individual metrics improve`,
                 ],
                 explain_workout_player: (ctx) => [
-                    `Workout Player specification:\n- Function: guided real-time exercise session\n- Features: exercise display, set/rep tracking, rest timers, progress bar\n- Input: goal-tailored exercise list (${GOAL_LABELS[ctx.goal] || 'fitness'})\n- Flow: exercise â†’ reps â†’ rest â†’ next exercise â†’ completion\n- Output: workout completion tracking, XP awarded`,
+                    `Workout Player specification:\n- Function: guided real-time exercise session\n- Features: exercise display, set/rep tracking, rest timers, progress bar\n- Input: goal-tailored exercise list (${GOAL_LABELS[ctx.goal] || 'fitness'})\n- Flow: exercise → reps → rest → next exercise → completion\n- Output: workout completion tracking, XP awarded`,
                 ],
                 explain_streaks_badges: (ctx) => [
                     `Gamification system components:\n\n1. Streak Tracker: consecutive workout days (stored in localStorage)\n2. Activity Heatmap: 14-day visual grid of training days\n3. Achievement Badges: milestone-triggered unlocks (configurable criteria)\n4. Weekly Challenges: 3 rotating objectives with progress bars\n5. XP System: points from workouts (20), challenges (40), coach use (10), snapshots (10)\n6. Level/Rank: cumulative XP thresholds determine progression\n7. Scan History: IndexedDB-stored analysis snapshots with visual comparison (select 2 to compare metrics)`,
                 ],
                 explain_confidence_indicator: (ctx) => [
-                    `Confidence Indicator:\n- Current level: ${ctx.confidence}\n- Factors: image quality, landmark visibility, pose angle, BMI data availability\n- Scale: low â†’ medium â†’ high\n- Impact: higher confidence = more reliable analysis results\n- Improvement: clear lighting, front-facing pose, full body visible, enter height/weight`,
+                    `Confidence Indicator:\n- Current level: ${ctx.confidence}\n- Factors: image quality, landmark visibility, pose angle, BMI data availability\n- Scale: low → medium → high\n- Impact: higher confidence = more reliable analysis results\n- Improvement: clear lighting, front-facing pose, full body visible, enter height/weight`,
                 ],
                 explain_visual_age: (ctx) => [
                     `Visual Age:\n- Definition: estimated apparent age based on fitness indicators\n- Inputs: posture quality, body composition, muscle tone\n- Display: Results screen (current), Simulator screen (projected)\n- Note: this is not biological/chronological age\n- Purpose: quantify how fitness level translates to visual appearance\n- Application: track visual age changes as fitness improves`,
@@ -8585,52 +8585,52 @@ Please try again with a different photo.`;
                     `Coach Persona System:\n- Available personas:\n  1. Encouraging: warm, motivating, supportive tone\n  2. Planner/Structured: organized, data-focused, bullet-point format\n  3. Explainer/Educational: science-based, research references, teaching style\n  4. Funny/Humorous: casual tone, jokes, pop culture references\n- Current persona: ${state.coachPersona || 'encouraging'}\n- Behavior: same information, different communication style\n- Switching: available anytime, no data loss`,
                 ],
                 explain_bmr_tdee: (ctx) => [
-                    `Metabolic Rate card (Nutrition screen):\n- BMR formula: Mifflin-St Jeor\n  Male: 10Ã—weight + 6.25Ã—height âˆ’ 5Ã—age + 5\n  Female: 10Ã—weight + 6.25Ã—height âˆ’ 5Ã—age âˆ’ 161\n- TDEE = BMR Ã— activity multiplier (sedentary: 1.2 â†’ athlete: 1.9)\n- Target = TDEE + goal adjustment (fat loss: âˆ’500, muscle: +300, maintain: 0)\n- Inputs: state.weight, state.height, state.age, state.gender\n- Interactive: activity select + goal select â†’ Recalculate & Apply updates macro targets\n- Formula displayed dynamically with user's actual values`,
+                    `Metabolic Rate card (Nutrition screen):\n- BMR formula: Mifflin-St Jeor\n  Male: 10×weight + 6.25×height − 5×age + 5\n  Female: 10×weight + 6.25×height − 5×age − 161\n- TDEE = BMR × activity multiplier (sedentary: 1.2 → athlete: 1.9)\n- Target = TDEE + goal adjustment (fat loss: −500, muscle: +300, maintain: 0)\n- Inputs: state.weight, state.height, state.age, state.gender\n- Interactive: activity select + goal select → Recalculate & Apply updates macro targets\n- Formula displayed dynamically with user's actual values`,
                 ],
                 explain_daily_habits: (ctx) => [
-                    `Daily Habits Tracker (Progress screen):\n- 5 tracked habits:\n  1. Workout: auto-detected from workout log (today's date match)\n  2. Hydration: auto-detected if â‰¥8 glasses logged today\n  3. Sleep: auto-detected if â‰¥7h logged yesterday/today\n  4. Nutrition: auto-detected if calories > 0 in calorie log today\n  5. Check-In: manual toggle (stored in fixit-habit-checkins)\n- Score ring: SVG circle, circumference 163.4, fills proportionally\n- Per-habit streak: consecutive days from historical log data\n- Visual feedback: ring turns green at 5/5 completion`,
+                    `Daily Habits Tracker (Progress screen):\n- 5 tracked habits:\n  1. Workout: auto-detected from workout log (today's date match)\n  2. Hydration: auto-detected if ≥8 glasses logged today\n  3. Sleep: auto-detected if ≥7h logged yesterday/today\n  4. Nutrition: auto-detected if calories > 0 in calorie log today\n  5. Check-In: manual toggle (stored in fixit-habit-checkins)\n- Score ring: SVG circle, circumference 163.4, fills proportionally\n- Per-habit streak: consecutive days from historical log data\n- Visual feedback: ring turns green at 5/5 completion`,
                 ],
                 explain_sleep_tracker: (ctx) => [
-                    `Sleep & Recovery Tracker (Progress screen bento):\n- Log inputs: hours (float), quality (5-level: Rough/Poor/Fair/Good/Excellent)\n- Storage: fixit-sleep-log (localStorage, max 365, deduped by date)\n- 7-day bar chart: height âˆ hours, color-coded by threshold\n- Recovery Score (0â€“100):\n  - 50% weight: hours score (9h=100%, 7-8h=85%, 6-7h=65%, 5-6h=45%, <5h=20%)\n  - 30% weight: quality (Excellent=100%, Good=80%, Fair=55%, Poor=30%, Rough=0%)\n  - 20% weight: workout balance (4-5/week=100%, 3/week=80%, 2/week=55%, 1/week=25%, 0=0%)\n- Good-nights streak: consecutive nights with â‰¥7h and quality â‰¥ Fair`,
+                    `Sleep & Recovery Tracker (Progress screen bento):\n- Log inputs: hours (float), quality (5-level: Rough/Poor/Fair/Good/Excellent)\n- Storage: fixit-sleep-log (localStorage, max 365, deduped by date)\n- 7-day bar chart: height ∝ hours, color-coded by threshold\n- Recovery Score (0–100):\n  - 50% weight: hours score (9h=100%, 7-8h=85%, 6-7h=65%, 5-6h=45%, <5h=20%)\n  - 30% weight: quality (Excellent=100%, Good=80%, Fair=55%, Poor=30%, Rough=0%)\n  - 20% weight: workout balance (4-5/week=100%, 3/week=80%, 2/week=55%, 1/week=25%, 0=0%)\n- Good-nights streak: consecutive nights with ≥7h and quality ≥ Fair`,
                 ],
                 explain_weekly_report: (ctx) => [
-                    `Weekly Report Card (Progress screen):\n- Scope: current week (Sunday 00:00 â†’ Saturday)\n- Grade inputs:\n  - Workout score: 5+=100, 4=90, 3=80, 2=70, 1=50, 0=0\n  - Sleep score: avg hours (â‰¥8=100, â‰¥7=85, â‰¥6=60, <6=30)\n  - Recovery score: from Sleep & Recovery Tracker (0â€“100)\n  - Streak score: â‰¥7=100, â‰¥5=80, â‰¥3=60, â‰¥1=40, 0=0\n- Grade thresholds: A+(93), A(85), B+(77), B(69), C+(61), C(53), D(<53)\n- Displayed: grade, workouts, avg sleep, weight delta, streak, message`,
+                    `Weekly Report Card (Progress screen):\n- Scope: current week (Sunday 00:00 → Saturday)\n- Grade inputs:\n  - Workout score: 5+=100, 4=90, 3=80, 2=70, 1=50, 0=0\n  - Sleep score: avg hours (≥8=100, ≥7=85, ≥6=60, <6=30)\n  - Recovery score: from Sleep & Recovery Tracker (0–100)\n  - Streak score: ≥7=100, ≥5=80, ≥3=60, ≥1=40, 0=0\n- Grade thresholds: A+(93), A(85), B+(77), B(69), C+(61), C(53), D(<53)\n- Displayed: grade, workouts, avg sleep, weight delta, streak, message`,
                 ],
                 explain_smart_insights: (ctx) => [
-                    `Smart Insights (Progress screen):\n- 8 analysis engines:\n  1. Streak: â‰¥7 consecutive days â†’ positive insight\n  2. Workout pattern: top 2 training days of week\n  3. Sleep/workout correlation: avg sleep diff on workout vs. rest days (Â±0.3h threshold)\n  4. Weight trend: 2-week rolling comparison\n  5. Calorie adherence: avg % of goal (Â±8% threshold)\n  6. Sleep quality: 5-night avg score + poor-night count\n  7. Measurement trend: waist/chest/arms â‰¥0.5cm change\n  8. Recovery score: <50 â†’ warning insight\n- Output: up to 6 insights, typed: positive/warning/neutral\n- Rendered with color-coded left borders`,
+                    `Smart Insights (Progress screen):\n- 8 analysis engines:\n  1. Streak: ≥7 consecutive days → positive insight\n  2. Workout pattern: top 2 training days of week\n  3. Sleep/workout correlation: avg sleep diff on workout vs. rest days (±0.3h threshold)\n  4. Weight trend: 2-week rolling comparison\n  5. Calorie adherence: avg % of goal (±8% threshold)\n  6. Sleep quality: 5-night avg score + poor-night count\n  7. Measurement trend: waist/chest/arms ≥0.5cm change\n  8. Recovery score: <50 → warning insight\n- Output: up to 6 insights, typed: positive/warning/neutral\n- Rendered with color-coded left borders`,
                 ],
                 explain_calorie_balance: (ctx) => [
-                    `Calorie Balance card (Nutrition screen):\n- Eaten: sum of calories from today's food log entries\n- Burned: Î£(MET Ã— weight_kg Ã— duration_hours) for today's workouts\n  MET values: cardio=8.0, HIIT=10.0, strength=6.0, yoga=3.0, sports=7.0\n- Net: eaten âˆ’ burned (positive = surplus, negative = deficit)\n- Data sources: fixit-calorie-log (today), fixit-workout-log (today)\n- Updates: on food log load + workout log render`,
+                    `Calorie Balance card (Nutrition screen):\n- Eaten: sum of calories from today's food log entries\n- Burned: Σ(MET × weight_kg × duration_hours) for today's workouts\n  MET values: cardio=8.0, HIIT=10.0, strength=6.0, yoga=3.0, sports=7.0\n- Net: eaten − burned (positive = surplus, negative = deficit)\n- Data sources: fixit-calorie-log (today), fixit-workout-log (today)\n- Updates: on food log load + workout log render`,
                 ],
                 explain_hydration_history: (ctx) => [
-                    `Hydration History (Nutrition screen):\n- 14-day heatmap: one cell per day\n  - Empty: 0â€“1 glasses\n  - Partial: â‰¥2 glasses\n  - Half: â‰¥5 glasses\n  - Full: â‰¥8 glasses (goal met)\n- 7-day average: mean(glasses[last 7 days])\n- Goal streak: consecutive days backward from today with â‰¥8 glasses\n- Best streak: longest consecutive run in 30-day window\n- Storage: fixit-water-YYYY-MM-DD keys (one per day)`,
+                    `Hydration History (Nutrition screen):\n- 14-day heatmap: one cell per day\n  - Empty: 0–1 glasses\n  - Partial: ≥2 glasses\n  - Half: ≥5 glasses\n  - Full: ≥8 glasses (goal met)\n- 7-day average: mean(glasses[last 7 days])\n- Goal streak: consecutive days backward from today with ≥8 glasses\n- Best streak: longest consecutive run in 30-day window\n- Storage: fixit-water-YYYY-MM-DD keys (one per day)`,
                 ],
                 explain_progress_charts: (ctx) => [
                     `Progress Charts (Progress screen):\n- Tabs: Weight | Sleep | Activity | Calories | Score | BMI | Muscle\n- Weight: fixit-weight-log, last 30 entries, line chart\n- Sleep: fixit-sleep-log, last 30 entries (hours), line chart\n- Activity: fixit-workout-log, 8-week buckets, bar chart (max 7/week)\n- Calories: fixit-calorie-log, last 30 entries + dashed goal line\n- Score/BMI/Muscle: getMergedSnapshots(), line chart\n- Library: Chart.js v4.4.0\n- Empty state: per-tab inline overlay (chart hidden, message shown)`,
                 ],
                 explain_challenges: (ctx) => [
-                    `Weekly Challenges specification:\n- Location: Progress screen â†’ Challenges section\n- Format: Rotating weekly objectives (resets Monday)\n- Examples: Log 5 workouts, hit hydration goal 7 days, complete habit streak\n- Reward: Bonus XP on completion\n- Tracking: Completion % per challenge card\n- Status: Active, completed, or missed\n- Multiple challenges can be active simultaneously`
+                    `Weekly Challenges specification:\n- Location: Progress screen → Challenges section\n- Format: Rotating weekly objectives (resets Monday)\n- Examples: Log 5 workouts, hit hydration goal 7 days, complete habit streak\n- Reward: Bonus XP on completion\n- Tracking: Completion % per challenge card\n- Status: Active, completed, or missed\n- Multiple challenges can be active simultaneously`
                 ],
                 explain_levels_xp: (ctx) => [
                     `XP & Level System:\n- XP sources: Workouts logged, food tracked, habits completed, challenges finished, scans run, coach queries\n- Accumulation: Lifetime, never resets\n- Level thresholds: Progressive scale (higher levels require more XP)\n- Display: Level badge + XP progress bar on Progress screen\n- Rank titles: Unlock at milestone levels\n- Purpose: Quantified consistency metric across all app behaviors`
                 ],
                 explain_weight_log: (ctx) => [
-                    `Weight Log specification:\n- Location: Goal Weight card â†’ bottom input row\n- Input: kg value (0.1 kg precision, range 30â€“300)\n- Storage: localStorage, date-stamped\n- Display: "Last: X.X kg Â· Month Day" label in card\n- Trend chart: Sparkline appears after 2+ entries\n- Pace input: 3+ entries over 14+ day span enables trend-based weekly rate\n- Entries used: 30 most recent for chart; all for pace calculation`
+                    `Weight Log specification:\n- Location: Goal Weight card → bottom input row\n- Input: kg value (0.1 kg precision, range 30–300)\n- Storage: localStorage, date-stamped\n- Display: "Last: X.X kg · Month Day" label in card\n- Trend chart: Sparkline appears after 2+ entries\n- Pace input: 3+ entries over 14+ day span enables trend-based weekly rate\n- Entries used: 30 most recent for chart; all for pace calculation`
                 ],
                 explain_goal_weight: (ctx) => [
-                    `Goal Weight Card breakdown:\n- Setup: "Set Goal Weight" â†’ kg input â†’ Save\n- Start weight: First logged entry (or profile weight fallback)\n- Progress bar: % of journey complete, with current-weight marker dot\n- Metrics row:\n  Â· kg remaining (or âœ“ if goal reached)\n  Â· Est. weeks to goal\n  Â· Weekly pace (source labeled: trend / calorie data / estimated)\n- Pace priority: Weight log trend > calorie balance estimate > 0.5 kg/wk default\n- Edit: "Edit Goal" button reopens editor at any time`
+                    `Goal Weight Card breakdown:\n- Setup: "Set Goal Weight" → kg input → Save\n- Start weight: First logged entry (or profile weight fallback)\n- Progress bar: % of journey complete, with current-weight marker dot\n- Metrics row:\n  · kg remaining (or ✓ if goal reached)\n  · Est. weeks to goal\n  · Weekly pace (source labeled: trend / calorie data / estimated)\n- Pace priority: Weight log trend > calorie balance estimate > 0.5 kg/wk default\n- Edit: "Edit Goal" button reopens editor at any time`
                 ],
                 explain_food_log: (ctx) => [
                     `Food Log specification:\n- Location: Nutrition screen\n- Quick Add fields: Name, Detail (portion), Calories, Protein (g), Carbs (g), Fats (g)\n- Food Presets: 15 pre-filled chips in 3 groups (Protein, Carbs & Meals, Snacks & Fats)\n- Entry display: Timestamp + name + detail + macro badges\n- Calorie integration: Logged totals feed into Calorie Balance card\n- Storage: localStorage, date-partitioned entries\n- Delete: Available per entry`
                 ],
                 explain_workout_splits: (ctx) => [
-                    `Training Split options:\n- Full Body (3Ã—/week): All compounds per session; best for beginners / time-limited\n- Upper/Lower (4Ã—/week): 2 upper + 2 lower days; intermediate level\n- Push/Pull/Legs (6Ã—/week): Highest volume; advanced lifters\n- Bro Split (5Ã—/week): 1 muscle group/day; hypertrophy-focused\n- Selection basis: Body analysis score + goal + available days\n- Filter: Workout screen frequency filter adjusts recommended days\n- Recovery rule: 48â€“72 hr per muscle group minimum`
+                    `Training Split options:\n- Full Body (3×/week): All compounds per session; best for beginners / time-limited\n- Upper/Lower (4×/week): 2 upper + 2 lower days; intermediate level\n- Push/Pull/Legs (6×/week): Highest volume; advanced lifters\n- Bro Split (5×/week): 1 muscle group/day; hypertrophy-focused\n- Selection basis: Body analysis score + goal + available days\n- Filter: Workout screen frequency filter adjusts recommended days\n- Recovery rule: 48–72 hr per muscle group minimum`
                 ],
                 explain_body_recomp: (ctx) => [
-                    `Body Recomposition protocol:\n- Definition: Simultaneous fat loss and muscle gain\n- Calorie target: Maintenance Â± 100 kcal (slight deficit preferred)\n- Protein: 1.8â€“2.2 g/kg body weight (critical for mTOR activation)\n- Training: Progressive overload resistance 3â€“4Ã—/week\n- Cardio: Moderate â€” supports fat loss without impairing recovery\n- Timeline: 3â€“6 months for measurable change\n- Measurement: Body score up + stable weight = successful recomp\n- Best for: Beginners, detrained athletes, moderate body fat (>20% male, >28% female)`
+                    `Body Recomposition protocol:\n- Definition: Simultaneous fat loss and muscle gain\n- Calorie target: Maintenance ± 100 kcal (slight deficit preferred)\n- Protein: 1.8–2.2 g/kg body weight (critical for mTOR activation)\n- Training: Progressive overload resistance 3–4×/week\n- Cardio: Moderate — supports fat loss without impairing recovery\n- Timeline: 3–6 months for measurable change\n- Measurement: Body score up + stable weight = successful recomp\n- Best for: Beginners, detrained athletes, moderate body fat (>20% male, >28% female)`
                 ],
                 explain_maintenance: (ctx) => [
-                    `Maintenance protocol:\n- Calorie target: TDEE (use BMR/TDEE Calculator on Nutrition screen)\n- Protein floor: â‰¥ 1.6 g/kg to prevent muscle loss\n- Training: 3â€“4Ã—/week resistance + 150 min moderate cardio/week\n- Monitoring tools:\n  Â· Calorie Balance card (intake vs. output)\n  Â· Weight Log (alert if drift > Â±2 kg over 4 weeks)\n  Â· Daily Habits ring (target 4â€“5/5 consistently)\n  Â· Weekly Report Card (target grade â‰¥ B)\n- Recalculate TDEE: Every 5 kg body weight change`
+                    `Maintenance protocol:\n- Calorie target: TDEE (use BMR/TDEE Calculator on Nutrition screen)\n- Protein floor: ≥ 1.6 g/kg to prevent muscle loss\n- Training: 3–4×/week resistance + 150 min moderate cardio/week\n- Monitoring tools:\n  · Calorie Balance card (intake vs. output)\n  · Weight Log (alert if drift > ±2 kg over 4 weeks)\n  · Daily Habits ring (target 4–5/5 consistently)\n  · Weekly Report Card (target grade ≥ B)\n- Recalculate TDEE: Every 5 kg body weight change`
                 ],
                 explain_workout_history: (ctx) => [
                     `Workout History logs every training session completed in the app:\n- Session list: Date, workout name, exercises performed\n- Sets/reps/load data per exercise\n- Consistency tracking: Total sessions logged\n- Located: Progress screen, Workout History cell\n- Use: Review volume trends and training frequency over time`
@@ -8639,28 +8639,28 @@ Please try again with a different photo.`;
                     `Personal Records (PRs) track peak performance per exercise:\n- Metric: Heaviest logged set or estimated 1RM\n- Update: Auto-updates when a new best is logged\n- Display: Exercise name + weight + date achieved\n- Located: Progress screen, Personal Records cell\n- Progressive PR increases confirm neuromuscular adaptation and training efficacy`
                 ],
                 explain_body_measurements: (ctx) => [
-                    `Body Measurements tracker logs circumference data:\n- Metrics: Chest, waist, hips, arms (cm)\n- Entry frequency: Every 2â€“4 weeks recommended\n- History: Trend lines per measurement\n- Located: Progress screen, Body Measurements cell\n- Use: Circumference data detects body composition change independent of scale weight â€” especially useful during recomposition`
+                    `Body Measurements tracker logs circumference data:\n- Metrics: Chest, waist, hips, arms (cm)\n- Entry frequency: Every 2–4 weeks recommended\n- History: Trend lines per measurement\n- Located: Progress screen, Body Measurements cell\n- Use: Circumference data detects body composition change independent of scale weight — especially useful during recomposition`
                 ],
                 explain_account: (ctx) => [
-                    `My Account â€” access via user menu (top right). Functions: update display name, email, fitness profile parameters (height, weight, gender, age range, activity level, fitness goal), change password, delete account. Update fitness profile regularly for accurate analysis and recommendations.`
+                    `My Account — access via user menu (top right). Functions: update display name, email, fitness profile parameters (height, weight, gender, age range, activity level, fitness goal), change password, delete account. Update fitness profile regularly for accurate analysis and recommendations.`
                 ],
                 explain_optional_measurements: (ctx) => [
                     `Upload screen optional inputs: chest, waist, hips, arms (cm). Function: supplements photo-based landmark detection with direct circumference data. Protocol: soft tape measure, relaxed stance, tape perpendicular to body axis at widest point. Effect: measurably improves body composition estimation accuracy.`
                 ],
                 explain_export: (ctx) => [
-                    `Export options on Results screen:\n- Export Data: saves complete analysis metrics as a structured file\n- Share Card: generates formatted visual summary for sharing\nWorkout Player: Share Workout â€” creates post-session summary. All accessible via respective screen action buttons.`
+                    `Export options on Results screen:\n- Export Data: saves complete analysis metrics as a structured file\n- Share Card: generates formatted visual summary for sharing\nWorkout Player: Share Workout — creates post-session summary. All accessible via respective screen action buttons.`
                 ],
                 explain_comparison: (ctx) => [
-                    `Scan comparison: Progress screen â†’ Scan History â†’ select 2 scans â†’ Compare. Output: side-by-side differential analysis of body score, muscle tone, posture alignment, plus change percentages. Use: longitudinal progress assessment. Available whenever 2+ scans exist in history.`
+                    `Scan comparison: Progress screen → Scan History → select 2 scans → Compare. Output: side-by-side differential analysis of body score, muscle tone, posture alignment, plus change percentages. Use: longitudinal progress assessment. Available whenever 2+ scans exist in history.`
                 ],
                 explain_live_posture: (ctx) => [
-                    `Live Posture Check: Workout screen â†’ "Start Live Posture Check". Function: camera-based real-time kinematic analysis using MediaPipe Pose. Evaluates: shoulder alignment, spinal alignment, hip alignment. Output: continuous corrective cue overlays. Recommended use during exercise for form monitoring.`
+                    `Live Posture Check: Workout screen → "Start Live Posture Check". Function: camera-based real-time kinematic analysis using MediaPipe Pose. Evaluates: shoulder alignment, spinal alignment, hip alignment. Output: continuous corrective cue overlays. Recommended use during exercise for form monitoring.`
                 ],
                 explain_data_management: (ctx) => [
                     `Data Management panel: Upload screen (bottom). Displays: localStorage utilization metrics. Function: "Clear All Data" removes client-side session state, scan history, and log data. Scope: local storage only. Server-side account data unaffected. Use when resetting app state or freeing device storage.`
                 ],
                 explain_auth: (ctx) => [
-                    `Authentication flow:\n- Register: email + password + display name â†’ email verification â†’ login\n- Existing users: login with credentials\n- Password recovery: "Forgot Password" â†’ email reset link\nBenefits: server-side data persistence, cross-session synchronization, progress continuity.`
+                    `Authentication flow:\n- Register: email + password + display name → email verification → login\n- Existing users: login with credentials\n- Password recovery: "Forgot Password" → email reset link\nBenefits: server-side data persistence, cross-session synchronization, progress continuity.`
                 ],
                 _fallback: (ctx) => [
                     `Query not recognized. Available topics: body metrics, training programming, nutrition targets, analysis methodology, screen/feature explanations. Please restate your question.`,
@@ -8728,11 +8728,11 @@ Please try again with a different photo.`;
                         return [`Interesting question! I notice your profile indicates male. The menstrual cycle is a female-specific physiological process involving cyclical hormonal changes (estrogen, progesterone, FSH, LH) that affect training capacity, recovery, and exercise selection.\n\nAre you perhaps asking on behalf of someone else -- a training partner, client, or family member? If so, I'd be happy to explain the science of cycle-based training periodization, including:\n\n- Hormonal phases and their effects on strength/endurance\n- Evidence-based exercise recommendations per phase\n- The research behind "cycle syncing"\n\nJust confirm and I'll provide the full educational breakdown!`];
                     }
                     return [
-                        `Great question! The menstrual cycle significantly affects training physiology -- here's the science with specific exercise recommendations:\n\n**Phase 1: Menstrual (Days 1-5)**\nHormone state: Estrogen and progesterone at lowest levels\nPhysiology: Prostaglandins trigger uterine contractions, inflammation elevated\nTraining implications: Pain perception heightened, recovery capacity reduced\n\nRecommended exercises:\n- Restorative yoga (research shows it reduces cortisol by 23%)\n- Walking (increases blood flow, natural endorphin release)\n- Swimming (buoyancy reduces joint stress)\n- Gentle stretching (hip flexors, lower back)\n- Light resistance: goblet squats, band pull-aparts (50% normal load)\n\nAvoid: Heavy axial loading (squats/deadlifts), intense ab work, high-impact plyometrics\n\n**Phase 2: Follicular (Days 6-14)**\nHormone state: Estrogen rising, peaks at ovulation\nPhysiology: Increased pain tolerance, better insulin sensitivity, enhanced MPS (muscle protein synthesis)\nTraining implications: Your STRONGEST phase! Studies show 10-15% strength increase.\n\nRecommended exercises:\n- Barbell compounds: back squats, deadlifts, bench press, rows\n- Olympic lifts: cleans, snatches (if trained)\n- HIIT protocols: Tabata, AMRAP circuits\n- Plyometrics: box jumps, broad jumps, burpees\n- PR attempts and 1RM testing\n\n**Phase 3: Ovulatory (Days 14-16)**\nHormone state: Estrogen peak triggers LH surge\nPhysiology: Joint laxity increases (estrogen affects collagen cross-linking)\n\nRecommended exercises:\n- Continue high-intensity work with extended warm-up (15+ min)\n- Reduce plyometric volume by 20-30%\n- Focus on controlled movements vs. ballistic\n- Proprioceptive work: single-leg exercises, balance training\n\n**Phase 4: Luteal (Days 17-28)**\nHormone state: Progesterone dominant\nPhysiology: Elevated body temp (+0.3-0.5Â°C), RPE increases 5-10% at same intensity\n\nRecommended exercises:\n- Moderate strength: machines, cables (controlled ROM)\n- Steady-state cardio: cycling, elliptical, incline walking\n- Pilates and barre (core stability without strain)\n- Yoga flows (avoid hot yoga -- already elevated temp)\n- Bodyweight circuits at 60-70% effort\n\nThe science term for this approach is "menstrual cycle periodization" -- a growing field with studies from the British Journal of Sports Medicine showing improved performance outcomes when training aligns with hormonal phases!`
+                        `Great question! The menstrual cycle significantly affects training physiology -- here's the science with specific exercise recommendations:\n\n**Phase 1: Menstrual (Days 1-5)**\nHormone state: Estrogen and progesterone at lowest levels\nPhysiology: Prostaglandins trigger uterine contractions, inflammation elevated\nTraining implications: Pain perception heightened, recovery capacity reduced\n\nRecommended exercises:\n- Restorative yoga (research shows it reduces cortisol by 23%)\n- Walking (increases blood flow, natural endorphin release)\n- Swimming (buoyancy reduces joint stress)\n- Gentle stretching (hip flexors, lower back)\n- Light resistance: goblet squats, band pull-aparts (50% normal load)\n\nAvoid: Heavy axial loading (squats/deadlifts), intense ab work, high-impact plyometrics\n\n**Phase 2: Follicular (Days 6-14)**\nHormone state: Estrogen rising, peaks at ovulation\nPhysiology: Increased pain tolerance, better insulin sensitivity, enhanced MPS (muscle protein synthesis)\nTraining implications: Your STRONGEST phase! Studies show 10-15% strength increase.\n\nRecommended exercises:\n- Barbell compounds: back squats, deadlifts, bench press, rows\n- Olympic lifts: cleans, snatches (if trained)\n- HIIT protocols: Tabata, AMRAP circuits\n- Plyometrics: box jumps, broad jumps, burpees\n- PR attempts and 1RM testing\n\n**Phase 3: Ovulatory (Days 14-16)**\nHormone state: Estrogen peak triggers LH surge\nPhysiology: Joint laxity increases (estrogen affects collagen cross-linking)\n\nRecommended exercises:\n- Continue high-intensity work with extended warm-up (15+ min)\n- Reduce plyometric volume by 20-30%\n- Focus on controlled movements vs. ballistic\n- Proprioceptive work: single-leg exercises, balance training\n\n**Phase 4: Luteal (Days 17-28)**\nHormone state: Progesterone dominant\nPhysiology: Elevated body temp (+0.3-0.5°C), RPE increases 5-10% at same intensity\n\nRecommended exercises:\n- Moderate strength: machines, cables (controlled ROM)\n- Steady-state cardio: cycling, elliptical, incline walking\n- Pilates and barre (core stability without strain)\n- Yoga flows (avoid hot yoga -- already elevated temp)\n- Bodyweight circuits at 60-70% effort\n\nThe science term for this approach is "menstrual cycle periodization" -- a growing field with studies from the British Journal of Sports Medicine showing improved performance outcomes when training aligns with hormonal phases!`
                     ];
                 },
                 cycle_for_other: (ctx) => [
-                    `Great! Here's the science of menstrual cycle training periodization for your partner:\n\n**ðŸŒ‘ Menstrual Phase (Days 1-5)**\nHormones: Estrogen & progesterone at lowest\nPhysiology: Prostaglandins elevated, inflammation increased\nExercises: Restorative yoga, walking, swimming, light resistance (50% load)\nAvoid: Heavy squats/deadlifts, intense ab work, HIIT\n\n**ðŸŒ’ Follicular Phase (Days 6-14)**\nHormones: Estrogen rising to peak\nPhysiology: Pain tolerance up, insulin sensitivity improved, MPS enhanced\nExercises: Barbell compounds, HIIT, plyometrics, PR attempts\nThis is the STRONGEST phase -- studies show 10-15% strength increase!\n\n**ðŸŒ• Ovulatory Phase (Days 14-16)**\nHormones: Estrogen peak triggers LH surge\nPhysiology: Joint laxity increases\nExercises: Continue intensity with 15+ min warm-up, reduce plyometrics 20-30%\n\n**ðŸŒ˜ Luteal Phase (Days 17-28)**\nHormones: Progesterone dominant\nPhysiology: Body temp elevated, RPE increases 5-10%\nExercises: Machines, steady-state cardio, Pilates, yoga flows\n\nThis approach is called "menstrual cycle periodization" -- research from the British Journal of Sports Medicine shows improved performance when training aligns with hormonal phases!`
+                    `Great! Here's the science of menstrual cycle training periodization for your partner:\n\n**🌑 Menstrual Phase (Days 1-5)**\nHormones: Estrogen & progesterone at lowest\nPhysiology: Prostaglandins elevated, inflammation increased\nExercises: Restorative yoga, walking, swimming, light resistance (50% load)\nAvoid: Heavy squats/deadlifts, intense ab work, HIIT\n\n**🌒 Follicular Phase (Days 6-14)**\nHormones: Estrogen rising to peak\nPhysiology: Pain tolerance up, insulin sensitivity improved, MPS enhanced\nExercises: Barbell compounds, HIIT, plyometrics, PR attempts\nThis is the STRONGEST phase -- studies show 10-15% strength increase!\n\n**🌕 Ovulatory Phase (Days 14-16)**\nHormones: Estrogen peak triggers LH surge\nPhysiology: Joint laxity increases\nExercises: Continue intensity with 15+ min warm-up, reduce plyometrics 20-30%\n\n**🌘 Luteal Phase (Days 17-28)**\nHormones: Progesterone dominant\nPhysiology: Body temp elevated, RPE increases 5-10%\nExercises: Machines, steady-state cardio, Pilates, yoga flows\n\nThis approach is called "menstrual cycle periodization" -- research from the British Journal of Sports Medicine shows improved performance when training aligns with hormonal phases!`
                 ],
                 workout_frequency: (ctx) => [
                     `Training frequency science: each muscle group needs stimulation every 48-72 hours for optimal growth. Research shows training a muscle 2x/week produces ~60% more growth than 1x/week at equal volume. For ${GOAL_LABELS[ctx.goal] || 'your goal'}, 3-5 sessions/week is evidence-based.`,
@@ -8750,7 +8750,7 @@ Please try again with a different photo.`;
                     `Protein deep dive: proteins are chains of amino acids. Of the 20 amino acids, 9 are "essential" (your body can't make them). Animal proteins are "complete" (all 9), while most plant proteins need combining. Leucine is the key trigger for muscle protein synthesis -- found abundantly in whey, eggs, and chicken.`,
                 ],
                 calories: (ctx) => [
-                    `Calorie science: a "calorie" is the energy needed to heat 1kg of water by 1Â°C. Your body burns calories three ways:\n- BMR (60-70%): just existing\n- TEF (10%): digesting food\n- Activity (20-30%): movement\n\nProtein has the highest TEF at 20-30%, meaning you "lose" some calories just processing it!`,
+                    `Calorie science: a "calorie" is the energy needed to heat 1kg of water by 1°C. Your body burns calories three ways:\n- BMR (60-70%): just existing\n- TEF (10%): digesting food\n- Activity (20-30%): movement\n\nProtein has the highest TEF at 20-30%, meaning you "lose" some calories just processing it!`,
                 ],
                 macros: (ctx) => [
                     `Macro science:\n- Protein: amino acids for muscle repair, immune function, enzymes\n- Carbs: glucose for brain and muscles, stored as glycogen\n- Fats: essential for hormones (testosterone, estrogen), vitamin absorption, brain function\n\nNo macro is "bad" -- each serves critical biological functions!`,
@@ -8779,14 +8779,14 @@ Please try again with a different photo.`;
                     `The Workout screen applies exercise programming principles from the National Strength and Conditioning Association (NSCA). It uses your body data to determine appropriate training variables: exercise selection, rep ranges, set counts, and rest periods. The built-in workout player applies the concept of "timed work-rest intervals" -- a key factor in training effectiveness that most people underestimate!`,
                 ],
                 explain_nutrition_screen: (ctx) => [
-                    `The Nutrition screen applies nutritional science at every level! The Metabolic Rate card uses the Mifflin-St Jeor equation (validated in 2005 as the most accurate BMR formula) to compute BMR â†’ TDEE â†’ your personalized calorie target. The Calorie Balance card applies energy balance thermodynamics (MET-based exercise calorie estimation). The Hydration History heatmap draws on research showing visual behavior tracking improves adherence by 40-60%. All macros follow ISSN position stands. Science, made actionable!`,
+                    `The Nutrition screen applies nutritional science at every level! The Metabolic Rate card uses the Mifflin-St Jeor equation (validated in 2005 as the most accurate BMR formula) to compute BMR → TDEE → your personalized calorie target. The Calorie Balance card applies energy balance thermodynamics (MET-based exercise calorie estimation). The Hydration History heatmap draws on research showing visual behavior tracking improves adherence by 40-60%. All macros follow ISSN position stands. Science, made actionable!`,
                     `The Nutrition screen is grounded in sport nutrition science. BMR (Basal Metabolic Rate) is calculated via Mifflin-St Jeor -- the gold standard formula. TDEE applies validated activity multipliers (PAL coefficients from Ainsworth's Compendium of Physical Activities). The 14-day hydration heatmap applies "temporal self-appraisal" theory -- seeing your historical patterns is more motivating than abstract goals. And the Calorie Balance card uses MET values to estimate exercise energy expenditure. Fun fact: the protein recommendation of ~1g/lb is supported by over 50 controlled studies!`
                 ],
                 explain_progress_screen: (ctx) => [
                     `The Progress screen is a masterclass in behavioral science! It applies:\n- Streaks + Habits Tracker: implementation intentions + loss aversion (Kahneman & Tversky, 1979)\n- Daily Habits Score Ring: the "progress principle" (Amabile & Kramer, 2011) -- visual progress drives positive emotions\n- Weekly Report Card: temporal landmarks (Hershfield, 2014) -- weekly reflection improves adherence\n- Sleep & Recovery Tracker: evidence that sleep is the primary anabolic stimulus (Webb, 1998)\n- Smart Insights: pattern recognition across longitudinal health data -- multi-variable analysis improves outcome prediction\n- Progress Charts: visual feedback shown to improve adherence by up to 78% (sports science research)\n- Gamification (badges/XP): variable ratio reinforcement (Skinner) -- the most engaging reward schedule in psychology`,
                 ],
                 explain_wearable_screen: (ctx) => [
-                    `The Activity Hub applies several key concepts from exercise science and human-computer interaction:\n\n**Step Counting**: Uses the DeviceMotion API to detect acceleration patterns. Walking produces a distinctive ~2Hz oscillation in the vertical axis. Distance is estimated via steps Ã— 0.76m (average stride length from kinanthropometry research).\n\n**NEAT (Non-Exercise Activity Thermogenesis)**: The 10,000-step target emerged from research associating daily step volume with reduced cardiovascular risk (Paluch et al., 2022 -- each +1,000 steps/day associates with ~15% lower mortality up to ~12,000 steps).\n\n**Heart Rate via PPG**: Photoplethysmography -- the camera detects subtle color changes in skin as blood pulses through capillaries. Oxyhemoglobin absorbs green light, so the green channel fluctuation maps to heart rate. The same principle powers clinical pulse oximeters!\n\n**Background Tracking**: The Page Visibility API detects app backgrounding; Wake Lock API prevents screen dimming during active sessions.\n\nCurrent data: ${ctx.todaySteps > 0 ? `${ctx.todaySteps.toLocaleString()} steps today (â‰ˆ${(ctx.todaySteps * 0.04).toFixed(0)} kcal, â‰ˆ${(ctx.todaySteps * 0.00076).toFixed(2)} km).` : 'No steps logged today yet.'}`
+                    `The Activity Hub applies several key concepts from exercise science and human-computer interaction:\n\n**Step Counting**: Uses the DeviceMotion API to detect acceleration patterns. Walking produces a distinctive ~2Hz oscillation in the vertical axis. Distance is estimated via steps × 0.76m (average stride length from kinanthropometry research).\n\n**NEAT (Non-Exercise Activity Thermogenesis)**: The 10,000-step target emerged from research associating daily step volume with reduced cardiovascular risk (Paluch et al., 2022 -- each +1,000 steps/day associates with ~15% lower mortality up to ~12,000 steps).\n\n**Heart Rate via PPG**: Photoplethysmography -- the camera detects subtle color changes in skin as blood pulses through capillaries. Oxyhemoglobin absorbs green light, so the green channel fluctuation maps to heart rate. The same principle powers clinical pulse oximeters!\n\n**Background Tracking**: The Page Visibility API detects app backgrounding; Wake Lock API prevents screen dimming during active sessions.\n\nCurrent data: ${ctx.todaySteps > 0 ? `${ctx.todaySteps.toLocaleString()} steps today (≈${(ctx.todaySteps * 0.04).toFixed(0)} kcal, ≈${(ctx.todaySteps * 0.00076).toFixed(2)} km).` : 'No steps logged today yet.'}`
                 ],
                 explain_scan_history: (ctx) => [
                     `Scan History implements a critical concept from sports science: longitudinal progress tracking! Research shows that visual progress feedback significantly increases motivation and adherence (up to 78% better retention in studies).\n\nTechnically, it uses IndexedDB -- a browser-based NoSQL database that can store large binary data (photos) that would exceed localStorage limits (~5MB). Each snapshot preserves the full analysis state, enabling true before/after comparison.\n\nThe comparison view applies the "delta highlighting" principle from data visualization -- showing not just values but the direction and magnitude of change, which our brains process more intuitively than raw numbers!`,
@@ -8865,11 +8865,11 @@ Please try again with a different photo.`;
                     `The Coach Persona system applies principles from educational psychology -- specifically, "differentiated instruction" (Tomlinson, 2001). Research shows that learners respond differently to communication styles:\n\n- Encouraging: uses positive reinforcement (Skinner) -- effective for motivation and adherence\n- Structured: appeals to systematic/analytical learners who prefer organized data\n- Educational: targets "need for cognition" (Cacioppo & Petty, 1982) -- people who enjoy understanding the "why"\n- Humorous: leverages humor's effect on information retention (Schmidt, 1994 -- humor increases recall by 20%)\n\nCurrently active: ${state.coachPersona || 'encouraging'}. Same evidence-based content, different pedagogical approach. Switch anytime -- no information is lost!`,
                 ],
                 explain_bmr_tdee: (ctx) => [
-                    `The Metabolic Rate card applies the Mifflin-St Jeor equation (validated in 2005 as the most accurate BMR formula for non-obese adults, beating Harris-Benedict by ~5% mean error).\n\nBMR = 10Ã—weight(kg) + 6.25Ã—height(cm) âˆ’ 5Ã—age + gender constant\n(+5 males, âˆ’161 females)\n\nMultiply by your PAL (Physical Activity Level) coefficient to get TDEE -- Total Daily Energy Expenditure. These multipliers (1.2â€“1.9) are derived from doubly-labeled water studies, the gold standard for free-living energy expenditure measurement. The card shows your formula with real numbers, making the "black box" of calorie science transparent!`,
+                    `The Metabolic Rate card applies the Mifflin-St Jeor equation (validated in 2005 as the most accurate BMR formula for non-obese adults, beating Harris-Benedict by ~5% mean error).\n\nBMR = 10×weight(kg) + 6.25×height(cm) − 5×age + gender constant\n(+5 males, −161 females)\n\nMultiply by your PAL (Physical Activity Level) coefficient to get TDEE -- Total Daily Energy Expenditure. These multipliers (1.2–1.9) are derived from doubly-labeled water studies, the gold standard for free-living energy expenditure measurement. The card shows your formula with real numbers, making the "black box" of calorie science transparent!`,
                     `BMR represents your resting energy expenditure -- the calories required for homeostasis at complete rest. It accounts for 60-75% of total daily calorie needs. The Mifflin-St Jeor formula accounts for weight (metabolically active tissue), height (body surface area proxy), age (each decade reduces BMR by 2-3% due to muscle loss), and sex (testosterone-driven muscle mass differences). Multiplied by your activity factor and adjusted for your goal, it gives your optimal daily calorie target. The Nutrition screen now shows every step of this calculation!`
                 ],
                 explain_daily_habits: (ctx) => [
-                    `The Daily Habits Tracker applies "implementation intentions" theory (Gollwitzer, 1999) -- research shows that specifying WHEN and HOW you'll perform health behaviors increases follow-through by 200-300% vs. vague goals alone.\n\nThe 5 habits (Workout, Hydration, Sleep, Nutrition, Check-In) represent the key pillars of the "Health Behavior Process Model." Each auto-detected habit removes the friction of manual logging -- a principle from "behavioral economics of health" (Thaler & Sunstein's Nudge Theory, 2008).\n\nThe streak counter applies "habit loop" theory (Duhigg, 2012): cue (app opens) â†’ routine (check habits) â†’ reward (ring fills). The visual score ring leverages the "goal gradient effect" -- effort increases as you approach completion!`,
+                    `The Daily Habits Tracker applies "implementation intentions" theory (Gollwitzer, 1999) -- research shows that specifying WHEN and HOW you'll perform health behaviors increases follow-through by 200-300% vs. vague goals alone.\n\nThe 5 habits (Workout, Hydration, Sleep, Nutrition, Check-In) represent the key pillars of the "Health Behavior Process Model." Each auto-detected habit removes the friction of manual logging -- a principle from "behavioral economics of health" (Thaler & Sunstein's Nudge Theory, 2008).\n\nThe streak counter applies "habit loop" theory (Duhigg, 2012): cue (app opens) → routine (check habits) → reward (ring fills). The visual score ring leverages the "goal gradient effect" -- effort increases as you approach completion!`,
                 ],
                 explain_sleep_tracker: (ctx) => [
                     `Sleep science is categorical: it is THE most underrated recovery modality in fitness. During NREM Stage 3-4 (slow-wave sleep), growth hormone secretion peaks -- this is when muscle protein synthesis primarily occurs, not during training (Webb & Doman, 1998).\n\nThe Recovery Score synthesizes three evidence-based factors:\n- Sleep hours (50% weight): NSF recommends 7-9h for adults\n- Sleep quality (30% weight): subjective quality correlates with slow-wave sleep depth and sleep efficiency\n- Workout balance (20% weight): the Overtraining Syndrome risk equation\n\nResearch consistently shows sleep restriction (<6h) reduces anabolic hormone output by 60-70% (Leproult & Van Cauter, 2011). The tracker makes this invisible recovery metric visible and actionable!`,
@@ -8878,10 +8878,10 @@ Please try again with a different photo.`;
                     `The Weekly Report Card applies "temporal landmarks" theory from behavioral economics (Hershfield et al., 2014). Research shows that weekly summaries are the optimal temporal unit for behavior reflection -- shorter windows (daily) generate noise, longer windows (monthly) reduce actionability.\n\nThe grading algorithm is a composite metric -- similar to how exercise science research uses multi-variable adherence scoring. It weights workout consistency, sleep quality, and recovery together because research shows composite scores predict long-term health outcomes better than any single metric.\n\nThe "fresh start effect" (Dai et al., 2014) is also applied -- natural week boundaries create psychological permission to improve after a suboptimal week. A poor week doesn't need to predict future weeks!`,
                 ],
                 explain_smart_insights: (ctx) => [
-                    `Smart Insights applies a technique from data science called "exploratory data analysis" (EDA) -- specifically, automated pattern recognition across longitudinal health data.\n\nRather than reporting raw numbers, it analyzes RELATIONSHIPS across logged data. For example, the sleep-workout correlation engine compares sleep hours on training days vs. rest days (a â‰¥0.3h difference is statistically meaningful in population studies). The calorie adherence engine applies a Â±8% threshold -- research on dietary compliance shows this is the meaningful deviation range.\n\nThis mirrors clinical exercise physiology research methodology, where multi-source biomarker combinations predict outcomes far better than individual metrics. The "wisdom of crowds" principle applied to your own longitudinal data!`,
+                    `Smart Insights applies a technique from data science called "exploratory data analysis" (EDA) -- specifically, automated pattern recognition across longitudinal health data.\n\nRather than reporting raw numbers, it analyzes RELATIONSHIPS across logged data. For example, the sleep-workout correlation engine compares sleep hours on training days vs. rest days (a ≥0.3h difference is statistically meaningful in population studies). The calorie adherence engine applies a ±8% threshold -- research on dietary compliance shows this is the meaningful deviation range.\n\nThis mirrors clinical exercise physiology research methodology, where multi-source biomarker combinations predict outcomes far better than individual metrics. The "wisdom of crowds" principle applied to your own longitudinal data!`,
                 ],
                 explain_calorie_balance: (ctx) => [
-                    `The Calorie Balance card applies the First Law of Thermodynamics to human metabolism! Energy can neither be created nor destroyed -- only converted. This is the fundamental principle of body composition change:\n\nNet balance = Calories Eaten âˆ’ Calories Burned\n\nWorkout calories use MET (Metabolic Equivalent of Task) values from Ainsworth's Compendium of Physical Activities (2011) -- the most comprehensive database of exercise energy costs. METs express intensity as multiples of resting metabolic rate (1 MET = 3.5mL Oâ‚‚/kg/min at rest).\n\nResearch shows that even a 300-500 kcal daily deficit (without excessive restriction) produces optimal fat loss rates while preserving lean mass. Tracking both sides of the equation is what separates effective programs from guesswork!`,
+                    `The Calorie Balance card applies the First Law of Thermodynamics to human metabolism! Energy can neither be created nor destroyed -- only converted. This is the fundamental principle of body composition change:\n\nNet balance = Calories Eaten − Calories Burned\n\nWorkout calories use MET (Metabolic Equivalent of Task) values from Ainsworth's Compendium of Physical Activities (2011) -- the most comprehensive database of exercise energy costs. METs express intensity as multiples of resting metabolic rate (1 MET = 3.5mL Oâ‚‚/kg/min at rest).\n\nResearch shows that even a 300-500 kcal daily deficit (without excessive restriction) produces optimal fat loss rates while preserving lean mass. Tracking both sides of the equation is what separates effective programs from guesswork!`,
                 ],
                 explain_hydration_history: (ctx) => [
                     `The Hydration History heatmap applies two key scientific principles!\n\n1. Water balance physiology: water comprises 60% of body mass and participates in every metabolic process -- including muscle protein synthesis, fat oxidation (lipolysis requires adequate hydration), and thermoregulation. Even 1-2% dehydration reduces strength output by 5-8% and cognitive function by 15-20% (Grandjean & Grandjean, 2007).\n\n2. "Behavior visualization" (Wood et al., 2005): seeing your historical patterns spatially creates stronger memory traces than numerical tracking alone. The heatmap provides "ambient feedback" -- passive awareness that shapes behavior without requiring active attention.\n\nThe 8-glass (~2L) target is a simplified guideline; actual needs scale with body mass (roughly 35ml/kg) and activity level (add 500ml per 30min of exercise)!`,
@@ -8890,73 +8890,73 @@ Please try again with a different photo.`;
                     `The Progress Charts section applies longitudinal data visualization principles from exercise science! Research consistently shows visual feedback of health metrics improves adherence and goal attainment by 40-78% compared to text-based reporting.\n\nThe 7 chart tabs cover distinct health dimensions aligned with the "integrated wellness" model:\n- Body metrics (Score, BMI, Muscle): kinanthropometric data from scans\n- Weight: body mass tracking\n- Sleep: recovery quantification\n- Activity: training load monitoring (key for periodization planning)\n- Calories: energy balance history\n\nThe Calories tab uses a "reference line" approach -- Tufte's data visualization principles show that contextualizing data relative to a goal benchmark improves decision-making compared to absolute values alone. Chart.js renders these as clean, interactive visualizations!`,
                 ],
                 explain_challenges: (ctx) => [
-                    `Behavioral psychology research shows that short-term, specific goals significantly outperform vague long-term intentions â€” this is "goal-setting theory" (Locke & Latham, 1990). Weekly Challenges leverage this: they're time-bound (7 days), specific, and rewarded (XP). This structure triggers the brain's dopamine reward pathway on completion, reinforcing the behavior. The rotating format prevents habituation â€” you're always working toward something new. Find them on the Progress screen!`,
-                    `Weekly Challenges apply the principle of "implementation intentions" â€” pre-committed, specific action plans shown in multiple studies to increase goal completion by 20-30%. Each challenge acts as a behavioral contract: concrete, deadline-bound, and rewarded. Completing them conditions the habit loop (cue â†’ routine â†’ reward), making healthy behaviors increasingly automatic over time.`
+                    `Behavioral psychology research shows that short-term, specific goals significantly outperform vague long-term intentions — this is "goal-setting theory" (Locke & Latham, 1990). Weekly Challenges leverage this: they're time-bound (7 days), specific, and rewarded (XP). This structure triggers the brain's dopamine reward pathway on completion, reinforcing the behavior. The rotating format prevents habituation — you're always working toward something new. Find them on the Progress screen!`,
+                    `Weekly Challenges apply the principle of "implementation intentions" — pre-committed, specific action plans shown in multiple studies to increase goal completion by 20-30%. Each challenge acts as a behavioral contract: concrete, deadline-bound, and rewarded. Completing them conditions the habit loop (cue → routine → reward), making healthy behaviors increasingly automatic over time.`
                 ],
                 explain_levels_xp: (ctx) => [
-                    `Gamification in health apps leverages Self-Determination Theory (Deci & Ryan) â€” specifically the need for competence (leveling up = measurable mastery). XP systems create operant conditioning loops where consistent behavior produces measurable reward. Research shows visible progress metrics increase behavioral adherence by up to 40% vs. non-gamified apps. Each XP point represents a completed health behavior, making your level a genuine proxy for lifestyle consistency.`,
-                    `The XP and leveling system is rooted in variable ratio reinforcement â€” the most powerful conditioning schedule in behavioral psychology. By earning XP for diverse behaviors (workouts, food logging, habits, challenges), the system creates compound motivation: any positive health action feels rewarding. Studies on gamified health interventions show sustained engagement increases significantly when progress is made visible and cumulative.`
+                    `Gamification in health apps leverages Self-Determination Theory (Deci & Ryan) — specifically the need for competence (leveling up = measurable mastery). XP systems create operant conditioning loops where consistent behavior produces measurable reward. Research shows visible progress metrics increase behavioral adherence by up to 40% vs. non-gamified apps. Each XP point represents a completed health behavior, making your level a genuine proxy for lifestyle consistency.`,
+                    `The XP and leveling system is rooted in variable ratio reinforcement — the most powerful conditioning schedule in behavioral psychology. By earning XP for diverse behaviors (workouts, food logging, habits, challenges), the system creates compound motivation: any positive health action feels rewarding. Studies on gamified health interventions show sustained engagement increases significantly when progress is made visible and cumulative.`
                 ],
                 explain_weight_log: (ctx) => [
-                    `Daily weight logging is one of the most evidence-backed self-monitoring behaviors in weight management research. A Cornell University study found that daily weighers lost 3Ã— more weight than weekly weighers. Critical caveat: body weight fluctuates 1â€“3 kg daily due to water retention, glycogen storage, and digestive contents â€” this is physiological noise, not fat change. The app's sparkline trend filters this noise, revealing the true underlying trajectory. Log consistently for accurate trend data.`,
-                    `Self-monitoring theory (Carver & Scheier) explains why weight logging works: it creates a feedback loop between behavior and outcome, enabling real-time course correction. Research shows that the act of logging alone â€” independent of the content â€” increases awareness of intake and activity patterns. The app's trend calculation uses linear regression principles: 3+ entries over 14+ days produces a statistically meaningful rate-of-change estimate.`
+                    `Daily weight logging is one of the most evidence-backed self-monitoring behaviors in weight management research. A Cornell University study found that daily weighers lost 3× more weight than weekly weighers. Critical caveat: body weight fluctuates 1–3 kg daily due to water retention, glycogen storage, and digestive contents — this is physiological noise, not fat change. The app's sparkline trend filters this noise, revealing the true underlying trajectory. Log consistently for accurate trend data.`,
+                    `Self-monitoring theory (Carver & Scheier) explains why weight logging works: it creates a feedback loop between behavior and outcome, enabling real-time course correction. Research shows that the act of logging alone — independent of the content — increases awareness of intake and activity patterns. The app's trend calculation uses linear regression principles: 3+ entries over 14+ days produces a statistically meaningful rate-of-change estimate.`
                 ],
                 explain_goal_weight: (ctx) => [
-                    `The Goal Weight feature applies the SMART goal framework (Specific, Measurable, Achievable, Relevant, Time-bound). The estimated weeks calculation prioritizes your actual logged trend (most accurate), then calorie balance data, then a conservative 0.5 kg/week default. Research from the American Journal of Clinical Nutrition identifies 0.5â€“1.0% body weight/week as the optimal fat loss rate to preserve lean mass. The progress bar provides continuous feedback â€” a key factor in goal adherence psychology.`,
-                    `Goal visualization research demonstrates that progress bars and quantified milestones significantly improve motivation compared to text-only goals. The Zeigarnik effect suggests incomplete goals remain "cognitively active" â€” meaning seeing 68% progress on your goal bar creates a genuine psychological pull toward completion. The app's dynamic pace calculation (using real weight trend data) ensures the timeline estimate reflects actual physiology, not arbitrary assumptions.`
+                    `The Goal Weight feature applies the SMART goal framework (Specific, Measurable, Achievable, Relevant, Time-bound). The estimated weeks calculation prioritizes your actual logged trend (most accurate), then calorie balance data, then a conservative 0.5 kg/week default. Research from the American Journal of Clinical Nutrition identifies 0.5–1.0% body weight/week as the optimal fat loss rate to preserve lean mass. The progress bar provides continuous feedback — a key factor in goal adherence psychology.`,
+                    `Goal visualization research demonstrates that progress bars and quantified milestones significantly improve motivation compared to text-only goals. The Zeigarnik effect suggests incomplete goals remain "cognitively active" — meaning seeing 68% progress on your goal bar creates a genuine psychological pull toward completion. The app's dynamic pace calculation (using real weight trend data) ensures the timeline estimate reflects actual physiology, not arbitrary assumptions.`
                 ],
                 explain_food_log: (ctx) => [
-                    `Dietary self-monitoring is the #1 predictor of successful weight management across multiple meta-analyses. A 2019 study in Obesity found that people logging food 100+ days/year lost significantly more weight than non-loggers. The mechanism: logging prevents "calorie amnesia" â€” research shows most people underestimate intake by 30â€“50%. The app's preset system reduces logging friction, a key barrier identified in HCI research on health app adherence.`,
-                    `The food log activates "prospective memory" and "inhibitory control" â€” two cognitive mechanisms that reduce impulsive eating when users know they'll need to log food. Studies on dietary self-monitoring show awareness alone reduces overconsumption by 10â€“15%. Macro logging (protein/carbs/fats) adds another layer: understanding macronutrient composition helps users make informed trade-offs rather than simply counting calories.`
+                    `Dietary self-monitoring is the #1 predictor of successful weight management across multiple meta-analyses. A 2019 study in Obesity found that people logging food 100+ days/year lost significantly more weight than non-loggers. The mechanism: logging prevents "calorie amnesia" — research shows most people underestimate intake by 30–50%. The app's preset system reduces logging friction, a key barrier identified in HCI research on health app adherence.`,
+                    `The food log activates "prospective memory" and "inhibitory control" — two cognitive mechanisms that reduce impulsive eating when users know they'll need to log food. Studies on dietary self-monitoring show awareness alone reduces overconsumption by 10–15%. Macro logging (protein/carbs/fats) adds another layer: understanding macronutrient composition helps users make informed trade-offs rather than simply counting calories.`
                 ],
                 explain_workout_splits: (ctx) => [
-                    `Training split selection should optimize both volume and frequency per muscle group. Research (Schoenfeld, 2010) identifies 10â€“20 weekly sets per muscle for hypertrophy, with each set needing 48â€“72 hours of recovery. Full Body splits deliver ~9 sets/muscle (3Ã—3), while PPL allows up to 18 sets (6Ã—3). Meta-analyses show that hitting each muscle group 2Ã—/week produces greater hypertrophy than 1Ã—/week at equal volume. The app's split recommendation weighs your frequency capacity against your analysis-identified weak areas.`,
-                    `The science of periodization shows that training split selection impacts both acute recovery and long-term adaptation. Mechanistically, muscle protein synthesis (MPS) peaks 24â€“48 hours post-training and returns to baseline by 72 hours â€” making frequency (hitting muscles before MPS returns to baseline) the critical variable for muscle growth. Upper/Lower and Full Body splits achieve this 2Ã— frequency most efficiently. PPL requires 6 days/week to maintain equivalent frequency.`
+                    `Training split selection should optimize both volume and frequency per muscle group. Research (Schoenfeld, 2010) identifies 10–20 weekly sets per muscle for hypertrophy, with each set needing 48–72 hours of recovery. Full Body splits deliver ~9 sets/muscle (3×3), while PPL allows up to 18 sets (6×3). Meta-analyses show that hitting each muscle group 2×/week produces greater hypertrophy than 1×/week at equal volume. The app's split recommendation weighs your frequency capacity against your analysis-identified weak areas.`,
+                    `The science of periodization shows that training split selection impacts both acute recovery and long-term adaptation. Mechanistically, muscle protein synthesis (MPS) peaks 24–48 hours post-training and returns to baseline by 72 hours — making frequency (hitting muscles before MPS returns to baseline) the critical variable for muscle growth. Upper/Lower and Full Body splits achieve this 2× frequency most efficiently. PPL requires 6 days/week to maintain equivalent frequency.`
                 ],
                 explain_body_recomp: (ctx) => [
-                    `Body recomposition occurs through concurrent activation of fat oxidation and muscle protein synthesis â€” historically thought impossible simultaneously, but now well-documented. It requires: adequate leucine intake (â‰¥2.5g/meal) to trigger mTOR pathway for MPS, a mild calorie deficit (100â€“300 kcal below maintenance) to drive fat oxidation, and sufficient sleep for GH release supporting tissue repair. Most effective in beginners (elevated MPS baseline), detrained athletes (muscle memory), and individuals with elevated body fat (metabolic flexibility).`,
-                    `The biochemistry of recomposition: in a slight calorie deficit with high protein, adipose tissue provides the energy shortfall via lipolysis (fat breakdown), while dietary amino acids fuel muscle protein synthesis. This partitioning is optimized by insulin sensitivity â€” resistance training acutely improves skeletal muscle glucose uptake and amino acid transport, creating a 24-48 hour anabolic window that muscle protein synthesis can leverage even in a deficit. Track with body score over time in Scan History.`
+                    `Body recomposition occurs through concurrent activation of fat oxidation and muscle protein synthesis — historically thought impossible simultaneously, but now well-documented. It requires: adequate leucine intake (≥2.5g/meal) to trigger mTOR pathway for MPS, a mild calorie deficit (100–300 kcal below maintenance) to drive fat oxidation, and sufficient sleep for GH release supporting tissue repair. Most effective in beginners (elevated MPS baseline), detrained athletes (muscle memory), and individuals with elevated body fat (metabolic flexibility).`,
+                    `The biochemistry of recomposition: in a slight calorie deficit with high protein, adipose tissue provides the energy shortfall via lipolysis (fat breakdown), while dietary amino acids fuel muscle protein synthesis. This partitioning is optimized by insulin sensitivity — resistance training acutely improves skeletal muscle glucose uptake and amino acid transport, creating a 24-48 hour anabolic window that muscle protein synthesis can leverage even in a deficit. Track with body score over time in Scan History.`
                 ],
                 explain_workout_history: (ctx) => [
-                    `Workout History provides longitudinal training session data â€” exercises performed, sets, reps, and load per session. Review for progressive overload verification, training frequency analysis, and volume tracking. Located in the Progress screen Workout History cell.`
+                    `Workout History provides longitudinal training session data — exercises performed, sets, reps, and load per session. Review for progressive overload verification, training frequency analysis, and volume tracking. Located in the Progress screen Workout History cell.`
                 ],
                 explain_personal_records: (ctx) => [
                     `Personal Records quantify peak neuromuscular output per exercise. Each PR update represents measurable strength adaptation. Progressive PR improvement is the primary objective indicator of training efficacy. Monitor in the Progress screen Personal Records cell.`
                 ],
                 explain_body_measurements: (ctx) => [
-                    `Anthropometric circumference tracking (chest, waist, hips, arms) provides body composition change data independent of scale weight. Waist reduction + arm circumference increase while weight remains stable is classic recomposition evidence. Log every 2â€“4 weeks in the Progress screen Body Measurements cell.`
+                    `Anthropometric circumference tracking (chest, waist, hips, arms) provides body composition change data independent of scale weight. Waist reduction + arm circumference increase while weight remains stable is classic recomposition evidence. Log every 2–4 weeks in the Progress screen Body Measurements cell.`
                 ],
                 explain_maintenance: (ctx) => [
-                    `Physiological maintenance requires matching energy intake to Total Daily Energy Expenditure (TDEE) within Â±200 kcal/day. Skeletal muscle is metabolically expensive (~13 kcal/kg/day) and requires continued mechanical stimulus (resistance training) to avoid sarcopenic drift â€” the gradual loss of muscle with age and disuse. The Mifflin-St Jeor equation (used in this app's BMR calculator) has Â±10% accuracy; recalculate every 5 kg of body weight change to maintain precision.`,
-                    `Maintenance is not a passive state â€” it requires active behavioral regulation. Research shows weight regain after loss is common (up to 50% within 1 year) without structured maintenance behaviors. The Daily Habits ring, Weekly Report Card, and Calorie Balance card are specifically designed to detect maintenance drift early (before it compounds). Sustained muscle mass during maintenance requires minimum ~1.6g protein/kg/day â€” without it, muscle catabolism begins within weeks even with adequate total calories.`
+                    `Physiological maintenance requires matching energy intake to Total Daily Energy Expenditure (TDEE) within ±200 kcal/day. Skeletal muscle is metabolically expensive (~13 kcal/kg/day) and requires continued mechanical stimulus (resistance training) to avoid sarcopenic drift — the gradual loss of muscle with age and disuse. The Mifflin-St Jeor equation (used in this app's BMR calculator) has ±10% accuracy; recalculate every 5 kg of body weight change to maintain precision.`,
+                    `Maintenance is not a passive state — it requires active behavioral regulation. Research shows weight regain after loss is common (up to 50% within 1 year) without structured maintenance behaviors. The Daily Habits ring, Weekly Report Card, and Calorie Balance card are specifically designed to detect maintenance drift early (before it compounds). Sustained muscle mass during maintenance requires minimum ~1.6g protein/kg/day — without it, muscle catabolism begins within weeks even with adequate total calories.`
                 ],
                 explain_account: (ctx) => [
-                    `The My Account section is your personal command center! Access it from the user menu (tap your name/avatar in the top right). You can update your display name, email, and fitness profile details â€” height, weight, gender, age range, activity level, and fitness goal. The more accurate your fitness profile, the more precisely the AI calibrates your workout and nutrition recommendations!`,
-                    `Your account settings live in the user menu â†’ My Account. This is where you can edit your identity details (name, email) and your full fitness profile. Keeping these accurate matters because the AI uses your biometric data to personalize everything from calorie targets to workout recommendations!`
+                    `The My Account section is your personal command center! Access it from the user menu (tap your name/avatar in the top right). You can update your display name, email, and fitness profile details — height, weight, gender, age range, activity level, and fitness goal. The more accurate your fitness profile, the more precisely the AI calibrates your workout and nutrition recommendations!`,
+                    `Your account settings live in the user menu → My Account. This is where you can edit your identity details (name, email) and your full fitness profile. Keeping these accurate matters because the AI uses your biometric data to personalize everything from calorie targets to workout recommendations!`
                 ],
                 explain_optional_measurements: (ctx) => [
                     `The optional measurements on the upload screen are scientifically valuable! The AI primarily uses MediaPipe Pose landmarks from your photo, but actual circumference measurements (chest, waist, hips, arms in cm) provide real-world body proportion data that photos can't perfectly capture. Use a soft tape measure, stand relaxed, measure at the widest point for each area. This hybrid approach significantly improves estimation accuracy!`,
-                    `Those optional measurement fields are genuinely worth filling in! Photo analysis estimates body proportions from camera geometry, but actual tape measurements are direct data. When the AI has both inputs, it cross-validates the photo estimates and refines results â€” the difference between an educated guess and a data-informed analysis!`
+                    `Those optional measurement fields are genuinely worth filling in! Photo analysis estimates body proportions from camera geometry, but actual tape measurements are direct data. When the AI has both inputs, it cross-validates the photo estimates and refines results — the difference between an educated guess and a data-informed analysis!`
                 ],
                 explain_export: (ctx) => [
-                    `Export and sharing features help you document and celebrate your journey! "Export Data" on the Results screen saves your complete analysis as a structured file â€” great for personal records. "Share Card" generates a visual summary formatted for social sharing. Research consistently shows that sharing fitness milestones increases long-term adherence to training goals!`,
-                    `You have several ways to capture and share your progress! The Results screen offers Export Data (saves your full metrics) and Share Card (creates a shareable image). After a workout session, "Share Workout" creates a completion summary. Sharing publicly has been shown to increase workout consistency â€” accountability is a powerful motivational tool!`
+                    `Export and sharing features help you document and celebrate your journey! "Export Data" on the Results screen saves your complete analysis as a structured file — great for personal records. "Share Card" generates a visual summary formatted for social sharing. Research consistently shows that sharing fitness milestones increases long-term adherence to training goals!`,
+                    `You have several ways to capture and share your progress! The Results screen offers Export Data (saves your full metrics) and Share Card (creates a shareable image). After a workout session, "Share Workout" creates a completion summary. Sharing publicly has been shown to increase workout consistency — accountability is a powerful motivational tool!`
                 ],
                 explain_comparison: (ctx) => [
-                    `The scan comparison feature is designed for longitudinal body composition assessment! Go to Progress â†’ Scan History, select two scans from different dates, and tap Compare. The side-by-side view shows every metric: body score, muscle tone, posture alignment, with percentage changes. The body changes slowly, so comparing scans months apart reveals genuine long-term trends!`,
-                    `Comparing scans over time is one of the most scientifically meaningful features in the app! Individual snapshots can be misleading due to daily fluctuations, but comparing two scans months apart reveals genuine trends in composition, muscle development, and posture. Find it in Progress â†’ Scan History â†’ select two â†’ Compare!`
+                    `The scan comparison feature is designed for longitudinal body composition assessment! Go to Progress → Scan History, select two scans from different dates, and tap Compare. The side-by-side view shows every metric: body score, muscle tone, posture alignment, with percentage changes. The body changes slowly, so comparing scans months apart reveals genuine long-term trends!`,
+                    `Comparing scans over time is one of the most scientifically meaningful features in the app! Individual snapshots can be misleading due to daily fluctuations, but comparing two scans months apart reveals genuine trends in composition, muscle development, and posture. Find it in Progress → Scan History → select two → Compare!`
                 ],
                 explain_live_posture: (ctx) => [
-                    `Live Posture Check uses your device camera and real-time AI to monitor your body mechanics as you exercise! On the Workout screen, tap "Start Live Posture Check." The system uses MediaPipe Pose to continuously evaluate shoulder alignment, spinal curvature, and hip positioning, then displays corrective cues. This is real-time proprioceptive feedback â€” teaching your body what correct alignment feels like!`,
+                    `Live Posture Check uses your device camera and real-time AI to monitor your body mechanics as you exercise! On the Workout screen, tap "Start Live Posture Check." The system uses MediaPipe Pose to continuously evaluate shoulder alignment, spinal curvature, and hip positioning, then displays corrective cues. This is real-time proprioceptive feedback — teaching your body what correct alignment feels like!`,
                     `The Live Posture Check is fascinating from a biomechanics perspective! It uses computer vision to analyze your posture in real time through your camera, detecting shoulder asymmetry, forward head posture, hip tilt, and other compensatory patterns, then gives immediate correction cues. Good posture during exercise prevents injury and maximizes muscle activation efficiency!`
                 ],
                 explain_data_management: (ctx) => [
-                    `The Data Management section (bottom of Upload screen) shows how much local storage the app is using and provides a "Clear All Data" option. This removes all client-side data: session state, scan history, food logs, workout logs, and habit data. Important: this only clears local browser storage â€” your server-side account and synced data remain intact. Use it for a fresh start or to free up device storage!`,
-                    `Local data management is important for app performance! The Data Management card on the Upload screen shows your localStorage usage and has a "Clear All Data" button. Browser localStorage has limited capacity, so clearing occasionally can prevent slowdowns. Your account data lives on the server and isn't affected â€” only locally cached data gets cleared!`
+                    `The Data Management section (bottom of Upload screen) shows how much local storage the app is using and provides a "Clear All Data" option. This removes all client-side data: session state, scan history, food logs, workout logs, and habit data. Important: this only clears local browser storage — your server-side account and synced data remain intact. Use it for a fresh start or to free up device storage!`,
+                    `Local data management is important for app performance! The Data Management card on the Upload screen shows your localStorage usage and has a "Clear All Data" button. Browser localStorage has limited capacity, so clearing occasionally can prevent slowdowns. Your account data lives on the server and isn't affected — only locally cached data gets cleared!`
                 ],
                 explain_auth: (ctx) => [
-                    `Authentication lets you securely access your personalized data across sessions! To create an account, click "Sign Up", enter your email and a password (minimum 8 characters), choose a display name, and verify your email via the confirmation link. Your account stores analysis history, progress data, and settings server-side â€” accessible from any device!`,
-                    `Having an account is what makes this app truly powerful! Registration takes under a minute: Sign Up â†’ email + password + display name â†’ email verification. Once verified, log in to access all your data from any session. The server stores your scan history, progress logs, habits, and settings so you never lose progress!`
+                    `Authentication lets you securely access your personalized data across sessions! To create an account, click "Sign Up", enter your email and a password (minimum 8 characters), choose a display name, and verify your email via the confirmation link. Your account stores analysis history, progress data, and settings server-side — accessible from any device!`,
+                    `Having an account is what makes this app truly powerful! Registration takes under a minute: Sign Up → email + password + display name → email verification. Once verified, log in to access all your data from any session. The server stores your scan history, progress logs, habits, and settings so you never lose progress!`
                 ],
                 _fallback: (ctx) => [
                     `Interesting question, but I'm not sure how to answer that! I'm best at explaining the science behind body analysis, exercise, nutrition, and app features. Try asking about how your score works, workout science, nutrition biochemistry, or ask me to explain any screen!`,
@@ -9175,11 +9175,11 @@ Please try again with a different photo.`;
                 ],
                 explain_bmr_tdee: (ctx) => [
                     `BMR stands for "Basal Metabolic Rate" -- the calories you burn by doing absolutely nothing. Not even blinking. Just existing. Somewhere around ${state._bmr || 'a calculable number'} kcal/day for you. Add movement and you get TDEE -- the real daily target. Calculated using the Mifflin-St Jeor formula, which sounds like a Harry Potter spell but is actually legit science from 1990. On the Nutrition screen, tweak your activity level and goal, hit Recalculate & Apply, and your macros update automatically. Fun fact: your brain alone burns ~20% of your BMR. You're welcome, big-brain reader.`,
-                    `The BMR/TDEE Calculator on the Nutrition screen: the app's way of saying "this is how much food your body demands, minimum." BMR = what you burn lying in bed. TDEE = BMR Ã— how much you move. The Mifflin-St Jeor formula does the math so you don't have to. Couch potato â†’ elite athlete activity levels, all the calorie targets in between, one button to apply them. Science! On your phone!`
+                    `The BMR/TDEE Calculator on the Nutrition screen: the app's way of saying "this is how much food your body demands, minimum." BMR = what you burn lying in bed. TDEE = BMR × how much you move. The Mifflin-St Jeor formula does the math so you don't have to. Couch potato → elite athlete activity levels, all the calorie targets in between, one button to apply them. Science! On your phone!`
                 ],
                 explain_daily_habits: (ctx) => [
-                    `Daily Habits on Progress: 5 things the app wants you to do every day, presented as a ring that fills up like a health bar in an RPG. Log a workout (ðŸ’ª), reach 8 glasses of water (ðŸ’§), get 7+ hours of sleep (ðŸ˜´), log your meals (ðŸ¥—), and tap the Check-In habit (ðŸŽ¯) like you're punching a time clock. The app auto-detects the first four from your logs, so if you're already doing them -- the ring fills itself. The Check-In is manual because we still trust you. Mostly.`,
-                    `The Daily Habits tracker on Progress auto-detects 4 of 5 habits: workout logged today? Auto-detected. 8 glasses of water? Checked. 7+ hours of sleep logged? Verified. Meals logged? Confirmed. The 5th (Check-In ðŸŽ¯) you tap manually -- call it the honor system. Score 5/5 and the ring turns green. Which is either satisfying or mildly terrifying depending on your personality. Per-habit streaks show how many days in a row you've been consistent. Yes, they judge you.`
+                    `Daily Habits on Progress: 5 things the app wants you to do every day, presented as a ring that fills up like a health bar in an RPG. Log a workout (💪), reach 8 glasses of water (💧), get 7+ hours of sleep (😴), log your meals (🥗), and tap the Check-In habit (🎯) like you're punching a time clock. The app auto-detects the first four from your logs, so if you're already doing them -- the ring fills itself. The Check-In is manual because we still trust you. Mostly.`,
+                    `The Daily Habits tracker on Progress auto-detects 4 of 5 habits: workout logged today? Auto-detected. 8 glasses of water? Checked. 7+ hours of sleep logged? Verified. Meals logged? Confirmed. The 5th (Check-In 🎯) you tap manually -- call it the honor system. Score 5/5 and the ring turns green. Which is either satisfying or mildly terrifying depending on your personality. Per-habit streaks show how many days in a row you've been consistent. Yes, they judge you.`
                 ],
                 explain_sleep_tracker: (ctx) => [
                     `The Sleep & Recovery Tracker on Progress: the app's polite way of pointing out that you can't out-train a sleep deficit. Log your hours + quality (great/okay/poor) in the Sleep Modal. Get back a Recovery Score, a 7-day bar chart, average hours, and an insight card that sounds wise whether you slept 4 hours or 10. Reminder: muscles don't grow during the workout, they grow while you sleep. So... maybe sleep. Radical concept, I know.`,
@@ -9206,73 +9206,73 @@ Please try again with a different photo.`;
                     `The Progress Charts tab: because sometimes you need to see your health data as actual graphs instead of vague feelings. Calories logged over time, weight trends, sleep hours, workout frequency, hydration streaks -- each gets its own chart tab. If the trend lines are going in the right direction for your goal, congratulations! If not, at least now you have documented evidence of exactly when things went wrong. Data-driven shame is still data-driven.`
                 ],
                 explain_challenges: (ctx) => [
-                    `Weekly Challenges: because apparently just telling yourself to work out wasn't compelling enough, so now there are weekly assignments. Each Monday, new objectives appear â€” things like "log 5 workouts" or "drink water like a functional human for 7 days." Complete them for XP. Skip them and nothing bad happens, but you'll feel it. Check the Progress screen. This is gamified accountability and it absolutely works.`,
-                    `The Challenges section is basically homework for your body â€” except you actually want to do this homework. New objectives every Monday. Complete them for XP and the quiet satisfaction of 100% on a progress bar. It's engineered to make you feel slightly bad about ignoring it. Classic behavioral design. Works on most people. You're probably most people. Worth checking.`
+                    `Weekly Challenges: because apparently just telling yourself to work out wasn't compelling enough, so now there are weekly assignments. Each Monday, new objectives appear — things like "log 5 workouts" or "drink water like a functional human for 7 days." Complete them for XP. Skip them and nothing bad happens, but you'll feel it. Check the Progress screen. This is gamified accountability and it absolutely works.`,
+                    `The Challenges section is basically homework for your body — except you actually want to do this homework. New objectives every Monday. Complete them for XP and the quiet satisfaction of 100% on a progress bar. It's engineered to make you feel slightly bad about ignoring it. Classic behavioral design. Works on most people. You're probably most people. Worth checking.`
                 ],
                 explain_levels_xp: (ctx) => [
-                    `XP points: the currency of "technically I did something healthy today." Log workouts, track meals, complete habits, finish challenges â€” it all converts to Experience Points that stack into levels and rank titles. It's PokÃ©mon but for your body. Your level is literally a receipt for how much of your life you chose the gym over the couch. Collect them all. They're on the Progress screen.`,
-                    `The Level & XP system exists because humans apparently need fake internet points to do things that are obviously good for them. (No judgment â€” neuroscience says this works.) Every healthy action earns XP. Enough XP = level up = new rank title = brief feeling of invincibility. The fun part: XP never resets. Every point is documented proof of your effort. Your level is your fitness legacy. Don't let it embarrass you.`
+                    `XP points: the currency of "technically I did something healthy today." Log workouts, track meals, complete habits, finish challenges — it all converts to Experience Points that stack into levels and rank titles. It's Pokémon but for your body. Your level is literally a receipt for how much of your life you chose the gym over the couch. Collect them all. They're on the Progress screen.`,
+                    `The Level & XP system exists because humans apparently need fake internet points to do things that are obviously good for them. (No judgment — neuroscience says this works.) Every healthy action earns XP. Enough XP = level up = new rank title = brief feeling of invincibility. The fun part: XP never resets. Every point is documented proof of your effort. Your level is your fitness legacy. Don't let it embarrass you.`
                 ],
                 explain_weight_log: (ctx) => [
                     `The Weight Log: where you go to have a complicated relationship with a number. Log your weight daily in the Goal Weight card. It saves with a date, builds a trend chart after 2+ entries, and uses your actual trend to estimate your goal ETA. Pro tip: weigh yourself at the same time every morning for consistent data. The number will lie to you some days. The TREND is your friend. The daily fluctuation is just your body being dramatic.`,
-                    `Logging weight every day is either motivating or soul-crushing depending on the day â€” but statistically, people who do it lose more weight. The app stores every entry, charts them, and uses the trend to estimate how long until you hit your goal. Daily 1-3 kg swings are completely normal (water, food in transit, vibes). The app smooths that into a real trend line. Log it, don't obsess over it, trust the trend. The trend doesn't lie.`
+                    `Logging weight every day is either motivating or soul-crushing depending on the day — but statistically, people who do it lose more weight. The app stores every entry, charts them, and uses the trend to estimate how long until you hit your goal. Daily 1-3 kg swings are completely normal (water, food in transit, vibes). The app smooths that into a real trend line. Log it, don't obsess over it, trust the trend. The trend doesn't lie.`
                 ],
                 explain_goal_weight: (ctx) => [
-                    `The Goal Weight card is the bento cell that turns your vague fitness hopes into an actual progress bar with a dot on it. Set a target, log your weight regularly, and watch that dot move â€” very slowly, but it moves. Metrics shown: how far you've come, how far you have left, estimated weeks, and weekly pace (based on your real logged trend, not optimistic guessing). The "estimated weeks" number is honest. Sometimes uncomfortably so.`,
-                    `Goal Weight logic: you set a target, the app records your start, tracks your current position, and calculates the gap. Then it estimates weeks at your actual pace â€” pulled from real weight log data, then calorie balance, then a conservative default if you haven't logged enough. It's a GPS for your body weight. Cannot recalculate when you detour through a pizza place. That's what the weight log is for. Log, track, face the data.`
+                    `The Goal Weight card is the bento cell that turns your vague fitness hopes into an actual progress bar with a dot on it. Set a target, log your weight regularly, and watch that dot move — very slowly, but it moves. Metrics shown: how far you've come, how far you have left, estimated weeks, and weekly pace (based on your real logged trend, not optimistic guessing). The "estimated weeks" number is honest. Sometimes uncomfortably so.`,
+                    `Goal Weight logic: you set a target, the app records your start, tracks your current position, and calculates the gap. Then it estimates weeks at your actual pace — pulled from real weight log data, then calorie balance, then a conservative default if you haven't logged enough. It's a GPS for your body weight. Cannot recalculate when you detour through a pizza place. That's what the weight log is for. Log, track, face the data.`
                 ],
                 explain_food_log: (ctx) => [
-                    `The Food Log: because "I think I ate healthily" is not the same as having actually eaten healthily. Log food in the Nutrition screen with the Quick Add form, or tap a preset chip (Chicken Breast, Rice, Eggs â€” the holy trinity of people who track macros). Each entry feeds your Calorie Balance card. The presets exist because nobody wants to type "247 calories, 46g protein" from memory while already hangry. You're welcome.`,
-                    `Science says we underestimate our food intake by 30-50%. The Food Log exists to catch those sneaky calories that somehow didn't count. (They count.) Tap a preset, confirm the values, hit Log â€” done in 5 seconds. Macro breakdown per entry, running totals in Calorie Balance. Knowledge is the first step. The second step is not eating a second dinner and then telling yourself it was "just a snack."`
+                    `The Food Log: because "I think I ate healthily" is not the same as having actually eaten healthily. Log food in the Nutrition screen with the Quick Add form, or tap a preset chip (Chicken Breast, Rice, Eggs — the holy trinity of people who track macros). Each entry feeds your Calorie Balance card. The presets exist because nobody wants to type "247 calories, 46g protein" from memory while already hangry. You're welcome.`,
+                    `Science says we underestimate our food intake by 30-50%. The Food Log exists to catch those sneaky calories that somehow didn't count. (They count.) Tap a preset, confirm the values, hit Log — done in 5 seconds. Macro breakdown per entry, running totals in Calorie Balance. Knowledge is the first step. The second step is not eating a second dinner and then telling yourself it was "just a snack."`
                 ],
                 explain_workout_splits: (ctx) => [
-                    `A workout split is a schedule for which body parts get trained on which days. Options range from Full Body (3x/week, "I'm a reasonable person") to Push/Pull/Legs (6x/week, "the gym is my entire personality"). Your recommended split is on the Workout screen â€” tailored to your body analysis. If your lower body score is low, prepare for leg days. Lots of them. The best split is the one you'll actually do. Start there.`,
+                    `A workout split is a schedule for which body parts get trained on which days. Options range from Full Body (3x/week, "I'm a reasonable person") to Push/Pull/Legs (6x/week, "the gym is my entire personality"). Your recommended split is on the Workout screen — tailored to your body analysis. If your lower body score is low, prepare for leg days. Lots of them. The best split is the one you'll actually do. Start there.`,
                     `Workout splits: because muscles need rest and your ego needs structure. Full Body = 3 days, every muscle, solid start. Upper/Lower = 4 days, solid intermediate. Push/Pull/Legs = 6 days, advanced, probably owns protein powder in bulk. Bro Split = one muscle per day, still valid, don't let anyone tell you otherwise. Your specific split is in the Workout screen based on your actual analysis. Follow it consistently and things will happen.`
                 ],
                 explain_body_recomp: (ctx) => [
-                    `Body recomposition: losing fat and gaining muscle at the same time. The fitness internet spent years insisting this was impossible. Peer-reviewed research said "actually, no." It IS possible â€” especially for beginners and people coming back after a break. It's slower than pure cutting or bulking. You need high protein, resistance training, and patience â€” the trifecta of not being satisfied immediately. Check Scan History over time. If score goes up while weight barely moves, you're recomping. Genuinely impressive.`,
-                    `Recomp is the fitness equivalent of having your cake and eating it too â€” except the cake is made of muscle and the eating part involves a calorie deficit. It works. It's slower. It requires protein intake that makes your grocery bill uncomfortable. Eat near maintenance, lift heavy things consistently, log food, sleep enough. The body score will trend upward. Your weight might barely move. That's the point. Mass stays, fat leaves, muscle arrives. The math eventually works out.`
+                    `Body recomposition: losing fat and gaining muscle at the same time. The fitness internet spent years insisting this was impossible. Peer-reviewed research said "actually, no." It IS possible — especially for beginners and people coming back after a break. It's slower than pure cutting or bulking. You need high protein, resistance training, and patience — the trifecta of not being satisfied immediately. Check Scan History over time. If score goes up while weight barely moves, you're recomping. Genuinely impressive.`,
+                    `Recomp is the fitness equivalent of having your cake and eating it too — except the cake is made of muscle and the eating part involves a calorie deficit. It works. It's slower. It requires protein intake that makes your grocery bill uncomfortable. Eat near maintenance, lift heavy things consistently, log food, sleep enough. The body score will trend upward. Your weight might barely move. That's the point. Mass stays, fat leaves, muscle arrives. The math eventually works out.`
                 ],
                 explain_workout_history: (ctx) => [
-                    `Workout History: your training diary, minus the dramatic teenage diary energy. It logs every session you complete in the app â€” what you did, when, and how much. More sessions = longer list = proof you showed up. Find it in the Progress screen. The act of logging creates accountability, which is half the battle.`
+                    `Workout History: your training diary, minus the dramatic teenage diary energy. It logs every session you complete in the app — what you did, when, and how much. More sessions = longer list = proof you showed up. Find it in the Progress screen. The act of logging creates accountability, which is half the battle.`
                 ],
                 explain_personal_records: (ctx) => [
-                    `Personal Records are your lift milestones â€” the heaviest you've ever moved for each exercise. Every new PR gets saved automatically. Seeing those numbers go up over weeks and months is genuinely one of the most satisfying parts of training. Check the Progress screen PR cell and try to beat those numbers next session.`
+                    `Personal Records are your lift milestones — the heaviest you've ever moved for each exercise. Every new PR gets saved automatically. Seeing those numbers go up over weeks and months is genuinely one of the most satisfying parts of training. Check the Progress screen PR cell and try to beat those numbers next session.`
                 ],
                 explain_body_measurements: (ctx) => [
                     `Body Measurements tracks the tape measure numbers that actually tell the truth: chest, waist, hips, arms. Because sometimes the scale lies (it's water, it's muscle, it's a bad morning), but the waist measurement never does. Log every 2-4 weeks in the Progress screen. The real victory is watching that waist number go down while the others hold or go up.`
                 ],
                 explain_maintenance: (ctx) => [
-                    `Maintenance mode: the mythical state where you've achieved your goal and now get to... do everything you've been doing, forever. That's it. That's maintenance. The habits that got you here need to continue, which is the part nobody mentions before you start. The BMR/TDEE Calculator tells you your maintenance calories. The Calorie Balance card shows if you're hitting it. The Daily Habits ring shows if you're sustaining the behaviors. Maintenance isn't a finish line â€” it's a different part of the same track.`,
+                    `Maintenance mode: the mythical state where you've achieved your goal and now get to... do everything you've been doing, forever. That's it. That's maintenance. The habits that got you here need to continue, which is the part nobody mentions before you start. The BMR/TDEE Calculator tells you your maintenance calories. The Calorie Balance card shows if you're hitting it. The Daily Habits ring shows if you're sustaining the behaviors. Maintenance isn't a finish line — it's a different part of the same track.`,
                     `Maintenance calories = the exact amount to eat to stay exactly as you are. Too much: slow creep back. Too little: muscle starts leaving. The BMR/TDEE Calculator on Nutrition solves this math for you. Then: keep training (muscle is expensive to maintain and the body is lazy), hit your habits, monitor the weight log for drift. Your past self did the hard work. Your present self just has to not undo it. Slightly easier. Only slightly.`
                 ],
                 explain_account: (ctx) => [
                     `My Account is your personal headquarters! Find it in the user menu (top right corner, that little avatar icon). You can update your name, email, fitness profile stuff (height, weight, goal, the whole biography), change your password, or in a moment of dramatic crisis, delete your account entirely. Update those stats regularly so I'm not giving you ancient advice!`,
-                    `Great news: you don't have to stay who you were when you created your account! Head to the user menu â†’ My Account to update your display name, email, height, weight, fitness goal, and more. No judgment on how outdated your old stats were. Much judgment. Just kidding. Mostly.`
+                    `Great news: you don't have to stay who you were when you created your account! Head to the user menu → My Account to update your display name, email, height, weight, fitness goal, and more. No judgment on how outdated your old stats were. Much judgment. Just kidding. Mostly.`
                 ],
                 explain_optional_measurements: (ctx) => [
-                    `Those optional measurements? Highly recommend doing them. The AI's photo analysis is good, but adding actual tape measurements (chest, waist, hips, arms in cm) is like telling it "here, I measured myself, stop guessing." It massively improves accuracy. Grab a tape measure â€” the one you bought for a home project you haven't started yet â€” and measure at the widest points!`,
-                    `"Optional" is doing a lot of work in "Optional Measurements." Technically optional. Practically? They make the analysis way more accurate. Chest, waist, hips, arms â€” all in cm, all from a tape measure. Takes maybe 3 minutes. The AI will reward you with better results, which is as close to gratitude as it gets!`
+                    `Those optional measurements? Highly recommend doing them. The AI's photo analysis is good, but adding actual tape measurements (chest, waist, hips, arms in cm) is like telling it "here, I measured myself, stop guessing." It massively improves accuracy. Grab a tape measure — the one you bought for a home project you haven't started yet — and measure at the widest points!`,
+                    `"Optional" is doing a lot of work in "Optional Measurements." Technically optional. Practically? They make the analysis way more accurate. Chest, waist, hips, arms — all in cm, all from a tape measure. Takes maybe 3 minutes. The AI will reward you with better results, which is as close to gratitude as it gets!`
                 ],
                 explain_export: (ctx) => [
-                    `The Results screen has "Export Data" (saves your full analysis â€” for the spreadsheet lovers among us) and "Share Card" (generates a pretty shareable card, because documenting fitness wins is important). After a workout session, there's also "Share Workout" â€” for when you absolutely need your social media to know you finished leg day. Accountability with style!`,
-                    `Export and Share options on the Results screen! "Export Data" saves everything for your records. "Share Card" makes a shareable image â€” document those wins! "Share Workout" after a session, for the "I worked out and I need everyone to know" energy. All valid. Very valid.`
+                    `The Results screen has "Export Data" (saves your full analysis — for the spreadsheet lovers among us) and "Share Card" (generates a pretty shareable card, because documenting fitness wins is important). After a workout session, there's also "Share Workout" — for when you absolutely need your social media to know you finished leg day. Accountability with style!`,
+                    `Export and Share options on the Results screen! "Export Data" saves everything for your records. "Share Card" makes a shareable image — document those wins! "Share Workout" after a session, for the "I worked out and I need everyone to know" energy. All valid. Very valid.`
                 ],
                 explain_comparison: (ctx) => [
-                    `Scan comparison is where you get to see if all that hard work actually did anything! Progress â†’ Scan History â†’ pick two scans â†’ Compare. You get a side-by-side of your body score, muscle tone, posture â€” all of it â€” with the changes highlighted. If the numbers improved: victory lap. If not: data-informed recalibration. Either way, information is power!`,
-                    `Want to feel smug about your progress? Progress screen â†’ Scan History â†’ select two scans â†’ Compare. You'll see every metric side by side with percentage changes. It's basically a before-and-after without the awkward lighting. Do this every 4-8 weeks for maximum emotional impact!`
+                    `Scan comparison is where you get to see if all that hard work actually did anything! Progress → Scan History → pick two scans → Compare. You get a side-by-side of your body score, muscle tone, posture — all of it — with the changes highlighted. If the numbers improved: victory lap. If not: data-informed recalibration. Either way, information is power!`,
+                    `Want to feel smug about your progress? Progress screen → Scan History → select two scans → Compare. You'll see every metric side by side with percentage changes. It's basically a before-and-after without the awkward lighting. Do this every 4-8 weeks for maximum emotional impact!`
                 ],
                 explain_live_posture: (ctx) => [
-                    `Live Posture Check is on the Workout screen â€” tap "Start Live Posture Check" and it uses your camera to analyze your posture in real time. It checks if your shoulders, spine, and hips are aligned properly and gives correction cues on the fly. Think of it as a personal trainer who can see you but can't judge your workout playlist. Very helpful!`,
-                    `The Live Posture Check catches you slouching in real time, which is embarrassing but extremely useful! Workout screen â†’ "Start Live Posture Check" â†’ camera on â†’ instant posture feedback. Shoulder alignment, spine, hips â€” all monitored continuously. The AI is basically the "sit up straight" your parents always nagged about, but with more data!`
+                    `Live Posture Check is on the Workout screen — tap "Start Live Posture Check" and it uses your camera to analyze your posture in real time. It checks if your shoulders, spine, and hips are aligned properly and gives correction cues on the fly. Think of it as a personal trainer who can see you but can't judge your workout playlist. Very helpful!`,
+                    `The Live Posture Check catches you slouching in real time, which is embarrassing but extremely useful! Workout screen → "Start Live Posture Check" → camera on → instant posture feedback. Shoulder alignment, spine, hips — all monitored continuously. The AI is basically the "sit up straight" your parents always nagged about, but with more data!`
                 ],
                 explain_data_management: (ctx) => [
-                    `Data Management is at the very bottom of the Upload screen, where most people never look. It shows how much storage the app is using and has a "Clear All Data" button for when you want a truly fresh start (or you're in a dramatic mood). Clears local data only â€” your actual account on the server is untouched. The nuclear option, but a very targeted nuclear option!`,
+                    `Data Management is at the very bottom of the Upload screen, where most people never look. It shows how much storage the app is using and has a "Clear All Data" button for when you want a truly fresh start (or you're in a dramatic mood). Clears local data only — your actual account on the server is untouched. The nuclear option, but a very targeted nuclear option!`,
                     `"Clear All Data" in the Data Management section (Upload screen, bottom) is the app equivalent of "turn it off and back on again." Wipes all local scan history, logs, and session data. Does NOT delete your account or server data. Perfect for when your phone is running low on storage or you've decided to spiritually restart. Available whenever needed!`
                 ],
                 explain_auth: (ctx) => [
                     `Signing up for an account is easier than most things in fitness! Click "Sign Up," enter your email, pick a password (not "password", please, we're past that), add your display name, confirm your email when the verification arrives, and you're in. Forgot your password? "Forgot Password" sends a reset email. Having an account means your data actually persists. Revolutionary!`,
-                    `Login or register from the welcome screen â€” it's four fields, not a marathon. Sign up with email + password + name, verify your email (check spam if it's playing hide and seek), and you're good. Already have an account? Log in. Password escaped? "Forgot Password" catches it. Your progress and data all live server-side once you're in!`
+                    `Login or register from the welcome screen — it's four fields, not a marathon. Sign up with email + password + name, verify your email (check spam if it's playing hide and seek), and you're good. Already have an account? Log in. Password escaped? "Forgot Password" catches it. Your progress and data all live server-side once you're in!`
                 ],
                 _fallback: (ctx) => [
                     `I understood none of that, but I respect the energy. Try asking about your body score, workouts, nutrition, how the AI works, or ask me to explain any screen or feature. Or type "help" -- I promise it's not as desperate as it sounds.`,
@@ -10069,20 +10069,20 @@ Please try again with a different photo.`;
 
         // Fallback metadata in case API is unavailable
         const ACHIEVEMENTS_FALLBACK = [
-            { id: 'first-scan',    title: 'First Scan',        icon: 'ðŸ“¸', description: 'Complete 1 analysis' },
-            { id: 'scan-veteran',  title: 'Scan Veteran',      icon: 'ðŸ”¬', description: '5 analyses' },
-            { id: 'first-workout', title: 'First Rep',         icon: 'ðŸ’ª', description: 'Complete 1 workout' },
-            { id: 'workout-5',     title: 'Gym Rat',           icon: 'ðŸ‹ï¸', description: '5 workouts' },
-            { id: 'workout-10',    title: 'Iron Will',         icon: 'âš¡', description: '10 workouts' },
-            { id: 'workout-25',    title: 'Legend',            icon: 'ðŸ‘‘', description: '25 workouts' },
-            { id: 'meal-plan',     title: 'Meal Prepper',      icon: 'ðŸ½ï¸', description: 'Generate meal plan' },
-            { id: 'food-scan',     title: 'Food Detective',    icon: 'ðŸ”', description: 'Scan a food' },
-            { id: 'all-personas',  title: 'Social Butterfly',  icon: 'ðŸ¦‹', description: 'Try all 4 personas' },
-            { id: 'streak-3',      title: 'On Fire',           icon: 'ðŸ”¥', description: '3-day streak' },
-            { id: 'streak-7',      title: 'Unstoppable',       icon: 'ðŸš€', description: '7-day streak' },
-            { id: 'streak-30',     title: 'Dedicated',         icon: 'ðŸ†', description: '30-day streak' },
-            { id: 'first-compare', title: 'Time Traveler',     icon: 'â³', description: 'Compare 2 scans' },
-            { id: 'scan-5',        title: 'Dedicated Tracker', icon: 'ðŸ“Š', description: '5 analysis scans saved' },
+            { id: 'first-scan',    title: 'First Scan',        icon: '📸', description: 'Complete 1 analysis' },
+            { id: 'scan-veteran',  title: 'Scan Veteran',      icon: '🔬', description: '5 analyses' },
+            { id: 'first-workout', title: 'First Rep',         icon: '💪', description: 'Complete 1 workout' },
+            { id: 'workout-5',     title: 'Gym Rat',           icon: '🏋️', description: '5 workouts' },
+            { id: 'workout-10',    title: 'Iron Will',         icon: '⚡', description: '10 workouts' },
+            { id: 'workout-25',    title: 'Legend',            icon: '👑', description: '25 workouts' },
+            { id: 'meal-plan',     title: 'Meal Prepper',      icon: '🍽️', description: 'Generate meal plan' },
+            { id: 'food-scan',     title: 'Food Detective',    icon: '🔍', description: 'Scan a food' },
+            { id: 'all-personas',  title: 'Social Butterfly',  icon: '🦋', description: 'Try all 4 personas' },
+            { id: 'streak-3',      title: 'On Fire',           icon: '🔥', description: '3-day streak' },
+            { id: 'streak-7',      title: 'Unstoppable',       icon: '🚀', description: '7-day streak' },
+            { id: 'streak-30',     title: 'Dedicated',         icon: '🏆', description: '30-day streak' },
+            { id: 'first-compare', title: 'Time Traveler',     icon: '⏳', description: 'Compare 2 scans' },
+            { id: 'scan-5',        title: 'Dedicated Tracker', icon: '📊', description: '5 analysis scans saved' },
         ];
 
         let _achievementsMeta = null; // null = not yet loaded
@@ -10116,7 +10116,7 @@ Please try again with a different photo.`;
         const LEVEL_THRESHOLDS = [0, 100, 250, 450, 700, 1000, 1400, 1900, 2500, 3200, 4000, 5000, 6200, 7600, 9200, 11000, 13000, 15500, 18500, 22000];
         const RANK_NAMES = ['Beginner', 'Novice', 'Rookie', 'Apprentice', 'Dedicated', 'Consistent', 'Skilled', 'Advanced', 'Expert', 'Elite', 'Champion', 'Master', 'Grandmaster', 'Prodigy', 'Virtuoso', 'Titan', 'Mythic', 'Legendary', 'Immortal', 'Transcendent'];
 
-        // Maps DB metric_key â†’ localStorage key (and optional isArray flag)
+        // Maps DB metric_key → localStorage key (and optional isArray flag)
         const CHALLENGE_KEY_MAP = {
             'total_workouts':       { key: 'fixit-total-workouts' },
             'total_analyses':       { key: 'fixit-total-analyses' },
@@ -10127,14 +10127,14 @@ Please try again with a different photo.`;
         };
 
         let CHALLENGE_POOL = [
-            { id: 'workouts-3', name: 'Complete 3 workouts', icon: 'ðŸ‹ï¸', target: 3, key: 'fixit-total-workouts' },
-            { id: 'workouts-5', name: 'Complete 5 workouts', icon: 'ðŸ’ª', target: 5, key: 'fixit-total-workouts' },
-            { id: 'analyses-2', name: 'Run 2 analyses', icon: 'ðŸ“Š', target: 2, key: 'fixit-total-analyses' },
-            { id: 'coach-3', name: 'Ask coach 3 questions', icon: 'ðŸ’¬', target: 3, key: 'fixit-coach-questions' },
-            { id: 'coach-5', name: 'Ask coach 5 questions', icon: 'ðŸ—£ï¸', target: 5, key: 'fixit-coach-questions' },
-            { id: 'nutrition', name: 'Check nutrition screen', icon: 'ðŸ¥—', target: 1, key: 'fixit-nutrition-views' },
-            { id: 'personas-2', name: 'Try 2 coach personas', icon: 'ðŸŽ­', target: 2, key: 'fixit-used-personas', isArray: true },
-            { id: 'meal-plan', name: 'Generate a meal plan', icon: 'ðŸ“‹', target: 1, key: 'fixit-meal-plan-count' }
+            { id: 'workouts-3', name: 'Complete 3 workouts', icon: '🏋️', target: 3, key: 'fixit-total-workouts' },
+            { id: 'workouts-5', name: 'Complete 5 workouts', icon: '💪', target: 5, key: 'fixit-total-workouts' },
+            { id: 'analyses-2', name: 'Run 2 analyses', icon: '📊', target: 2, key: 'fixit-total-analyses' },
+            { id: 'coach-3', name: 'Ask coach 3 questions', icon: '💬', target: 3, key: 'fixit-coach-questions' },
+            { id: 'coach-5', name: 'Ask coach 5 questions', icon: '🗣️', target: 5, key: 'fixit-coach-questions' },
+            { id: 'nutrition', name: 'Check nutrition screen', icon: '🥗', target: 1, key: 'fixit-nutrition-views' },
+            { id: 'personas-2', name: 'Try 2 coach personas', icon: '🎭', target: 2, key: 'fixit-used-personas', isArray: true },
+            { id: 'meal-plan', name: 'Generate a meal plan', icon: '📋', target: 1, key: 'fixit-meal-plan-count' }
         ];
 
         let _challengePoolLoaded = false;
@@ -10376,14 +10376,14 @@ Please try again with a different photo.`;
         function refreshProgressScreen() {
             const safe = (fn) => { try { fn(); } catch (e) { console.error('[progress]', e); } };
 
-            // Chunk 1 â€” runs synchronously so the screen feels instantly populated
+            // Chunk 1 — runs synchronously so the screen feels instantly populated
             safe(checkAchievements);
             safe(renderStreakTracker);
             safe(renderHeatmap);
             safe(renderLevelXP);
             safe(renderBadges);
 
-            // Chunk 2 â€” deferred so the click handler returns first and the
+            // Chunk 2 — deferred so the click handler returns first and the
             // browser can render the screen before doing heavier work
             setTimeout(() => {
                 safe(renderChallenges);
@@ -10393,7 +10393,7 @@ Please try again with a different photo.`;
                 safe(renderPersonalRecords);
             }, 0);
 
-            // Chunk 3 â€” deferred again to keep the main thread free
+            // Chunk 3 — deferred again to keep the main thread free
             setTimeout(() => {
                 safe(renderMeasurementsTracker);
                 safe(renderSleepTracker);
@@ -10506,7 +10506,7 @@ Please try again with a different photo.`;
                 const input = document.getElementById('goal-weight-input');
                 const val = parseFloat(input?.value);
                 if (!val || val < 30 || val > 300) {
-                    showToast('Enter a valid goal weight (30â€“300 kg)', 'error');
+                    showToast('Enter a valid goal weight (30–300 kg)', 'error');
                     return;
                 }
                 saveGoalWeight(val);
@@ -10522,7 +10522,7 @@ Please try again with a different photo.`;
                 const input = document.getElementById(inputId);
                 const val = parseFloat(input?.value);
                 if (!val || val < 30 || val > 300) {
-                    showToast('Enter a valid weight (30â€“300 kg)', 'error');
+                    showToast('Enter a valid weight (30–300 kg)', 'error');
                     return;
                 }
                 appendWeightEntry(val);
@@ -10600,7 +10600,7 @@ Please try again with a different photo.`;
             if (lastLogEl) {
                 if (wLog[0]) {
                     const d = new Date(wLog[0].date);
-                    lastLogEl.textContent = `Last: ${wLog[0].weight.toFixed(1)} kg Â· ${d.toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}`;
+                    lastLogEl.textContent = `Last: ${wLog[0].weight.toFixed(1)} kg · ${d.toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}`;
                 } else if (currentKg) {
                     lastLogEl.textContent = `Profile weight: ${currentKg} kg`;
                 } else {
@@ -10657,7 +10657,7 @@ Please try again with a different photo.`;
             const remLbl = document.getElementById('goal-remaining-lbl');
             if (remVal && remLbl) {
                 if (isGoalDone) {
-                    remVal.textContent = 'âœ“';
+                    remVal.textContent = '✓';
                     remVal.classList.add('done');
                     remLbl.textContent = 'Goal reached!';
                 } else {
@@ -10768,108 +10768,108 @@ Please try again with a different photo.`;
         // ========== DAILY EXERCISE LOG ==========
 
         let EXERCISE_PRESETS = [
-            // â€” Chest â€”
-            { emoji: 'ðŸ‹ï¸', name: 'Bench Press',              muscles: 'Chest, Triceps',          sets: 4, reps: 10 },
-            { emoji: 'ðŸ‹ï¸', name: 'Incline Bench Press',      muscles: 'Upper Chest, Shoulders',  sets: 4, reps: 10 },
-            { emoji: 'ðŸ‹ï¸', name: 'Decline Bench Press',      muscles: 'Lower Chest, Triceps',    sets: 3, reps: 10 },
-            { emoji: 'ðŸ‹ï¸', name: 'Incline Dumbbell Press',   muscles: 'Upper Chest, Shoulders',  sets: 3, reps: 12 },
-            { emoji: 'ðŸ‹ï¸', name: 'Dumbbell Flyes',           muscles: 'Chest',                   sets: 3, reps: 12 },
-            { emoji: 'ðŸ‹ï¸', name: 'Cable Flyes',              muscles: 'Chest',                   sets: 3, reps: 15 },
-            { emoji: 'ðŸ‹ï¸', name: 'Chest Press Machine',      muscles: 'Chest, Triceps',          sets: 3, reps: 12 },
-            { emoji: 'ðŸ’ª', name: 'Push-Ups',                  muscles: 'Chest, Core',             sets: 3, reps: 20 },
-            { emoji: 'ðŸ’ª', name: 'Wide Push-Ups',             muscles: 'Chest',                   sets: 3, reps: 15 },
-            { emoji: 'ðŸ’ª', name: 'Diamond Push-Ups',          muscles: 'Chest, Triceps',          sets: 3, reps: 12 },
-            { emoji: 'ðŸ’ª', name: 'Decline Push-Ups',          muscles: 'Upper Chest',             sets: 3, reps: 15 },
-            { emoji: 'ðŸ’ª', name: 'Dips',                      muscles: 'Chest, Triceps',          sets: 3, reps: 10 },
-            // â€” Back â€”
-            { emoji: 'ðŸ‹ï¸', name: 'Deadlift',                 muscles: 'Full Back, Legs',         sets: 4, reps: 5  },
-            { emoji: 'ðŸ‹ï¸', name: 'Barbell Rows',             muscles: 'Back, Biceps',            sets: 4, reps: 10 },
-            { emoji: 'ðŸ‹ï¸', name: 'Dumbbell Rows',            muscles: 'Mid Back, Biceps',        sets: 3, reps: 12 },
-            { emoji: 'ðŸ‹ï¸', name: 'Lat Pulldown',             muscles: 'Lats',                    sets: 3, reps: 12 },
-            { emoji: 'ðŸ‹ï¸', name: 'Seated Cable Rows',        muscles: 'Mid Back',                sets: 3, reps: 12 },
-            { emoji: 'ðŸ‹ï¸', name: 'Face Pulls',               muscles: 'Rear Delts, Traps',       sets: 3, reps: 15 },
-            { emoji: 'ðŸ‹ï¸', name: 'T-Bar Rows',               muscles: 'Back, Biceps',            sets: 4, reps: 10 },
-            { emoji: 'ðŸ‹ï¸', name: 'Chest-Supported Rows',     muscles: 'Mid Back',                sets: 3, reps: 12 },
-            { emoji: 'ðŸ’ª', name: 'Pull-Ups',                  muscles: 'Lats, Biceps',            sets: 4, reps: 8  },
-            { emoji: 'ðŸ’ª', name: 'Chin-Ups',                  muscles: 'Lats, Biceps',            sets: 4, reps: 8  },
-            { emoji: 'ðŸ’ª', name: 'Inverted Rows',             muscles: 'Back, Biceps',            sets: 3, reps: 12 },
-            // â€” Shoulders â€”
-            { emoji: 'ðŸ‹ï¸', name: 'Overhead Press',           muscles: 'Shoulders, Triceps',      sets: 4, reps: 8  },
-            { emoji: 'ðŸ‹ï¸', name: 'Dumbbell Shoulder Press',  muscles: 'Shoulders',               sets: 3, reps: 12 },
-            { emoji: 'ðŸ‹ï¸', name: 'Arnold Press',             muscles: 'Shoulders',               sets: 3, reps: 12 },
-            { emoji: 'ðŸ‹ï¸', name: 'Lateral Raises',           muscles: 'Side Delts',              sets: 3, reps: 15 },
-            { emoji: 'ðŸ‹ï¸', name: 'Front Raises',             muscles: 'Front Delts',             sets: 3, reps: 15 },
-            { emoji: 'ðŸ‹ï¸', name: 'Reverse Flyes',            muscles: 'Rear Delts',              sets: 3, reps: 15 },
-            { emoji: 'ðŸ‹ï¸', name: 'Upright Rows',             muscles: 'Traps, Side Delts',       sets: 3, reps: 12 },
-            { emoji: 'ðŸ‹ï¸', name: 'Shrugs',                   muscles: 'Traps',                   sets: 4, reps: 15 },
-            { emoji: 'ðŸ’ª', name: 'Pike Push-Ups',             muscles: 'Shoulders',               sets: 3, reps: 12 },
-            { emoji: 'ðŸ’ª', name: 'Handstand Push-Ups',        muscles: 'Shoulders, Triceps',      sets: 3, reps: 8  },
-            // â€” Legs â€”
-            { emoji: 'ðŸ¦µ', name: 'Squats',                    muscles: 'Quads, Glutes',           sets: 4, reps: 10 },
-            { emoji: 'ðŸ¦µ', name: 'Front Squats',              muscles: 'Quads, Core',             sets: 4, reps: 8  },
-            { emoji: 'ðŸ¦µ', name: 'Romanian Deadlifts',        muscles: 'Hamstrings, Glutes',      sets: 4, reps: 10 },
-            { emoji: 'ðŸ¦µ', name: 'Leg Press',                 muscles: 'Quads',                   sets: 3, reps: 12 },
-            { emoji: 'ðŸ¦µ', name: 'Leg Curls',                 muscles: 'Hamstrings',              sets: 3, reps: 12 },
-            { emoji: 'ðŸ¦µ', name: 'Leg Extensions',            muscles: 'Quads',                   sets: 3, reps: 15 },
-            { emoji: 'ðŸ¦µ', name: 'Lunges',                    muscles: 'Quads, Glutes',           sets: 3, reps: 10 },
-            { emoji: 'ðŸ¦µ', name: 'Walking Lunges',            muscles: 'Quads, Glutes',           sets: 3, reps: 12 },
-            { emoji: 'ðŸ¦µ', name: 'Bulgarian Split Squats',    muscles: 'Quads, Glutes',           sets: 3, reps: 10 },
-            { emoji: 'ðŸ¦µ', name: 'Hip Thrusts',               muscles: 'Glutes, Hamstrings',      sets: 4, reps: 12 },
-            { emoji: 'ðŸ¦µ', name: 'Glute Bridges',             muscles: 'Glutes',                  sets: 3, reps: 15 },
-            { emoji: 'ðŸ¦µ', name: 'Calf Raises',               muscles: 'Calves',                  sets: 4, reps: 20 },
-            { emoji: 'ðŸ¦µ', name: 'Seated Calf Raises',        muscles: 'Calves',                  sets: 3, reps: 20 },
-            { emoji: 'ðŸ¦µ', name: 'Step-Ups',                  muscles: 'Quads, Glutes',           sets: 3, reps: 12 },
-            { emoji: 'ðŸ¦µ', name: 'Sumo Squats',               muscles: 'Inner Thighs, Glutes',    sets: 3, reps: 15 },
-            { emoji: 'ðŸ ', name: 'Bodyweight Squats',         muscles: 'Quads, Glutes',           sets: 4, reps: 20 },
-            { emoji: 'ðŸ ', name: 'Jump Squats',               muscles: 'Quads, Glutes, Cardio',   sets: 3, reps: 15 },
-            { emoji: 'ðŸ ', name: 'Wall Sit',                  muscles: 'Quads',                   sets: 3, reps: 45 },
-            // â€” Arms â€”
-            { emoji: 'ðŸ’ª', name: 'Barbell Curls',             muscles: 'Biceps',                  sets: 3, reps: 12 },
-            { emoji: 'ðŸ’ª', name: 'Dumbbell Curls',            muscles: 'Biceps',                  sets: 3, reps: 12 },
-            { emoji: 'ðŸ’ª', name: 'Hammer Curls',              muscles: 'Biceps, Forearms',        sets: 3, reps: 12 },
-            { emoji: 'ðŸ’ª', name: 'Concentration Curls',       muscles: 'Biceps',                  sets: 2, reps: 12 },
-            { emoji: 'ðŸ’ª', name: 'Preacher Curls',            muscles: 'Biceps',                  sets: 3, reps: 10 },
-            { emoji: 'ðŸ’ª', name: 'Cable Curls',               muscles: 'Biceps',                  sets: 3, reps: 15 },
-            { emoji: 'ðŸ’ª', name: 'Tricep Pushdowns',          muscles: 'Triceps',                 sets: 3, reps: 15 },
-            { emoji: 'ðŸ’ª', name: 'Overhead Tricep Extension', muscles: 'Triceps',                 sets: 3, reps: 12 },
-            { emoji: 'ðŸ’ª', name: 'Skull Crushers',            muscles: 'Triceps',                 sets: 3, reps: 10 },
-            { emoji: 'ðŸ’ª', name: 'Tricep Kickbacks',          muscles: 'Triceps',                 sets: 3, reps: 15 },
-            { emoji: 'ðŸ’ª', name: 'Close-Grip Bench Press',    muscles: 'Triceps, Chest',          sets: 3, reps: 10 },
-            { emoji: 'ðŸ’ª', name: 'Wrist Curls',               muscles: 'Forearms',                sets: 3, reps: 20 },
-            { emoji: 'ðŸ’ª', name: 'Reverse Curls',             muscles: 'Forearms, Biceps',        sets: 3, reps: 15 },
-            // â€” Core â€”
-            { emoji: 'ðŸ§˜', name: 'Plank',                     muscles: 'Core',                    sets: 3, reps: 60 },
-            { emoji: 'ðŸ§˜', name: 'Side Plank',                muscles: 'Obliques, Core',          sets: 3, reps: 45 },
-            { emoji: 'ðŸ§˜', name: 'Crunches',                  muscles: 'Abs',                     sets: 3, reps: 20 },
-            { emoji: 'ðŸ§˜', name: 'Bicycle Crunches',          muscles: 'Abs, Obliques',           sets: 3, reps: 20 },
-            { emoji: 'ðŸ§˜', name: 'Leg Raises',                muscles: 'Lower Abs',               sets: 3, reps: 15 },
-            { emoji: 'ðŸ§˜', name: 'Hanging Leg Raises',        muscles: 'Abs',                     sets: 3, reps: 12 },
-            { emoji: 'ðŸ§˜', name: 'Russian Twists',            muscles: 'Obliques',                sets: 3, reps: 20 },
-            { emoji: 'ðŸ§˜', name: 'Dead Bug',                  muscles: 'Core',                    sets: 3, reps: 10 },
-            { emoji: 'ðŸ§˜', name: 'Ab Wheel Rollout',          muscles: 'Core',                    sets: 3, reps: 10 },
-            { emoji: 'ðŸ§˜', name: 'Cable Crunches',            muscles: 'Abs',                     sets: 3, reps: 15 },
-            { emoji: 'ðŸ§˜', name: 'V-Ups',                     muscles: 'Abs',                     sets: 3, reps: 15 },
-            { emoji: 'ðŸ§˜', name: 'Flutter Kicks',             muscles: 'Lower Abs',               sets: 3, reps: 30 },
-            { emoji: 'ðŸ§˜', name: 'Hollow Body Hold',          muscles: 'Core',                    sets: 3, reps: 30 },
-            // â€” Cardio â€”
-            { emoji: 'ðŸƒ', name: 'Treadmill Run',             muscles: 'Cardio',                  sets: 1, reps: 30 },
-            { emoji: 'ðŸƒ', name: 'Outdoor Run',               muscles: 'Cardio',                  sets: 1, reps: 30 },
-            { emoji: 'ðŸƒ', name: 'HIIT Run',                  muscles: 'Cardio, Full Body',       sets: 6, reps: 30 },
-            { emoji: 'ðŸš´', name: 'Stationary Bike',           muscles: 'Cardio, Legs',            sets: 1, reps: 30 },
-            { emoji: 'ðŸš´', name: 'Cycling',                   muscles: 'Cardio, Legs',            sets: 1, reps: 45 },
-            { emoji: 'ðŸƒ', name: 'Jump Rope',                 muscles: 'Cardio',                  sets: 3, reps: 60 },
-            { emoji: 'ðŸƒ', name: 'Burpees',                   muscles: 'Full Body, Cardio',       sets: 3, reps: 10 },
-            { emoji: 'ðŸƒ', name: 'Mountain Climbers',         muscles: 'Core, Cardio',            sets: 3, reps: 30 },
-            { emoji: 'ðŸƒ', name: 'High Knees',                muscles: 'Cardio, Core',            sets: 3, reps: 30 },
-            { emoji: 'ðŸƒ', name: 'Box Jumps',                 muscles: 'Legs, Cardio',            sets: 4, reps: 8  },
-            { emoji: 'ðŸŠ', name: 'Swimming',                  muscles: 'Full Body, Cardio',       sets: 1, reps: 30 },
-            { emoji: 'ðŸ§—', name: 'Rowing Machine',            muscles: 'Back, Legs, Cardio',      sets: 1, reps: 20 },
-            { emoji: 'ðŸƒ', name: 'Stair Climber',             muscles: 'Legs, Cardio',            sets: 1, reps: 20 },
-            { emoji: 'ðŸƒ', name: 'Elliptical',                muscles: 'Full Body, Cardio',       sets: 1, reps: 30 },
-            // â€” Flexibility & Recovery â€”
-            { emoji: 'ðŸ§˜', name: 'Yoga',                      muscles: 'Flexibility, Core',       sets: 1, reps: 30 },
-            { emoji: 'ðŸ§˜', name: 'Stretching',                muscles: 'Flexibility',             sets: 1, reps: 20 },
-            { emoji: 'ðŸ§˜', name: 'Foam Rolling',              muscles: 'Recovery',                sets: 1, reps: 15 },
+            // — Chest —
+            { emoji: '🏋️', name: 'Bench Press',              muscles: 'Chest, Triceps',          sets: 4, reps: 10 },
+            { emoji: '🏋️', name: 'Incline Bench Press',      muscles: 'Upper Chest, Shoulders',  sets: 4, reps: 10 },
+            { emoji: '🏋️', name: 'Decline Bench Press',      muscles: 'Lower Chest, Triceps',    sets: 3, reps: 10 },
+            { emoji: '🏋️', name: 'Incline Dumbbell Press',   muscles: 'Upper Chest, Shoulders',  sets: 3, reps: 12 },
+            { emoji: '🏋️', name: 'Dumbbell Flyes',           muscles: 'Chest',                   sets: 3, reps: 12 },
+            { emoji: '🏋️', name: 'Cable Flyes',              muscles: 'Chest',                   sets: 3, reps: 15 },
+            { emoji: '🏋️', name: 'Chest Press Machine',      muscles: 'Chest, Triceps',          sets: 3, reps: 12 },
+            { emoji: '💪', name: 'Push-Ups',                  muscles: 'Chest, Core',             sets: 3, reps: 20 },
+            { emoji: '💪', name: 'Wide Push-Ups',             muscles: 'Chest',                   sets: 3, reps: 15 },
+            { emoji: '💪', name: 'Diamond Push-Ups',          muscles: 'Chest, Triceps',          sets: 3, reps: 12 },
+            { emoji: '💪', name: 'Decline Push-Ups',          muscles: 'Upper Chest',             sets: 3, reps: 15 },
+            { emoji: '💪', name: 'Dips',                      muscles: 'Chest, Triceps',          sets: 3, reps: 10 },
+            // — Back —
+            { emoji: '🏋️', name: 'Deadlift',                 muscles: 'Full Back, Legs',         sets: 4, reps: 5  },
+            { emoji: '🏋️', name: 'Barbell Rows',             muscles: 'Back, Biceps',            sets: 4, reps: 10 },
+            { emoji: '🏋️', name: 'Dumbbell Rows',            muscles: 'Mid Back, Biceps',        sets: 3, reps: 12 },
+            { emoji: '🏋️', name: 'Lat Pulldown',             muscles: 'Lats',                    sets: 3, reps: 12 },
+            { emoji: '🏋️', name: 'Seated Cable Rows',        muscles: 'Mid Back',                sets: 3, reps: 12 },
+            { emoji: '🏋️', name: 'Face Pulls',               muscles: 'Rear Delts, Traps',       sets: 3, reps: 15 },
+            { emoji: '🏋️', name: 'T-Bar Rows',               muscles: 'Back, Biceps',            sets: 4, reps: 10 },
+            { emoji: '🏋️', name: 'Chest-Supported Rows',     muscles: 'Mid Back',                sets: 3, reps: 12 },
+            { emoji: '💪', name: 'Pull-Ups',                  muscles: 'Lats, Biceps',            sets: 4, reps: 8  },
+            { emoji: '💪', name: 'Chin-Ups',                  muscles: 'Lats, Biceps',            sets: 4, reps: 8  },
+            { emoji: '💪', name: 'Inverted Rows',             muscles: 'Back, Biceps',            sets: 3, reps: 12 },
+            // — Shoulders —
+            { emoji: '🏋️', name: 'Overhead Press',           muscles: 'Shoulders, Triceps',      sets: 4, reps: 8  },
+            { emoji: '🏋️', name: 'Dumbbell Shoulder Press',  muscles: 'Shoulders',               sets: 3, reps: 12 },
+            { emoji: '🏋️', name: 'Arnold Press',             muscles: 'Shoulders',               sets: 3, reps: 12 },
+            { emoji: '🏋️', name: 'Lateral Raises',           muscles: 'Side Delts',              sets: 3, reps: 15 },
+            { emoji: '🏋️', name: 'Front Raises',             muscles: 'Front Delts',             sets: 3, reps: 15 },
+            { emoji: '🏋️', name: 'Reverse Flyes',            muscles: 'Rear Delts',              sets: 3, reps: 15 },
+            { emoji: '🏋️', name: 'Upright Rows',             muscles: 'Traps, Side Delts',       sets: 3, reps: 12 },
+            { emoji: '🏋️', name: 'Shrugs',                   muscles: 'Traps',                   sets: 4, reps: 15 },
+            { emoji: '💪', name: 'Pike Push-Ups',             muscles: 'Shoulders',               sets: 3, reps: 12 },
+            { emoji: '💪', name: 'Handstand Push-Ups',        muscles: 'Shoulders, Triceps',      sets: 3, reps: 8  },
+            // — Legs —
+            { emoji: '🦵', name: 'Squats',                    muscles: 'Quads, Glutes',           sets: 4, reps: 10 },
+            { emoji: '🦵', name: 'Front Squats',              muscles: 'Quads, Core',             sets: 4, reps: 8  },
+            { emoji: '🦵', name: 'Romanian Deadlifts',        muscles: 'Hamstrings, Glutes',      sets: 4, reps: 10 },
+            { emoji: '🦵', name: 'Leg Press',                 muscles: 'Quads',                   sets: 3, reps: 12 },
+            { emoji: '🦵', name: 'Leg Curls',                 muscles: 'Hamstrings',              sets: 3, reps: 12 },
+            { emoji: '🦵', name: 'Leg Extensions',            muscles: 'Quads',                   sets: 3, reps: 15 },
+            { emoji: '🦵', name: 'Lunges',                    muscles: 'Quads, Glutes',           sets: 3, reps: 10 },
+            { emoji: '🦵', name: 'Walking Lunges',            muscles: 'Quads, Glutes',           sets: 3, reps: 12 },
+            { emoji: '🦵', name: 'Bulgarian Split Squats',    muscles: 'Quads, Glutes',           sets: 3, reps: 10 },
+            { emoji: '🦵', name: 'Hip Thrusts',               muscles: 'Glutes, Hamstrings',      sets: 4, reps: 12 },
+            { emoji: '🦵', name: 'Glute Bridges',             muscles: 'Glutes',                  sets: 3, reps: 15 },
+            { emoji: '🦵', name: 'Calf Raises',               muscles: 'Calves',                  sets: 4, reps: 20 },
+            { emoji: '🦵', name: 'Seated Calf Raises',        muscles: 'Calves',                  sets: 3, reps: 20 },
+            { emoji: '🦵', name: 'Step-Ups',                  muscles: 'Quads, Glutes',           sets: 3, reps: 12 },
+            { emoji: '🦵', name: 'Sumo Squats',               muscles: 'Inner Thighs, Glutes',    sets: 3, reps: 15 },
+            { emoji: '🏠', name: 'Bodyweight Squats',         muscles: 'Quads, Glutes',           sets: 4, reps: 20 },
+            { emoji: '🏠', name: 'Jump Squats',               muscles: 'Quads, Glutes, Cardio',   sets: 3, reps: 15 },
+            { emoji: '🏠', name: 'Wall Sit',                  muscles: 'Quads',                   sets: 3, reps: 45 },
+            // — Arms —
+            { emoji: '💪', name: 'Barbell Curls',             muscles: 'Biceps',                  sets: 3, reps: 12 },
+            { emoji: '💪', name: 'Dumbbell Curls',            muscles: 'Biceps',                  sets: 3, reps: 12 },
+            { emoji: '💪', name: 'Hammer Curls',              muscles: 'Biceps, Forearms',        sets: 3, reps: 12 },
+            { emoji: '💪', name: 'Concentration Curls',       muscles: 'Biceps',                  sets: 2, reps: 12 },
+            { emoji: '💪', name: 'Preacher Curls',            muscles: 'Biceps',                  sets: 3, reps: 10 },
+            { emoji: '💪', name: 'Cable Curls',               muscles: 'Biceps',                  sets: 3, reps: 15 },
+            { emoji: '💪', name: 'Tricep Pushdowns',          muscles: 'Triceps',                 sets: 3, reps: 15 },
+            { emoji: '💪', name: 'Overhead Tricep Extension', muscles: 'Triceps',                 sets: 3, reps: 12 },
+            { emoji: '💪', name: 'Skull Crushers',            muscles: 'Triceps',                 sets: 3, reps: 10 },
+            { emoji: '💪', name: 'Tricep Kickbacks',          muscles: 'Triceps',                 sets: 3, reps: 15 },
+            { emoji: '💪', name: 'Close-Grip Bench Press',    muscles: 'Triceps, Chest',          sets: 3, reps: 10 },
+            { emoji: '💪', name: 'Wrist Curls',               muscles: 'Forearms',                sets: 3, reps: 20 },
+            { emoji: '💪', name: 'Reverse Curls',             muscles: 'Forearms, Biceps',        sets: 3, reps: 15 },
+            // — Core —
+            { emoji: '🧘', name: 'Plank',                     muscles: 'Core',                    sets: 3, reps: 60 },
+            { emoji: '🧘', name: 'Side Plank',                muscles: 'Obliques, Core',          sets: 3, reps: 45 },
+            { emoji: '🧘', name: 'Crunches',                  muscles: 'Abs',                     sets: 3, reps: 20 },
+            { emoji: '🧘', name: 'Bicycle Crunches',          muscles: 'Abs, Obliques',           sets: 3, reps: 20 },
+            { emoji: '🧘', name: 'Leg Raises',                muscles: 'Lower Abs',               sets: 3, reps: 15 },
+            { emoji: '🧘', name: 'Hanging Leg Raises',        muscles: 'Abs',                     sets: 3, reps: 12 },
+            { emoji: '🧘', name: 'Russian Twists',            muscles: 'Obliques',                sets: 3, reps: 20 },
+            { emoji: '🧘', name: 'Dead Bug',                  muscles: 'Core',                    sets: 3, reps: 10 },
+            { emoji: '🧘', name: 'Ab Wheel Rollout',          muscles: 'Core',                    sets: 3, reps: 10 },
+            { emoji: '🧘', name: 'Cable Crunches',            muscles: 'Abs',                     sets: 3, reps: 15 },
+            { emoji: '🧘', name: 'V-Ups',                     muscles: 'Abs',                     sets: 3, reps: 15 },
+            { emoji: '🧘', name: 'Flutter Kicks',             muscles: 'Lower Abs',               sets: 3, reps: 30 },
+            { emoji: '🧘', name: 'Hollow Body Hold',          muscles: 'Core',                    sets: 3, reps: 30 },
+            // — Cardio —
+            { emoji: '🏃', name: 'Treadmill Run',             muscles: 'Cardio',                  sets: 1, reps: 30 },
+            { emoji: '🏃', name: 'Outdoor Run',               muscles: 'Cardio',                  sets: 1, reps: 30 },
+            { emoji: '🏃', name: 'HIIT Run',                  muscles: 'Cardio, Full Body',       sets: 6, reps: 30 },
+            { emoji: '🚴', name: 'Stationary Bike',           muscles: 'Cardio, Legs',            sets: 1, reps: 30 },
+            { emoji: '🚴', name: 'Cycling',                   muscles: 'Cardio, Legs',            sets: 1, reps: 45 },
+            { emoji: '🏃', name: 'Jump Rope',                 muscles: 'Cardio',                  sets: 3, reps: 60 },
+            { emoji: '🏃', name: 'Burpees',                   muscles: 'Full Body, Cardio',       sets: 3, reps: 10 },
+            { emoji: '🏃', name: 'Mountain Climbers',         muscles: 'Core, Cardio',            sets: 3, reps: 30 },
+            { emoji: '🏃', name: 'High Knees',                muscles: 'Cardio, Core',            sets: 3, reps: 30 },
+            { emoji: '🏃', name: 'Box Jumps',                 muscles: 'Legs, Cardio',            sets: 4, reps: 8  },
+            { emoji: '🏊', name: 'Swimming',                  muscles: 'Full Body, Cardio',       sets: 1, reps: 30 },
+            { emoji: '🧗', name: 'Rowing Machine',            muscles: 'Back, Legs, Cardio',      sets: 1, reps: 20 },
+            { emoji: '🏃', name: 'Stair Climber',             muscles: 'Legs, Cardio',            sets: 1, reps: 20 },
+            { emoji: '🏃', name: 'Elliptical',                muscles: 'Full Body, Cardio',       sets: 1, reps: 30 },
+            // — Flexibility & Recovery —
+            { emoji: '🧘', name: 'Yoga',                      muscles: 'Flexibility, Core',       sets: 1, reps: 30 },
+            { emoji: '🧘', name: 'Stretching',                muscles: 'Flexibility',             sets: 1, reps: 20 },
+            { emoji: '🧘', name: 'Foam Rolling',              muscles: 'Recovery',                sets: 1, reps: 15 },
         ];
 
         function getExerciseLogKey() {
@@ -10924,7 +10924,7 @@ Please try again with a different photo.`;
                                 <span class="fl-dd-name">${p.name}</span>
                                 <span class="fl-dd-detail">${p.muscles}</span>
                             </div>
-                            <span class="fl-dd-cal">${p.sets}Ã—${p.reps}</span>
+                            <span class="fl-dd-cal">${p.sets}×${p.reps}</span>
                         </div>`
                     ).join('');
                     elDrop.style.display = 'block';
@@ -11004,7 +11004,7 @@ Please try again with a different photo.`;
                     e.sets   ? `${e.sets} sets`  : '',
                     e.reps   ? `${e.reps} reps`  : '',
                     e.weight ? `${e.weight} kg`  : '',
-                ].filter(Boolean).join(' Â· ');
+                ].filter(Boolean).join(' · ');
                 return `<div class="food-log-entry">
                     <span class="fle-name" title="${name}">${name}</span>
                     ${muscles}
@@ -11108,7 +11108,7 @@ Please try again with a different photo.`;
                 const exListHTML = (s.exercises || []).map(e =>
                     `<li class="wl-ex-item">
                         <span class="wl-ex-name">${e.name}</span>
-                        <span class="wl-ex-detail">${e.sets}Ã—${e.reps}</span>
+                        <span class="wl-ex-detail">${e.sets}×${e.reps}</span>
                     </li>`
                 ).join('');
 
@@ -11210,14 +11210,14 @@ Please try again with a different photo.`;
             list.innerHTML = exercises.map((ex, i) => {
                 const prev = log[ex.name]?.[0];
                 const prevHint = prev
-                    ? `prev: ${prev.weight}kg Ã— ${prev.reps}`
+                    ? `prev: ${prev.weight}kg × ${prev.reps}`
                     : 'no data yet';
                 return `<div class="lift-entry-row" data-exercise="${ex.name.replace(/"/g, '&quot;')}">
                     <span class="lift-entry-name" title="${ex.name}">${ex.name}</span>
                     <span class="lift-entry-pr-hint">${prevHint}</span>
                     <input type="number" class="lift-entry-input lift-weight" placeholder="kg" min="0" max="500" step="0.5" aria-label="Weight for ${ex.name}">
                     <span class="lift-entry-unit">kg</span>
-                    <span class="lift-entry-unit" style="color:var(--text-secondary)">Ã—</span>
+                    <span class="lift-entry-unit" style="color:var(--text-secondary)">×</span>
                     <input type="number" class="lift-entry-input lift-reps" placeholder="reps" min="1" max="100" step="1" value="${ex.reps || ''}" aria-label="Reps for ${ex.name}">
                 </div>`;
             }).join('');
@@ -11245,7 +11245,7 @@ Please try again with a different photo.`;
             document.getElementById('log-lifts-toggle')?.classList.remove('open');
             renderPersonalRecords();
             const msg = newPRs > 0
-                ? `${newPRs} new PR${newPRs > 1 ? 's' : ''}! ðŸ† + ${saved - newPRs} lift${saved - newPRs !== 1 ? 's' : ''} saved`
+                ? `${newPRs} new PR${newPRs > 1 ? 's' : ''}! 🏆 + ${saved - newPRs} lift${saved - newPRs !== 1 ? 's' : ''} saved`
                 : `${saved} lift${saved > 1 ? 's' : ''} logged`;
             showToast(msg, 'success');
         }
@@ -11287,9 +11287,9 @@ Please try again with a different photo.`;
                 if (prev) {
                     const diff = best.e1rm - prev.e1rm;
                     if (diff > 0) {
-                        deltaHTML = `<span class="pr-card-delta up">â†‘ +${diff} kg e1RM</span>`;
+                        deltaHTML = `<span class="pr-card-delta up">↑ +${diff} kg e1RM</span>`;
                     } else if (diff < 0) {
-                        deltaHTML = `<span class="pr-card-delta same">â†“ ${diff} kg e1RM</span>`;
+                        deltaHTML = `<span class="pr-card-delta same">↓ ${diff} kg e1RM</span>`;
                     } else {
                         deltaHTML = `<span class="pr-card-delta same">= same as before</span>`;
                     }
@@ -11428,7 +11428,7 @@ Please try again with a different photo.`;
                 for (let i = 0; i < numGlasses; i++) {
                     const glass = document.createElement('button');
                     glass.className = 'water-glass' + (i < drunk ? ' filled' : '');
-                    glass.title = i < drunk ? `Glass ${i+1} â€” ${glassMl}ml` : `Tap to log glass ${i+1}`;
+                    glass.title = i < drunk ? `Glass ${i+1} — ${glassMl}ml` : `Tap to log glass ${i+1}`;
                     glass.innerHTML = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="18" height="18">
                         <path d="M5 3h14l-2 14a2 2 0 0 1-2 2H9a2 2 0 0 1-2-2L5 3z"/>
                     </svg>`;
@@ -11437,7 +11437,7 @@ Please try again with a different photo.`;
                         if (i < current) return; // already filled, use undo
                         saveGlassesDrunk(i + 1);
                         renderWater();
-                        if (i + 1 === numGlasses) showToast('Great job! Daily hydration goal reached! ðŸ’§', 'success');
+                        if (i + 1 === numGlasses) showToast('Great job! Daily hydration goal reached! 💧', 'success');
                     });
                     grid.appendChild(glass);
                 }
@@ -11477,7 +11477,7 @@ Please try again with a different photo.`;
                 // 7-day average (last 7 days including today)
                 const last7  = days.slice(-7);
                 const avg7   = (last7.reduce((s, d) => s + d.glasses, 0) / 7).toFixed(1);
-                if (avgEl) avgEl.textContent = avg7 === '0.0' ? 'â€”' : `${avg7}`;
+                if (avgEl) avgEl.textContent = avg7 === '0.0' ? '—' : `${avg7}`;
 
                 // Current goal streak (consecutive days from today back hitting 8 glasses)
                 let streak = 0;
@@ -11495,8 +11495,8 @@ Please try again with a different photo.`;
                     else run = 0;
                 }
 
-                if (streakEl) streakEl.textContent = streak > 0 ? `${streak}d` : 'â€”';
-                if (bestEl)   bestEl.textContent   = best   > 0 ? `${best}d`   : 'â€”';
+                if (streakEl) streakEl.textContent = streak > 0 ? `${streak}d` : '—';
+                if (bestEl)   bestEl.textContent   = best   > 0 ? `${best}d`   : '—';
             }
 
             // Patch renderWater to also update history
@@ -11507,7 +11507,7 @@ Please try again with a different photo.`;
             }
 
             // Re-wire glass clicks and undo to use the patched version
-            // (renderWater is called internally in glass clicks â€” we need to re-register)
+            // (renderWater is called internally in glass clicks — we need to re-register)
             // Instead, just call renderWaterHistory() after renderWater() throughout
             renderWaterHistory();
 
@@ -11519,7 +11519,7 @@ Please try again with a different photo.`;
             // Patch glass click handlers to also call history after save
             // We do this by wrapping the grid click via event delegation
             grid.addEventListener('click', () => {
-                // renderWater already called in individual glass handlers â€” just update history after
+                // renderWater already called in individual glass handlers — just update history after
                 setTimeout(renderWaterHistory, 0);
             });
 
@@ -11661,7 +11661,7 @@ Please try again with a different photo.`;
                 const cur = latest?.[k];
                 const old = prev?.[k];
 
-                valEl.textContent = cur != null ? cur.toFixed(1) : 'â€”';
+                valEl.textContent = cur != null ? cur.toFixed(1) : '—';
 
                 if (deltaEl) {
                     if (cur != null && old != null && cur !== old) {
@@ -11695,35 +11695,35 @@ Please try again with a different photo.`;
         const HABIT_CONFIG = [
             {
                 id: 'workout',
-                icon: 'ðŸ’ª',
+                icon: '💪',
                 name: 'Workout',
                 auto: true,
                 goalDesc: 'Log a workout session'
             },
             {
                 id: 'hydration',
-                icon: 'ðŸ’§',
+                icon: '💧',
                 name: 'Hydration',
                 auto: true,
                 goalDesc: 'Reach 8 glasses of water'
             },
             {
                 id: 'sleep',
-                icon: 'ðŸ˜´',
+                icon: '😴',
                 name: 'Sleep',
                 auto: true,
                 goalDesc: 'Log 7+ hours last night'
             },
             {
                 id: 'nutrition',
-                icon: 'ðŸ¥—',
+                icon: '🥗',
                 name: 'Nutrition',
                 auto: true,
                 goalDesc: 'Log your meals today'
             },
             {
                 id: 'checkin',
-                icon: 'ðŸŽ¯',
+                icon: '🎯',
                 name: 'Check-In',
                 auto: false,
                 goalDesc: 'Tap to mark done'
@@ -11785,7 +11785,7 @@ Please try again with a different photo.`;
                     return glasses >= 8;
                 }
                 case 'sleep': {
-                    // Sleep is logged for the night that just ended â†’ check yesterday's or today's entry
+                    // Sleep is logged for the night that just ended → check yesterday's or today's entry
                     const log = getSleepLog();
                     const entry = log.find(e => e.date === yesterday || e.date === today);
                     return entry ? entry.hours >= 7 : false;
@@ -11843,10 +11843,10 @@ Please try again with a different photo.`;
 
         const SCORE_MSGS = [
             'Start logging to track your daily habits.',
-            'Good start! Keep going â€” every habit counts.',
+            'Good start! Keep going — every habit counts.',
             'Making progress! You\'re building momentum.',
             'Solid day! You\'re more than halfway there.',
-            'Almost perfect â€” one more habit to go!',
+            'Almost perfect — one more habit to go!',
             'Perfect day! Every habit complete. Keep it up!'
         ];
 
@@ -11877,7 +11877,7 @@ Please try again with a different photo.`;
                     : h.goalDesc;
                 const streakHtml = h.streak > 0
                     ? `<span class="habit-streak"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M8.5 14.5A2.5 2.5 0 0011 12c0-1.38-.5-2-1-3-1.072-2.143-.224-4.054 2-6 .5 2.5 2 4.9 4 6.5 2 1.6 3 3.5 3 5.5a7 7 0 11-14 0c0-1.153.433-2.294 1-3a2.5 2.5 0 002.5 3z"/></svg>${h.streak}d</span>`
-                    : `<span class="habit-streak" style="color:var(--text-muted);font-weight:500">â€”</span>`;
+                    : `<span class="habit-streak" style="color:var(--text-muted);font-weight:500">—</span>`;
                 return `
                     <div class="habit-tile${doneClass}${manualClass}" data-habit="${h.id}">
                         <div class="habit-check">
@@ -11899,7 +11899,7 @@ Please try again with a different photo.`;
             });
 
             // Update score ring
-            const CIRCUMFERENCE = 163.4; // 2Ï€ Ã— r(26)
+            const CIRCUMFERENCE = 163.4; // 2π × r(26)
             const fill = document.getElementById('habits-ring-fill');
             const num = document.getElementById('habits-ring-num');
             const badge = document.getElementById('habits-score-badge');
@@ -11928,7 +11928,7 @@ Please try again with a different photo.`;
             const messageEl  = document.getElementById('wr-message');
             const rangeEl    = document.getElementById('wr-week-range');
 
-            // Current week bounds (Sunâ€“Sat)
+            // Current week bounds (Sun–Sat)
             const now = new Date();
             const startOfWeek = new Date(now);
             startOfWeek.setDate(now.getDate() - now.getDay());
@@ -11938,7 +11938,7 @@ Please try again with a different photo.`;
 
             const fmt = { month: 'short', day: 'numeric' };
             if (rangeEl) rangeEl.textContent =
-                `${startOfWeek.toLocaleDateString('en-US', fmt)} â€“ ${endOfWeek.toLocaleDateString('en-US', fmt)}`;
+                `${startOfWeek.toLocaleDateString('en-US', fmt)} – ${endOfWeek.toLocaleDateString('en-US', fmt)}`;
 
             const weekStartStr = startOfWeek.toISOString().split('T')[0];
 
@@ -11953,7 +11953,7 @@ Please try again with a different photo.`;
             const avgSleep = sleepThisWeek.length
                 ? sleepThisWeek.reduce((s, e) => s + e.hours, 0) / sleepThisWeek.length
                 : null;
-            if (sleepEl) sleepEl.textContent = avgSleep !== null ? `${avgSleep.toFixed(1)}h` : 'â€”';
+            if (sleepEl) sleepEl.textContent = avgSleep !== null ? `${avgSleep.toFixed(1)}h` : '—';
 
             // --- Weight change this week (or last 7 days) ---
             const weightLog = getWeightLog();
@@ -11974,7 +11974,7 @@ Please try again with a different photo.`;
                     weightEl.textContent = `${sign}${weightChange.toFixed(1)}kg`;
                     weightEl.style.color = weightChange <= 0 ? '#4ade80' : 'var(--accent-warm)';
                 } else {
-                    weightEl.textContent = 'â€”';
+                    weightEl.textContent = '—';
                     weightEl.style.color = '';
                 }
             }
@@ -12015,13 +12015,13 @@ Please try again with a different photo.`;
             let weekMessage = '';
             if (!hasData) {
                 weekMessage = "Start logging workouts and sleep to see your weekly report.";
-            } else if (finalScore >= 93) weekMessage = "Outstanding week â€” elite-level consistency!";
+            } else if (finalScore >= 93) weekMessage = "Outstanding week — elite-level consistency!";
             else if (finalScore >= 85) weekMessage = "Excellent week. Keep this momentum going.";
-            else if (finalScore >= 77) weekMessage = "Solid week â€” you're building great habits.";
+            else if (finalScore >= 77) weekMessage = "Solid week — you're building great habits.";
             else if (finalScore >= 69) weekMessage = "Good effort this week. Small gains compound.";
-            else if (finalScore >= 61) weekMessage = "Decent week â€” try adding one more workout.";
-            else if (finalScore >= 53) weekMessage = "Room to grow â€” focus on sleep and consistency.";
-            else weekMessage = "Tough week â€” every step forward still counts.";
+            else if (finalScore >= 61) weekMessage = "Decent week — try adding one more workout.";
+            else if (finalScore >= 53) weekMessage = "Room to grow — focus on sleep and consistency.";
+            else weekMessage = "Tough week — every step forward still counts.";
             // Append calorie context if nutrition data is available for this week
             const calLogThisWeek = getCalorieLog().filter(e => e.date >= weekStartStr);
             let calSuffix = '';
@@ -12031,9 +12031,9 @@ Please try again with a different photo.`;
                 if (goalCal) {
                     const diff = avgCal - goalCal;
                     const sign = diff > 0 ? '+' : '';
-                    calSuffix = `  Â·  Avg ${avgCal} kcal/day (${sign}${diff} vs goal).`;
+                    calSuffix = `  ·  Avg ${avgCal} kcal/day (${sign}${diff} vs goal).`;
                 } else {
-                    calSuffix = `  Â·  Avg ${avgCal} kcal/day this week.`;
+                    calSuffix = `  ·  Avg ${avgCal} kcal/day this week.`;
                 }
             }
             if (messageEl) messageEl.textContent = weekMessage + calSuffix;
@@ -12099,7 +12099,7 @@ Please try again with a different photo.`;
             const qualityMap = { good: 100, fair: 65, poor: 30 };
             const qualityScore = withData.reduce((s, e) => s + (qualityMap[e.quality] || 50), 0) / withData.length;
 
-            // Workout balance: 3â€“4/week ideal
+            // Workout balance: 3–4/week ideal
             const wlog = getWorkoutLog();
             const workoutsThisWeek = wlog.filter(s => {
                 if (!s.date) return false;
@@ -12172,7 +12172,7 @@ Please try again with a different photo.`;
             const log = getSleepLog();
             const now = new Date();
 
-            // Build last-7-days data oldestâ†’newest
+            // Build last-7-days data oldest→newest
             const days7 = [];
             for (let i = 6; i >= 0; i--) {
                 const d = new Date(now);
@@ -12208,13 +12208,13 @@ Please try again with a different photo.`;
             const avgHrs = withData.length
                 ? (withData.reduce((s, d) => s + d.entry.hours, 0) / withData.length).toFixed(1)
                 : null;
-            if (avgBadge) avgBadge.textContent = avgHrs ? `${avgHrs}h avg` : 'â€” hrs avg';
+            if (avgBadge) avgBadge.textContent = avgHrs ? `${avgHrs}h avg` : '— hrs avg';
 
             // Recovery score
             const score = computeRecoveryScore(log);
             if (scoreVal) {
                 if (score === null) {
-                    scoreVal.textContent = 'â€”';
+                    scoreVal.textContent = '—';
                     scoreVal.className = 'sleep-score-val';
                 } else {
                     scoreVal.textContent = score;
@@ -12225,14 +12225,14 @@ Please try again with a different photo.`;
                 }
             }
 
-            // Good-nights streak (consecutive days from today back: â‰¥7h & quality !== 'poor')
+            // Good-nights streak (consecutive days from today back: ≥7h & quality !== 'poor')
             let streak = 0;
             for (let i = 0; i < log.length; i++) {
                 const e = log[i];
                 if (e.hours >= 7 && e.quality !== 'poor') streak++;
                 else break;
             }
-            if (streakVal) streakVal.textContent = streak > 0 ? streak : 'â€”';
+            if (streakVal) streakVal.textContent = streak > 0 ? streak : '—';
 
             // Last logged
             if (lastLogged) {
@@ -12277,7 +12277,7 @@ Please try again with a different photo.`;
             // â”€â”€ Streak â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
             if (streak >= 7) {
                 insights.push({ type: 'positive', icon: 'streak',
-                    text: `<strong>${streak}-day workout streak.</strong> Exceptional consistency â€” you're building a lasting habit.` });
+                    text: `<strong>${streak}-day workout streak.</strong> Exceptional consistency — you're building a lasting habit.` });
             }
 
             // â”€â”€ Workout day pattern â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
@@ -12347,13 +12347,13 @@ Please try again with a different photo.`;
                 const pct    = Math.abs(diff) / goalCal * 100;
                 if (pct <= 8) {
                     insights.push({ type: 'positive', icon: 'check',
-                        text: `Calorie tracking on point â€” averaging <strong>${avgCal} kcal/day</strong>, just ${Math.abs(diff)} kcal from your ${goalCal} goal.` });
+                        text: `Calorie tracking on point — averaging <strong>${avgCal} kcal/day</strong>, just ${Math.abs(diff)} kcal from your ${goalCal} goal.` });
                 } else if (diff < 0) {
                     insights.push({ type: 'warning', icon: 'food',
-                        text: `Averaging <strong>${avgCal} kcal/day â€” ${Math.abs(diff)} below your ${goalCal} goal.</strong> A consistent deficit this large can slow metabolism.` });
+                        text: `Averaging <strong>${avgCal} kcal/day — ${Math.abs(diff)} below your ${goalCal} goal.</strong> A consistent deficit this large can slow metabolism.` });
                 } else {
                     insights.push({ type: 'neutral', icon: 'food',
-                        text: `Averaging <strong>${avgCal} kcal/day â€” ${diff} above goal.</strong> ${diff > 300 ? 'Consider reviewing portion sizes.' : 'Moderate surplus â€” fine for muscle-building.'}` });
+                        text: `Averaging <strong>${avgCal} kcal/day — ${diff} above goal.</strong> ${diff > 300 ? 'Consider reviewing portion sizes.' : 'Moderate surplus — fine for muscle-building.'}` });
                 }
             }
 
@@ -12367,7 +12367,7 @@ Please try again with a different photo.`;
                         text: `<strong>${poorN} of your last 5 nights</strong> were rated poor quality. Consistent poor sleep raises cortisol and slows recovery.` });
                 } else if (avgH >= 7.5 && poorN === 0) {
                     insights.push({ type: 'positive', icon: 'sleep',
-                        text: `5-night sleep average of <strong>${avgH.toFixed(1)}h</strong> with no poor nights â€” excellent recovery foundation.` });
+                        text: `5-night sleep average of <strong>${avgH.toFixed(1)}h</strong> with no poor nights — excellent recovery foundation.` });
                 }
             }
 
@@ -12481,7 +12481,7 @@ Please try again with a different photo.`;
             const goal = { 'lose-weight': 'Lose Weight', 'build-muscle': 'Build Muscle', 'maintain': 'Maintain', 'recomp': 'Recomposition' }[state.fitnessGoal] || '';
             const m = getMeasurements();
 
-            // Body score â€” large centre piece
+            // Body score — large centre piece
             ctx.fillStyle = '#c9a962';
             ctx.font = 'bold 72px sans-serif';
             ctx.textAlign = 'center';
@@ -12491,7 +12491,7 @@ Please try again with a different photo.`;
             ctx.fillText('Body Score / 100', W / 2, 210);
             ctx.fillStyle = '#c9a962';
             ctx.font = 'bold 18px sans-serif';
-            ctx.fillText(category + (bodyType ? ' Â· ' + bodyType : ''), W / 2, 238);
+            ctx.fillText(category + (bodyType ? ' · ' + bodyType : ''), W / 2, 238);
             ctx.textAlign = 'left';
 
             // Stat columns
@@ -12553,7 +12553,7 @@ Please try again with a different photo.`;
             ctx.fillStyle = '#333';
             ctx.font = '11px sans-serif';
             ctx.textAlign = 'right';
-            ctx.fillText('Generated by FiX-it Â· Educational estimate only', W - 40, H - 16);
+            ctx.fillText('Generated by FiX-it · Educational estimate only', W - 40, H - 16);
 
             // Download
             const link = document.createElement('a');
@@ -12608,7 +12608,7 @@ Please try again with a different photo.`;
 
             // ---- WEIGHT tab ----
             if (metric === 'weight') {
-                const log = getWeightLog().slice(0, 30).reverse(); // oldestâ†’newest
+                const log = getWeightLog().slice(0, 30).reverse(); // oldest→newest
                 if (log.length < 2) { showEmpty('Log your weight on 2+ days to see the trend here.'); return; }
                 showCanvas();
                 const labels = log.map(e => new Date(e.date + 'T12:00:00').toLocaleDateString('en-US', { month: 'short', day: 'numeric' }));
@@ -12650,7 +12650,7 @@ Please try again with a different photo.`;
 
             // ---- CALORIES tab ----
             if (metric === 'calories') {
-                const clog = getCalorieLog().slice(0, 30).reverse(); // oldestâ†’newest
+                const clog = getCalorieLog().slice(0, 30).reverse(); // oldest→newest
                 if (clog.length < 2) { showEmpty('Log food on 2+ days to see your calorie trend here.'); return; }
                 showCanvas();
                 const labels = clog.map(e => new Date(e.date + 'T12:00:00').toLocaleDateString('en-US', { month: 'short', day: 'numeric' }));
@@ -12662,7 +12662,7 @@ Please try again with a different photo.`;
 
             // ---- MEASUREMENTS tab ----
             if (metric === 'measurements') {
-                const log = getMeasurementLog().slice(0, 30).reverse(); // oldestâ†’newest
+                const log = getMeasurementLog().slice(0, 30).reverse(); // oldest→newest
                 const validEntries = log.filter(e => e.chest || e.waist || e.hips || e.arms);
                 if (validEntries.length < 2) { showEmpty('Log measurements on 2+ days to see your trend here.'); return; }
                 showCanvas();
@@ -12907,12 +12907,12 @@ Please try again with a different photo.`;
         function getTodayCaloriesBurned() {
             const today = new Date().toISOString().split('T')[0];
 
-            // 1. Completed workout sessions (via the workout player â€” already have caloriesBurned)
+            // 1. Completed workout sessions (via the workout player — already have caloriesBurned)
             const sessionBurned = getWorkoutLog()
                 .filter(s => s.date && s.date.startsWith(today))
                 .reduce((sum, s) => sum + (s.caloriesBurned || 0), 0);
 
-            // 2. Manual exercise log entries â€” estimate via MET
+            // 2. Manual exercise log entries — estimate via MET
             const weightKg = parseFloat(
                 state.user?.weight || state.measurements?.weight || 70
             );
@@ -12931,7 +12931,7 @@ Please try again with a different photo.`;
 
                 let kcal;
                 if (isCardio) {
-                    // For cardio, reps â‰ˆ minutes of activity; MET ~7 for moderate cardio
+                    // For cardio, reps ≈ minutes of activity; MET ~7 for moderate cardio
                     const totalMin = sets * Math.max(reps, 1);
                     kcal = Math.round(7 * weightKg * (totalMin / 60));
                 } else {
@@ -12966,11 +12966,11 @@ Please try again with a different photo.`;
             const hintEl = document.getElementById('cb-workout-hint');
             const hintText = document.getElementById('cb-workout-hint-text');
 
-            if (eatenEl) eatenEl.textContent = eaten || 'â€”';
+            if (eatenEl) eatenEl.textContent = eaten || '—';
             if (burnedEl) burnedEl.textContent = burned;
 
             if (netEl) {
-                netEl.textContent = eaten ? net : 'â€”';
+                netEl.textContent = eaten ? net : '—';
                 netEl.className = 'cb-net-val';
                 if (eaten && target) {
                     netEl.classList.add(net > target ? 'surplus' : net < target * 0.9 ? 'deficit' : '');
@@ -12994,7 +12994,7 @@ Please try again with a different photo.`;
             if (hintEl && hintText) {
                 if (burned > 0) {
                     hintEl.style.display = '';
-                    hintText.textContent = `${burned} kcal burned in today's workout â€” keep it up!`;
+                    hintText.textContent = `${burned} kcal burned in today's workout — keep it up!`;
                 } else {
                     hintEl.style.display = 'none';
                 }
@@ -13005,9 +13005,9 @@ Please try again with a different photo.`;
 
         async function loadPresetsFromDB() {
             const MUSCLE_EMOJI = {
-                chest: 'ðŸ‹ï¸', back: 'ðŸ‹ï¸', shoulders: 'ðŸ‹ï¸',
-                legs: 'ðŸ¦µ', arms: 'ðŸ’ª', core: 'ðŸ§˜',
-                cardio: 'ðŸƒ', flexibility: 'ðŸ§˜',
+                chest: '🏋️', back: '🏋️', shoulders: '🏋️',
+                legs: '🦵', arms: '💪', core: '🧘',
+                cardio: '🏃', flexibility: '🧘',
             };
 
             try {
@@ -13020,7 +13020,7 @@ Please try again with a different photo.`;
                     const foods = await foodsRes.json();
                     if (Array.isArray(foods) && foods.length) {
                         FOOD_PRESETS = foods.map(f => ({
-                            emoji:   f.icon   || 'ðŸ½ï¸',
+                            emoji:   f.icon   || '🍽️',
                             name:    f.name,
                             detail:  f.portion || '',
                             cal:     Math.round(Number(f.calories) || 0),
@@ -13035,7 +13035,7 @@ Please try again with a different photo.`;
                     const exercises = await exRes.json();
                     if (Array.isArray(exercises) && exercises.length) {
                         EXERCISE_PRESETS = exercises.map(e => ({
-                            emoji:   MUSCLE_EMOJI[e.muscle_group] || 'ðŸ’ª',
+                            emoji:   MUSCLE_EMOJI[e.muscle_group] || '💪',
                             name:    e.name,
                             muscles: Array.isArray(e.target_muscles)
                                 ? e.target_muscles.join(', ')
@@ -13046,90 +13046,90 @@ Please try again with a different photo.`;
                     }
                 }
             } catch (_) {
-                // Backend unavailable â€” hardcoded fallbacks remain in place
+                // Backend unavailable — hardcoded fallbacks remain in place
             }
         }
 
         // ========== DAILY FOOD LOG ==========
 
         let FOOD_PRESETS = [
-            // â€” Protein Sources â€”
-            { emoji: 'ðŸ—', name: 'Chicken Breast',       detail: '150g',    cal: 247, protein: 46, carbs: 0,  fats: 5  },
-            { emoji: 'ðŸ—', name: 'Chicken Thigh',        detail: '150g',    cal: 295, protein: 30, carbs: 0,  fats: 19 },
-            { emoji: 'ðŸ¥©', name: 'Ground Beef (lean)',   detail: '150g',    cal: 280, protein: 35, carbs: 0,  fats: 15 },
-            { emoji: 'ðŸ¥©', name: 'Sirloin Steak',        detail: '150g',    cal: 271, protein: 38, carbs: 0,  fats: 13 },
-            { emoji: 'ðŸ¥©', name: 'Pork Tenderloin',      detail: '150g',    cal: 196, protein: 35, carbs: 0,  fats: 5  },
-            { emoji: 'ðŸŸ', name: 'Tuna (canned)',        detail: '85g tin', cal: 100, protein: 22, carbs: 0,  fats: 0  },
-            { emoji: 'ðŸŸ', name: 'Salmon Fillet',        detail: '150g',    cal: 280, protein: 39, carbs: 0,  fats: 13 },
-            { emoji: 'ðŸŸ', name: 'Tilapia',              detail: '150g',    cal: 193, protein: 39, carbs: 0,  fats: 4  },
-            { emoji: 'ðŸŸ', name: 'Shrimp',               detail: '150g',    cal: 151, protein: 29, carbs: 2,  fats: 2  },
-            { emoji: 'ðŸ¥š', name: 'Eggs (2 large)',       detail: '2 pcs',   cal: 143, protein: 13, carbs: 1,  fats: 10 },
-            { emoji: 'ðŸ¥š', name: 'Egg Whites (4)',       detail: '4 whites',cal:  68, protein: 14, carbs: 1,  fats: 0  },
-            { emoji: 'ðŸ³', name: 'Greek Yogurt',         detail: '170g',    cal: 100, protein: 17, carbs: 6,  fats: 0  },
-            { emoji: 'ðŸ§€', name: 'Cottage Cheese',       detail: '113g',    cal:  98, protein: 11, carbs: 4,  fats: 4  },
-            { emoji: 'ðŸ§€', name: 'Mozzarella',           detail: '50g',     cal: 149, protein: 11, carbs: 1,  fats: 11 },
-            { emoji: 'ðŸ§€', name: 'Cheddar Cheese',       detail: '30g',     cal: 120, protein: 7,  carbs: 0,  fats: 10 },
-            { emoji: 'ðŸ¥›', name: 'Protein Shake',        detail: '1 scoop', cal: 150, protein: 25, carbs: 8,  fats: 3  },
-            { emoji: 'ðŸ¥›', name: 'Whole Milk',           detail: '240ml',   cal: 149, protein: 8,  carbs: 12, fats: 8  },
-            { emoji: 'ðŸ¥›', name: 'Skimmed Milk',         detail: '240ml',   cal:  83, protein: 8,  carbs: 12, fats: 0  },
-            { emoji: 'ðŸŒ±', name: 'Tofu (firm)',          detail: '150g',    cal: 117, protein: 13, carbs: 3,  fats: 6  },
-            { emoji: 'ðŸŒ±', name: 'Tempeh',               detail: '100g',    cal: 193, protein: 19, carbs: 8,  fats: 11 },
-            { emoji: 'ðŸ¥œ', name: 'Peanut Butter',        detail: '2 tbsp',  cal: 190, protein: 8,  carbs: 7,  fats: 16 },
-            // â€” Carbs & Grains â€”
-            { emoji: 'ðŸš', name: 'White Rice',           detail: '1 cup',   cal: 206, protein: 4,  carbs: 45, fats: 0  },
-            { emoji: 'ðŸš', name: 'Brown Rice',           detail: '1 cup',   cal: 216, protein: 5,  carbs: 45, fats: 2  },
-            { emoji: 'ðŸ¥£', name: 'Oatmeal',              detail: '1 cup',   cal: 166, protein: 6,  carbs: 28, fats: 4  },
-            { emoji: 'ðŸ¥£', name: 'Overnight Oats',       detail: '1 cup',   cal: 230, protein: 9,  carbs: 35, fats: 5  },
-            { emoji: 'ðŸž', name: 'Wheat Bread',          detail: '2 slices',cal: 138, protein: 7,  carbs: 24, fats: 2  },
-            { emoji: 'ðŸ¥–', name: 'Bagel',                detail: '1 whole', cal: 270, protein: 10, carbs: 53, fats: 2  },
-            { emoji: 'ðŸŒ¾', name: 'Quinoa',               detail: '1 cup',   cal: 222, protein: 8,  carbs: 39, fats: 4  },
-            { emoji: 'ðŸ', name: 'Pasta',                detail: '100g dry',cal: 371, protein: 13, carbs: 74, fats: 2  },
-            { emoji: 'ðŸ¥”', name: 'White Potato',         detail: '1 med',   cal: 161, protein: 4,  carbs: 37, fats: 0  },
-            { emoji: 'ðŸ ', name: 'Sweet Potato',         detail: '1 med',   cal: 103, protein: 2,  carbs: 24, fats: 0  },
-            { emoji: 'ðŸŒ½', name: 'Corn',                 detail: '1 cup',   cal: 132, protein: 5,  carbs: 29, fats: 2  },
-            { emoji: 'ðŸ«˜', name: 'Black Beans',          detail: '1 cup',   cal: 227, protein: 15, carbs: 41, fats: 1  },
-            { emoji: 'ðŸ«˜', name: 'Lentils',              detail: '1 cup',   cal: 230, protein: 18, carbs: 40, fats: 1  },
-            { emoji: 'ðŸ«˜', name: 'Chickpeas',            detail: '1 cup',   cal: 269, protein: 15, carbs: 45, fats: 4  },
-            // â€” Fruits â€”
-            { emoji: 'ðŸŒ', name: 'Banana',               detail: '1 med',   cal: 105, protein: 1,  carbs: 27, fats: 0  },
-            { emoji: 'ðŸŽ', name: 'Apple',                detail: '1 med',   cal:  95, protein: 0,  carbs: 25, fats: 0  },
-            { emoji: 'ðŸŠ', name: 'Orange',               detail: '1 med',   cal:  62, protein: 1,  carbs: 15, fats: 0  },
-            { emoji: 'ðŸ‡', name: 'Grapes',               detail: '1 cup',   cal: 104, protein: 1,  carbs: 27, fats: 0  },
-            { emoji: 'ðŸ«', name: 'Blueberries',          detail: '1 cup',   cal:  84, protein: 1,  carbs: 21, fats: 0  },
-            { emoji: 'ðŸ“', name: 'Strawberries',         detail: '1 cup',   cal:  49, protein: 1,  carbs: 12, fats: 0  },
-            { emoji: 'ðŸ‘', name: 'Mango',                detail: '1 cup',   cal: 107, protein: 1,  carbs: 28, fats: 0  },
-            { emoji: 'ðŸ', name: 'Pineapple',            detail: '1 cup',   cal:  82, protein: 1,  carbs: 22, fats: 0  },
-            { emoji: 'ðŸ«’', name: 'Watermelon',           detail: '2 cups',  cal:  85, protein: 2,  carbs: 21, fats: 0  },
-            // â€” Vegetables â€”
-            { emoji: 'ðŸ¥¦', name: 'Broccoli',             detail: '1 cup',   cal:  55, protein: 4,  carbs: 11, fats: 1  },
-            { emoji: 'ðŸ¥¬', name: 'Spinach',              detail: '2 cups',  cal:  14, protein: 2,  carbs: 2,  fats: 0  },
-            { emoji: 'ðŸ¥•', name: 'Carrots',              detail: '1 cup',   cal:  52, protein: 1,  carbs: 12, fats: 0  },
-            { emoji: 'ðŸ¥’', name: 'Cucumber',             detail: '1 cup',   cal:  16, protein: 1,  carbs: 4,  fats: 0  },
-            { emoji: 'ðŸ…', name: 'Tomato',               detail: '1 med',   cal:  22, protein: 1,  carbs: 5,  fats: 0  },
-            { emoji: 'ðŸ«‘', name: 'Bell Pepper',          detail: '1 med',   cal:  31, protein: 1,  carbs: 7,  fats: 0  },
-            // â€” Healthy Fats & Snacks â€”
-            { emoji: 'ðŸ¥‘', name: 'Avocado',              detail: 'Â½ fruit', cal: 120, protein: 2,  carbs: 6,  fats: 10 },
-            { emoji: 'ðŸ¥œ', name: 'Almonds',              detail: '28g',     cal: 164, protein: 6,  carbs: 6,  fats: 14 },
-            { emoji: 'ðŸ¥œ', name: 'Walnuts',              detail: '28g',     cal: 185, protein: 4,  carbs: 4,  fats: 18 },
-            { emoji: 'ðŸ¥œ', name: 'Cashews',              detail: '28g',     cal: 157, protein: 5,  carbs: 9,  fats: 12 },
-            { emoji: 'ðŸ«’', name: 'Olive Oil',            detail: '1 tbsp',  cal: 119, protein: 0,  carbs: 0,  fats: 14 },
-            { emoji: 'ðŸ§ˆ', name: 'Butter',               detail: '1 tbsp',  cal: 102, protein: 0,  carbs: 0,  fats: 12 },
-            { emoji: 'ðŸ«', name: 'Dark Chocolate',       detail: '30g',     cal: 170, protein: 2,  carbs: 13, fats: 12 },
-            { emoji: 'ðŸ¥„', name: 'Peanut Butter',        detail: '1 tbsp',  cal:  95, protein: 4,  carbs: 3,  fats: 8  },
-            // â€” Meals â€”
-            { emoji: 'ðŸ¥—', name: 'Chicken Salad',        detail: '1 bowl',  cal: 350, protein: 40, carbs: 15, fats: 12 },
-            { emoji: 'ðŸŒ¯', name: 'Chicken Wrap',         detail: '1 wrap',  cal: 420, protein: 35, carbs: 38, fats: 12 },
-            { emoji: 'ðŸ¥—', name: 'Tuna Salad',           detail: '1 bowl',  cal: 220, protein: 28, carbs: 8,  fats: 8  },
-            { emoji: 'ðŸ±', name: 'Rice & Chicken Bowl',  detail: '1 bowl',  cal: 480, protein: 48, carbs: 48, fats: 8  },
-            { emoji: 'ðŸ', name: 'Pasta w/ Meat Sauce',  detail: '1 plate', cal: 520, protein: 28, carbs: 65, fats: 14 },
-            { emoji: 'ðŸ¥™', name: 'Burrito Bowl',         detail: '1 bowl',  cal: 550, protein: 35, carbs: 60, fats: 14 },
-            { emoji: 'ðŸ³', name: 'Omelette (3 eggs)',    detail: '1 serve', cal: 280, protein: 20, carbs: 2,  fats: 21 },
-            { emoji: 'ðŸ¥ž', name: 'Protein Pancakes',     detail: '3 pcs',   cal: 310, protein: 24, carbs: 38, fats: 6  },
-            { emoji: 'ðŸ¥™', name: 'Grilled Chicken Pita', detail: '1 pita',  cal: 380, protein: 32, carbs: 36, fats: 9  },
-            // â€” Drinks â€”
-            { emoji: 'ðŸ¥¤', name: 'Mass Gainer Shake',    detail: '1 serve', cal: 600, protein: 40, carbs: 90, fats: 8  },
-            { emoji: 'â˜•', name: 'Latte (whole milk)',   detail: '240ml',   cal: 190, protein: 7,  carbs: 15, fats: 11 },
-            { emoji: 'ðŸ¹', name: 'Orange Juice',         detail: '240ml',   cal: 112, protein: 2,  carbs: 26, fats: 0  },
+            // — Protein Sources —
+            { emoji: '🍗', name: 'Chicken Breast',       detail: '150g',    cal: 247, protein: 46, carbs: 0,  fats: 5  },
+            { emoji: '🍗', name: 'Chicken Thigh',        detail: '150g',    cal: 295, protein: 30, carbs: 0,  fats: 19 },
+            { emoji: '🥩', name: 'Ground Beef (lean)',   detail: '150g',    cal: 280, protein: 35, carbs: 0,  fats: 15 },
+            { emoji: '🥩', name: 'Sirloin Steak',        detail: '150g',    cal: 271, protein: 38, carbs: 0,  fats: 13 },
+            { emoji: '🥩', name: 'Pork Tenderloin',      detail: '150g',    cal: 196, protein: 35, carbs: 0,  fats: 5  },
+            { emoji: '🐟', name: 'Tuna (canned)',        detail: '85g tin', cal: 100, protein: 22, carbs: 0,  fats: 0  },
+            { emoji: '🐟', name: 'Salmon Fillet',        detail: '150g',    cal: 280, protein: 39, carbs: 0,  fats: 13 },
+            { emoji: '🐟', name: 'Tilapia',              detail: '150g',    cal: 193, protein: 39, carbs: 0,  fats: 4  },
+            { emoji: '🐟', name: 'Shrimp',               detail: '150g',    cal: 151, protein: 29, carbs: 2,  fats: 2  },
+            { emoji: '🥚', name: 'Eggs (2 large)',       detail: '2 pcs',   cal: 143, protein: 13, carbs: 1,  fats: 10 },
+            { emoji: '🥚', name: 'Egg Whites (4)',       detail: '4 whites',cal:  68, protein: 14, carbs: 1,  fats: 0  },
+            { emoji: '🍳', name: 'Greek Yogurt',         detail: '170g',    cal: 100, protein: 17, carbs: 6,  fats: 0  },
+            { emoji: '🧀', name: 'Cottage Cheese',       detail: '113g',    cal:  98, protein: 11, carbs: 4,  fats: 4  },
+            { emoji: '🧀', name: 'Mozzarella',           detail: '50g',     cal: 149, protein: 11, carbs: 1,  fats: 11 },
+            { emoji: '🧀', name: 'Cheddar Cheese',       detail: '30g',     cal: 120, protein: 7,  carbs: 0,  fats: 10 },
+            { emoji: '🥛', name: 'Protein Shake',        detail: '1 scoop', cal: 150, protein: 25, carbs: 8,  fats: 3  },
+            { emoji: '🥛', name: 'Whole Milk',           detail: '240ml',   cal: 149, protein: 8,  carbs: 12, fats: 8  },
+            { emoji: '🥛', name: 'Skimmed Milk',         detail: '240ml',   cal:  83, protein: 8,  carbs: 12, fats: 0  },
+            { emoji: '🌱', name: 'Tofu (firm)',          detail: '150g',    cal: 117, protein: 13, carbs: 3,  fats: 6  },
+            { emoji: '🌱', name: 'Tempeh',               detail: '100g',    cal: 193, protein: 19, carbs: 8,  fats: 11 },
+            { emoji: '🥜', name: 'Peanut Butter',        detail: '2 tbsp',  cal: 190, protein: 8,  carbs: 7,  fats: 16 },
+            // — Carbs & Grains —
+            { emoji: '🍚', name: 'White Rice',           detail: '1 cup',   cal: 206, protein: 4,  carbs: 45, fats: 0  },
+            { emoji: '🍚', name: 'Brown Rice',           detail: '1 cup',   cal: 216, protein: 5,  carbs: 45, fats: 2  },
+            { emoji: '🥣', name: 'Oatmeal',              detail: '1 cup',   cal: 166, protein: 6,  carbs: 28, fats: 4  },
+            { emoji: '🥣', name: 'Overnight Oats',       detail: '1 cup',   cal: 230, protein: 9,  carbs: 35, fats: 5  },
+            { emoji: '🍞', name: 'Wheat Bread',          detail: '2 slices',cal: 138, protein: 7,  carbs: 24, fats: 2  },
+            { emoji: '🥖', name: 'Bagel',                detail: '1 whole', cal: 270, protein: 10, carbs: 53, fats: 2  },
+            { emoji: '🌾', name: 'Quinoa',               detail: '1 cup',   cal: 222, protein: 8,  carbs: 39, fats: 4  },
+            { emoji: '🍝', name: 'Pasta',                detail: '100g dry',cal: 371, protein: 13, carbs: 74, fats: 2  },
+            { emoji: '🥔', name: 'White Potato',         detail: '1 med',   cal: 161, protein: 4,  carbs: 37, fats: 0  },
+            { emoji: '🍠', name: 'Sweet Potato',         detail: '1 med',   cal: 103, protein: 2,  carbs: 24, fats: 0  },
+            { emoji: '🌽', name: 'Corn',                 detail: '1 cup',   cal: 132, protein: 5,  carbs: 29, fats: 2  },
+            { emoji: '🫘', name: 'Black Beans',          detail: '1 cup',   cal: 227, protein: 15, carbs: 41, fats: 1  },
+            { emoji: '🫘', name: 'Lentils',              detail: '1 cup',   cal: 230, protein: 18, carbs: 40, fats: 1  },
+            { emoji: '🫘', name: 'Chickpeas',            detail: '1 cup',   cal: 269, protein: 15, carbs: 45, fats: 4  },
+            // — Fruits —
+            { emoji: '🍌', name: 'Banana',               detail: '1 med',   cal: 105, protein: 1,  carbs: 27, fats: 0  },
+            { emoji: '🍎', name: 'Apple',                detail: '1 med',   cal:  95, protein: 0,  carbs: 25, fats: 0  },
+            { emoji: '🍊', name: 'Orange',               detail: '1 med',   cal:  62, protein: 1,  carbs: 15, fats: 0  },
+            { emoji: '🍇', name: 'Grapes',               detail: '1 cup',   cal: 104, protein: 1,  carbs: 27, fats: 0  },
+            { emoji: '🫐', name: 'Blueberries',          detail: '1 cup',   cal:  84, protein: 1,  carbs: 21, fats: 0  },
+            { emoji: '🍓', name: 'Strawberries',         detail: '1 cup',   cal:  49, protein: 1,  carbs: 12, fats: 0  },
+            { emoji: '🍑', name: 'Mango',                detail: '1 cup',   cal: 107, protein: 1,  carbs: 28, fats: 0  },
+            { emoji: '🍍', name: 'Pineapple',            detail: '1 cup',   cal:  82, protein: 1,  carbs: 22, fats: 0  },
+            { emoji: '🫒', name: 'Watermelon',           detail: '2 cups',  cal:  85, protein: 2,  carbs: 21, fats: 0  },
+            // — Vegetables —
+            { emoji: '🥦', name: 'Broccoli',             detail: '1 cup',   cal:  55, protein: 4,  carbs: 11, fats: 1  },
+            { emoji: '🥬', name: 'Spinach',              detail: '2 cups',  cal:  14, protein: 2,  carbs: 2,  fats: 0  },
+            { emoji: '🥕', name: 'Carrots',              detail: '1 cup',   cal:  52, protein: 1,  carbs: 12, fats: 0  },
+            { emoji: '🥒', name: 'Cucumber',             detail: '1 cup',   cal:  16, protein: 1,  carbs: 4,  fats: 0  },
+            { emoji: '🍅', name: 'Tomato',               detail: '1 med',   cal:  22, protein: 1,  carbs: 5,  fats: 0  },
+            { emoji: '🫑', name: 'Bell Pepper',          detail: '1 med',   cal:  31, protein: 1,  carbs: 7,  fats: 0  },
+            // — Healthy Fats & Snacks —
+            { emoji: '🥑', name: 'Avocado',              detail: '½ fruit', cal: 120, protein: 2,  carbs: 6,  fats: 10 },
+            { emoji: '🥜', name: 'Almonds',              detail: '28g',     cal: 164, protein: 6,  carbs: 6,  fats: 14 },
+            { emoji: '🥜', name: 'Walnuts',              detail: '28g',     cal: 185, protein: 4,  carbs: 4,  fats: 18 },
+            { emoji: '🥜', name: 'Cashews',              detail: '28g',     cal: 157, protein: 5,  carbs: 9,  fats: 12 },
+            { emoji: '🫒', name: 'Olive Oil',            detail: '1 tbsp',  cal: 119, protein: 0,  carbs: 0,  fats: 14 },
+            { emoji: '🧈', name: 'Butter',               detail: '1 tbsp',  cal: 102, protein: 0,  carbs: 0,  fats: 12 },
+            { emoji: '🍫', name: 'Dark Chocolate',       detail: '30g',     cal: 170, protein: 2,  carbs: 13, fats: 12 },
+            { emoji: '🥄', name: 'Peanut Butter',        detail: '1 tbsp',  cal:  95, protein: 4,  carbs: 3,  fats: 8  },
+            // — Meals —
+            { emoji: '🥗', name: 'Chicken Salad',        detail: '1 bowl',  cal: 350, protein: 40, carbs: 15, fats: 12 },
+            { emoji: '🌯', name: 'Chicken Wrap',         detail: '1 wrap',  cal: 420, protein: 35, carbs: 38, fats: 12 },
+            { emoji: '🥗', name: 'Tuna Salad',           detail: '1 bowl',  cal: 220, protein: 28, carbs: 8,  fats: 8  },
+            { emoji: '🍱', name: 'Rice & Chicken Bowl',  detail: '1 bowl',  cal: 480, protein: 48, carbs: 48, fats: 8  },
+            { emoji: '🍝', name: 'Pasta w/ Meat Sauce',  detail: '1 plate', cal: 520, protein: 28, carbs: 65, fats: 14 },
+            { emoji: '🥙', name: 'Burrito Bowl',         detail: '1 bowl',  cal: 550, protein: 35, carbs: 60, fats: 14 },
+            { emoji: '🍳', name: 'Omelette (3 eggs)',    detail: '1 serve', cal: 280, protein: 20, carbs: 2,  fats: 21 },
+            { emoji: '🥞', name: 'Protein Pancakes',     detail: '3 pcs',   cal: 310, protein: 24, carbs: 38, fats: 6  },
+            { emoji: '🥙', name: 'Grilled Chicken Pita', detail: '1 pita',  cal: 380, protein: 32, carbs: 36, fats: 9  },
+            // — Drinks —
+            { emoji: '🥤', name: 'Mass Gainer Shake',    detail: '1 serve', cal: 600, protein: 40, carbs: 90, fats: 8  },
+            { emoji: '☕', name: 'Latte (whole milk)',   detail: '240ml',   cal: 190, protein: 7,  carbs: 15, fats: 11 },
+            { emoji: '🍹', name: 'Orange Juice',         detail: '240ml',   cal: 112, protein: 2,  carbs: 26, fats: 0  },
         ];
 
         function renderFoodPresets() {
@@ -13166,7 +13166,7 @@ Please try again with a different photo.`;
                 dateEl.textContent = d.toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
             }
 
-            // Meal type dropdown â€” no default, user must choose
+            // Meal type dropdown — no default, user must choose
             const mealSelect = document.getElementById('fl-meal-select');
             if (mealSelect) {
                 mealSelect.addEventListener('change', () => {
@@ -13322,7 +13322,7 @@ Please try again with a different photo.`;
             }
 
             if (entries.length === 0) {
-                container.innerHTML = `<div class="food-log-empty">No entries yet â€” add your first meal above!</div>`;
+                container.innerHTML = `<div class="food-log-empty">No entries yet — add your first meal above!</div>`;
                 updateFoodLogCalBar(0);
                 updateMacroEatenDisplay(0, 0, 0);
                 document.getElementById('food-log-cal-eaten').textContent = '0';
@@ -13335,7 +13335,7 @@ Please try again with a different photo.`;
                 const p = e.protein ? `${Math.round(e.protein)}g P` : '';
                 const c = e.carbs ? `${Math.round(e.carbs)}g C` : '';
                 const f = e.fats ? `${Math.round(e.fats)}g F` : '';
-                const macroStr = [p, c, f].filter(Boolean).join(' Â· ');
+                const macroStr = [p, c, f].filter(Boolean).join(' · ');
                 const meal = e.meal_type || '';
                 return `<div class="food-log-entry">
                     <span class="fle-name" title="${name}">${name}</span>
@@ -13476,7 +13476,7 @@ Please try again with a different photo.`;
                         if (!sw) return;
                         sw.addEventListener('statechange', () => {
                             if (sw.state === 'installed' && navigator.serviceWorker.controller) {
-                                showToast('App updated â€” refresh for the latest version', 'info');
+                                showToast('App updated — refresh for the latest version', 'info');
                             }
                         });
                     });
@@ -13552,7 +13552,7 @@ Please try again with a different photo.`;
                 btn.onclick = () => {
                     if (note) {
                         note.style.display = 'block';
-                        note.innerHTML = 'Chrome on iPhone cannot install apps. Open this page in <strong style="color:#c9a962">Safari</strong>, then tap Share â†’ <strong style="color:#c9a962">Add to Home Screen</strong>.';
+                        note.innerHTML = 'Chrome on iPhone cannot install apps. Open this page in <strong style="color:#c9a962">Safari</strong>, then tap Share → <strong style="color:#c9a962">Add to Home Screen</strong>.';
                     }
                 };
             } else if (_isIosSafari()) {
@@ -13589,7 +13589,7 @@ Please try again with a different photo.`;
                 };
             } else {
                 if (installBtn) installBtn.textContent = 'Install';
-                if (sub) sub.textContent = 'Add to your home screen â€” works like a real app';
+                if (sub) sub.textContent = 'Add to your home screen — works like a real app';
                 if (installBtn) installBtn.onclick = async () => {
                     if (!window.__pwaPrompt) return;
                     window.__pwaPrompt.prompt();
@@ -14015,7 +14015,7 @@ Please try again with a different photo.`;
                     throw new Error((data.error && data.error.message) || data.message || 'Failed to delete account');
                 }
                 closeAccountModal();
-                // Wipe all local data â€” scan history, logs, tokens, everything
+                // Wipe all local data — scan history, logs, tokens, everything
                 localStorage.clear();
                 sessionStorage.clear();
                 // Also wipe IndexedDB snapshots (not covered by localStorage.clear)
@@ -15074,7 +15074,7 @@ Please try again with a different photo.`;
             if (!wearableState.isRunning) return;
 
             if (document.visibilityState === 'hidden') {
-                // Going to background â€” record when
+                // Going to background — record when
                 wearableState._bgStart = Date.now();
                 // Freeze accumulated secs at current value
                 if (wearableState._runStartWall) {
@@ -15210,7 +15210,7 @@ Please try again with a different photo.`;
                 try {
                     const result = await DeviceMotionEvent.requestPermission();
                     if (result !== 'granted') {
-                        _woSetStatus('Motion permission denied â€” check iOS Settings > Safari');
+                        _woSetStatus('Motion permission denied — check iOS Settings > Safari');
                         return;
                     }
                 } catch (e) {
@@ -15303,7 +15303,7 @@ Please try again with a different photo.`;
             const stepsEl = document.getElementById('wo-steps-display');
             if (stepsEl) stepsEl.textContent = wearableState.steps.toLocaleString();
 
-            // Step ring (circumference â‰ˆ 534.07)
+            // Step ring (circumference ≈ 534.07)
             const arc = document.getElementById('wo-ring-arc');
             const overflow = document.getElementById('wo-ring-overflow');
             if (arc) {
@@ -15331,7 +15331,7 @@ Please try again with a different photo.`;
             if (calEl) calEl.textContent = wearableState.calories;
 
             const hrEl = document.getElementById('wo-hr-display');
-            if (hrEl) hrEl.textContent = wearableState.hr ? wearableState.hr : 'â€”';
+            if (hrEl) hrEl.textContent = wearableState.hr ? wearableState.hr : '—';
 
             const timeEl = document.getElementById('wo-time-display');
             if (timeEl) {
@@ -15431,16 +15431,16 @@ Please try again with a different photo.`;
                 if (bpm >= 40 && bpm <= 200) {
                     wearableState.hr = bpm;
                     wearableState.hrReadings.push({ time: Date.now(), bpm });
-                    _woSetStatus(`HR: ${bpm} bpm âœ“`);
+                    _woSetStatus(`HR: ${bpm} bpm ✓`);
                     _woUpdateUI();
                     if (wearableState.steps > 0 || bpm > 0) {
                         document.getElementById('wo-save-btn').style.display = 'flex';
                     }
                 } else {
-                    _woSetStatus('Could not read HR â€” try again');
+                    _woSetStatus('Could not read HR — try again');
                 }
             } else {
-                _woSetStatus('Too few samples â€” try again');
+                _woSetStatus('Too few samples — try again');
             }
         }
 
@@ -15490,7 +15490,7 @@ Please try again with a different photo.`;
                 intervals.push(peaks[i] - peaks[i - 1]);
             }
             const avgInterval = intervals.reduce((a, b) => a + b) / intervals.length;
-            // Each sample â‰ˆ 33 ms â†’ BPM = 60000 / (avgInterval Ã— 33)
+            // Each sample ≈ 33 ms → BPM = 60000 / (avgInterval × 33)
             return Math.round(60000 / (avgInterval * 33));
         }
 
@@ -15534,7 +15534,7 @@ Please try again with a different photo.`;
             const toast = document.getElementById('wo-saved-msg');
             toast.textContent = saved
                 ? 'Saved! Check the Wearables tab on your computer.'
-                : 'Saved locally â€” will sync next time you open this page logged in.';
+                : 'Saved locally — will sync next time you open this page logged in.';
             toast.style.display = 'block';
             setTimeout(() => { toast.style.display = 'none'; }, 5000);
 
@@ -15629,7 +15629,7 @@ Please try again with a different photo.`;
                         if (img) {
                             const qrUrl = `https://api.qrserver.com/v1/create-qr-code/?size=160x160&margin=8&data=${encodeURIComponent(wearableUrl)}`;
                             img.onload  = () => { img.style.display = 'block'; if (loading) loading.style.display = 'none'; };
-                            img.onerror = () => { if (loading) loading.textContent = 'QR unavailable â€” use Copy below'; };
+                            img.onerror = () => { if (loading) loading.textContent = 'QR unavailable — use Copy below'; };
                             img.src = qrUrl;
                         }
                         const copyBtn = document.getElementById('wearable-copy-link');
@@ -15637,7 +15637,7 @@ Please try again with a different photo.`;
                             copyBtn.addEventListener('click', () => {
                                 navigator.clipboard.writeText(wearableUrl)
                                     .then(() => showToast('Link copied!', 'success'))
-                                    .catch(() => showToast('Copy failed â€” select manually', 'error'));
+                                    .catch(() => showToast('Copy failed — select manually', 'error'));
                             });
                         }
                     } else {
@@ -15765,11 +15765,11 @@ Please try again with a different photo.`;
             const distKm = (steps * 0.00076).toFixed(2);
 
             const el = (id, v) => { const e = document.getElementById(id); if (e) e.textContent = v; };
-            el('today-steps', steps ? steps.toLocaleString() : 'â€”');
-            el('today-distance', steps ? `${distKm} km` : 'â€” km');
-            el('today-hr', hr ? `${hr}` : 'â€”');
-            el('today-calories', cal ? `${cal}` : 'â€”');
-            el('today-active', activeSecs ? `${Math.round(activeSecs / 60)}` : 'â€”');
+            el('today-steps', steps ? steps.toLocaleString() : '—');
+            el('today-distance', steps ? `${distKm} km` : '— km');
+            el('today-hr', hr ? `${hr}` : '—');
+            el('today-calories', cal ? `${cal}` : '—');
+            el('today-active', activeSecs ? `${Math.round(activeSecs / 60)}` : '—');
 
             const GOAL = parseInt(localStorage.getItem('fixit-wearable-daily-goal')) || 10000;
             const pct = Math.min(steps / GOAL, 1);
@@ -15783,22 +15783,22 @@ Please try again with a different photo.`;
             if (motivEl && steps > 0) {
                 let msg, tier;
                 if (pct >= 1) {
-                    msg = 'ðŸ† Goal accomplished! Outstanding effort!';
+                    msg = '🏆 Goal accomplished! Outstanding effort!';
                     tier = 'complete';
                 } else if (pct >= 0.9) {
-                    msg = 'ðŸ”¥ So close! Just ' + (GOAL - steps).toLocaleString() + ' more steps to go!';
+                    msg = '🔥 So close! Just ' + (GOAL - steps).toLocaleString() + ' more steps to go!';
                     tier = 'almost';
                 } else if (pct >= 0.75) {
-                    msg = 'ðŸ’ª Almost there â€” you\'re on fire!';
+                    msg = '💪 Almost there — you\'re on fire!';
                     tier = 'almost';
                 } else if (pct >= 0.5) {
-                    msg = 'âš¡ Halfway there! Keep pushing!';
+                    msg = '⚡ Halfway there! Keep pushing!';
                     tier = 'halfway';
                 } else if (pct >= 0.25) {
-                    msg = 'ðŸ‘Ÿ Good progress! A quarter done!';
+                    msg = '👟 Good progress! A quarter done!';
                     tier = 'started';
                 } else {
-                    msg = 'ðŸš€ Great start! Every step counts!';
+                    msg = '🚀 Great start! Every step counts!';
                     tier = 'started';
                 }
                 motivEl.textContent = msg;
@@ -15809,7 +15809,7 @@ Please try again with a different photo.`;
                 const celebKey = 'fixit-step-goal-celebrated-' + today;
                 if (pct >= 1 && !localStorage.getItem(celebKey)) {
                     localStorage.setItem(celebKey, '1');
-                    setTimeout(() => showToast('ðŸ† Daily step goal reached! Amazing work!', 'success', 5000), 400);
+                    setTimeout(() => showToast('🏆 Daily step goal reached! Amazing work!', 'success', 5000), 400);
                 }
             } else if (motivEl) {
                 motivEl.textContent = '';
@@ -15854,14 +15854,14 @@ Please try again with a different photo.`;
             const today = new Date();
             const todayKey = today.toISOString().split('T')[0];
 
-            // Build date â†’ steps map
+            // Build date → steps map
             const byDate = {};
             sessions.forEach(s => {
                 const key = (s.date || s.session_date || '').toString().split('T')[0];
                 if (key) byDate[key] = Number(s.steps || 0);
             });
 
-            // â”€â”€ Weekly summary (Mon â†’ today) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+            // â”€â”€ Weekly summary (Mon → today) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
             const dayOfWeek = today.getDay(); // 0=Sun
             const daysFromMon = dayOfWeek === 0 ? 6 : dayOfWeek - 1;
             let weekTotal = 0, weekDaysWithData = 0, daysGoalHit = 0;
@@ -15909,16 +15909,16 @@ Please try again with a different photo.`;
             // â”€â”€ Render â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
             const set = (id, v) => { const e = document.getElementById(id); if (e) e.textContent = v; };
 
-            set('wr-week-total', weekTotal ? weekTotal.toLocaleString() : 'â€”');
-            set('wr-week-avg',   weekAvg   ? weekAvg.toLocaleString()   : 'â€”');
+            set('wr-week-total', weekTotal ? weekTotal.toLocaleString() : '—');
+            set('wr-week-avg',   weekAvg   ? weekAvg.toLocaleString()   : '—');
             set('wr-days-hit',   `${daysGoalHit} / ${daysFromMon + 1}`);
             set('wr-step-streak', streak > 0 ? `${streak}d` : '0d');
 
-            set('wr-step-pb', pbSteps ? pbSteps.toLocaleString() : 'â€”');
+            set('wr-step-pb', pbSteps ? pbSteps.toLocaleString() : '—');
             const pbDateEl = document.getElementById('wr-pb-date');
             if (pbDateEl && pbDate) {
                 const d = new Date(pbDate + 'T00:00:00');
-                pbDateEl.textContent = isPbToday ? 'ðŸŽ‰ set today!' :
+                pbDateEl.textContent = isPbToday ? '🎉 set today!' :
                     d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
             }
 
@@ -15930,7 +15930,7 @@ Please try again with a different photo.`;
             const pbKey = 'fixit-step-pb-celebrated-' + todayKey;
             if (isPbToday && pbSteps > 0 && !localStorage.getItem(pbKey)) {
                 localStorage.setItem(pbKey, '1');
-                setTimeout(() => showToast('ðŸ… New personal best! ' + pbSteps.toLocaleString() + ' steps!', 'success', 5000), 800);
+                setTimeout(() => showToast('🏅 New personal best! ' + pbSteps.toLocaleString() + ' steps!', 'success', 5000), 800);
             }
         }
 
@@ -15948,7 +15948,7 @@ Please try again with a different photo.`;
             const GOAL = parseInt(localStorage.getItem('fixit-wearable-daily-goal')) || 10000;
             const today = new Date();
 
-            // Build a map of date â†’ aggregated totals (sum across multiple sessions per day)
+            // Build a map of date → aggregated totals (sum across multiple sessions per day)
             const byDate = {};
             _wrAllSessions.forEach(s => {
                 const d = (s.date || s.session_date || '').toString().split('T')[0];
@@ -15960,7 +15960,7 @@ Please try again with a different photo.`;
                 if (s.hr || s.hr_avg) byDate[d].hr = s.hr || s.hr_avg;
             });
 
-            // Build last N days oldest â†’ newest
+            // Build last N days oldest → newest
             const labels = [], stepsData = [], colors = [];
             for (let i = _wrChartDays - 1; i >= 0; i--) {
                 const d = new Date(today);
@@ -16075,10 +16075,10 @@ Please try again with a different photo.`;
             const steps = session ? Number(session.steps || 0) : 0;
             const cal   = session ? Math.round(session.calories || 0) : 0;
             const secs  = session ? (session.active_secs || session.activeSecs || 0) : 0;
-            if (stepsEl) stepsEl.textContent = steps ? steps.toLocaleString() : 'â€”';
-            if (distEl)  distEl.textContent  = steps ? (steps * 0.00076).toFixed(2) : 'â€”';
-            if (calEl)   calEl.textContent   = cal   ? cal : 'â€”';
-            if (activeEl) activeEl.textContent = secs ? Math.round(secs / 60) : 'â€”';
+            if (stepsEl) stepsEl.textContent = steps ? steps.toLocaleString() : '—';
+            if (distEl)  distEl.textContent  = steps ? (steps * 0.00076).toFixed(2) : '—';
+            if (calEl)   calEl.textContent   = cal   ? cal : '—';
+            if (activeEl) activeEl.textContent = secs ? Math.round(secs / 60) : '—';
 
             detailEl.style.display = '';
         }
@@ -16093,7 +16093,7 @@ Please try again with a different photo.`;
             if (!list) return;
 
             if (!sessions || sessions.length === 0) {
-                list.innerHTML = '<div class="wr-empty">No sessions yet â€” start tracking on your phone</div>';
+                list.innerHTML = '<div class="wr-empty">No sessions yet — start tracking on your phone</div>';
                 return;
             }
 
@@ -16102,12 +16102,12 @@ Please try again with a different photo.`;
                 const d = new Date(rawDate + 'T00:00:00');
                 const dateStr = !isNaN(d) ? d.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' }) : rawDate;
                 const stepsNum = s.steps != null ? Number(s.steps) : 0;
-                const steps = stepsNum ? stepsNum.toLocaleString() : 'â€”';
-                const dist = stepsNum ? `${(stepsNum * 0.00076).toFixed(2)} km` : 'â€”';
-                const hr = (s.hr_avg || s.hr) ? `${s.hr_avg || s.hr} bpm` : 'â€”';
-                const cal = s.calories ? `${Math.round(s.calories)} kcal` : 'â€”';
+                const steps = stepsNum ? stepsNum.toLocaleString() : '—';
+                const dist = stepsNum ? `${(stepsNum * 0.00076).toFixed(2)} km` : '—';
+                const hr = (s.hr_avg || s.hr) ? `${s.hr_avg || s.hr} bpm` : '—';
+                const cal = s.calories ? `${Math.round(s.calories)} kcal` : '—';
                 const activeSecs = s.active_secs || s.activeSecs;
-                const active = activeSecs ? `${Math.round(activeSecs / 60)} min` : 'â€”';
+                const active = activeSecs ? `${Math.round(activeSecs / 60)} min` : '—';
 
                 return `<div class="wr-session-row">
                     <div class="wr-srow-date">${dateStr}</div>
