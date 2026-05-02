@@ -17219,6 +17219,97 @@
     }
 }
 
+/* ── Fixed Bottom Navigation ── */
+.bottom-nav {
+    display: none;
+    position: fixed;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    z-index: 300;
+    background: var(--bg-card);
+    border-top: 1px solid var(--border-subtle);
+    box-shadow: 0 -4px 24px rgba(0, 0, 0, 0.35);
+    padding: 6px 6px calc(6px + env(safe-area-inset-bottom, 0px));
+    gap: 2px;
+    justify-content: stretch;
+    align-items: stretch;
+    backdrop-filter: blur(12px);
+    -webkit-backdrop-filter: blur(12px);
+}
+
+.bnav-item {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 3px;
+    padding: 7px 2px 5px;
+    background: none;
+    border: none;
+    border-radius: 10px;
+    cursor: pointer;
+    color: var(--text-tertiary);
+    font-family: 'Plus Jakarta Sans', sans-serif;
+    font-weight: 500;
+    transition: color 0.2s ease, background 0.2s ease, transform 0.15s ease;
+    min-width: 0;
+    -webkit-tap-highlight-color: transparent;
+}
+
+.bnav-item svg {
+    width: 20px;
+    height: 20px;
+    stroke: currentColor;
+    flex-shrink: 0;
+    transition: stroke 0.2s ease;
+}
+
+.bnav-item span {
+    font-size: 0.55rem;
+    letter-spacing: 0.01em;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    max-width: 100%;
+    line-height: 1;
+}
+
+.bnav-item.active {
+    color: var(--accent-primary);
+    background: rgba(201, 169, 98, 0.1);
+}
+
+.bnav-item:active {
+    transform: scale(0.88);
+}
+
+.bnav-item.bnav-new {
+    color: var(--accent-primary);
+    opacity: 0.75;
+}
+
+.bnav-item.bnav-new.active {
+    opacity: 1;
+}
+
+/* Screen padding to avoid content hiding behind the nav */
+body.has-bottom-nav .screen.active {
+    padding-bottom: 80px;
+}
+
+@media (max-width: 480px) {
+    .bnav-item svg { width: 18px; height: 18px; }
+    .bnav-item span { font-size: 0.5rem; }
+    .bnav-item { padding: 6px 1px 4px; }
+}
+
+@media (max-width: 375px) {
+    .bnav-item span { display: none; }
+    .bnav-item { padding: 8px 2px; }
+}
+
 /* ── Offline banner ── */
 #offline-banner {
     position: fixed;

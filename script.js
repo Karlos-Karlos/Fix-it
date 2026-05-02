@@ -2166,6 +2166,7 @@
             // without the model trained.
 
             const trySetup = (fn) => { try { fn(); } catch (e) { console.error('[setup error]', fn.name, e); } };
+            trySetup(setupBottomNav);
             trySetup(setupUpload);
             trySetup(setupCamera);
             trySetup(setupNavigation);
@@ -2562,6 +2563,21 @@
             // Show/hide nav steps (hidden for admin screen)
             if (num !== 10) {
                 document.querySelector('.nav-steps').style.display = 'flex';
+            }
+
+            // Bottom nav: show on screens 3-9 with active highlight
+            const bottomNav = document.getElementById('bottom-nav');
+            if (bottomNav) {
+                if (num >= 3 && num <= 9) {
+                    bottomNav.style.display = 'flex';
+                    document.body.classList.add('has-bottom-nav');
+                    bottomNav.querySelectorAll('.bnav-item').forEach(btn => {
+                        btn.classList.toggle('active', parseInt(btn.dataset.screen) === num);
+                    });
+                } else {
+                    bottomNav.style.display = 'none';
+                    document.body.classList.remove('has-bottom-nav');
+                }
             }
 
             // Animate gauges + position zone dots when results screen shows
@@ -3525,37 +3541,20 @@ Please try again with a different photo.`;
             }
         }
 
+        // Bottom nav: wire up all bnav-item buttons
+        function setupBottomNav() {
+            document.querySelectorAll('.bnav-item[data-screen]').forEach(btn => {
+                btn.addEventListener('click', () => {
+                    const screen = parseInt(btn.dataset.screen);
+                    if (screen === 1) clearPreview();
+                    goToScreen(screen);
+                });
+            });
+        }
+
         // Mock data fallback
-        // Results
+        // Results — IDs now live in the bottom nav; setupBottomNav() handles them
         function setupResults() {
-            document.getElementById('view-details-btn').addEventListener('click', () => {
-                goToScreen(4);
-            });
-
-            document.getElementById('open-simulator-btn').addEventListener('click', () => {
-                goToScreen(5);
-            });
-
-            document.getElementById('open-workout-btn').addEventListener('click', () => {
-                goToScreen(6);
-            });
-
-            document.getElementById('open-nutrition-btn').addEventListener('click', () => {
-                goToScreen(7);
-            });
-
-            document.getElementById('open-progress-btn').addEventListener('click', () => {
-                goToScreen(8);
-            });
-
-            document.getElementById('open-wearable-btn').addEventListener('click', () => {
-                goToScreen(9);
-            });
-
-            document.getElementById('new-analysis-btn').addEventListener('click', () => {
-                clearPreview();
-                goToScreen(1);
-            });
         }
 
         // Animate gauges
