@@ -4045,15 +4045,6 @@ Please try again with a different photo.`;
                 goToScreen(3);
             });
 
-            document.getElementById('back-to-breakdown').addEventListener('click', () => {
-                goToScreen(4);
-            });
-
-            document.getElementById('start-new-sim').addEventListener('click', () => {
-                clearPreview();
-                goToScreen(1);
-            });
-
             // Initial update
             updateProjection();
         }
@@ -4123,18 +4114,6 @@ Please try again with a different photo.`;
             document.getElementById('back-to-results-workout').addEventListener('click', () => {
                 goToScreen(3);
             });
-
-            document.getElementById('back-to-simulator-workout').addEventListener('click', () => {
-                goToScreen(5);
-            });
-
-            // Navigation to nutrition from workout
-            const goToNutritionBtn = document.getElementById('go-to-nutrition-workout');
-            if (goToNutritionBtn) {
-                goToNutritionBtn.addEventListener('click', () => {
-                    goToScreen(7);
-                });
-            }
 
             // More Details toggle
             document.querySelectorAll('.btn-more-details').forEach(btn => {
@@ -5516,14 +5495,6 @@ Please try again with a different photo.`;
             // Navigation buttons
             document.getElementById('back-to-results-nutrition').addEventListener('click', () => {
                 goToScreen(3);
-            });
-
-            document.getElementById('back-to-workout-nutrition').addEventListener('click', () => {
-                goToScreen(6);
-            });
-
-            document.getElementById('back-to-simulator-nutrition').addEventListener('click', () => {
-                goToScreen(5);
             });
 
             document.getElementById('generate-meal-plan-btn').addEventListener('click', () => {
