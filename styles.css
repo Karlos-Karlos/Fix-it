@@ -552,6 +552,7 @@
             grid-template-columns: 1fr 420px;
             gap: 28px;
             align-items: stretch;
+            padding-bottom: 40px;
         }
 
         @media (max-width: 960px) {
