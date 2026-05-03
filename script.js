@@ -610,8 +610,11 @@
 
             // 2. Check server for scans — source of truth for which account owns data
             let serverScans = [];
+            let scanFetchFailed = false;
             if (state.accessToken) {
-                try { serverScans = await fetchServerScans(); } catch (e) {}
+                try { serverScans = await fetchServerScans(); } catch (e) {
+                    scanFetchFailed = true;
+                }
             }
 
             // 3. Check IndexedDB — only use if server also has scans (prevents stale
@@ -657,6 +660,7 @@
             }
 
             // 5. Genuinely new user with no scans anywhere — go to Upload
+            if (scanFetchFailed) showToast('Could not load your previous data. Please check your connection.', 'warning');
             goToScreen(1);
         }
 
@@ -2566,7 +2570,8 @@
             // Show back button on upload screen only when a previous analysis exists
             const uploadBackBtn = document.getElementById('upload-back-btn');
             if (uploadBackBtn) {
-                uploadBackBtn.style.display = (num === 1 && state.analysisResult) ? 'flex' : 'none';
+                const canGoBack = num === 1 && (state.analysisResult || (state.previousScreen >= 3 && state.previousScreen <= 9));
+                uploadBackBtn.style.display = canGoBack ? 'flex' : 'none';
             }
 
             // Show/hide nav steps (hidden for admin screen)
@@ -2587,6 +2592,13 @@
                     bottomNav.style.display = 'none';
                     document.body.classList.remove('has-bottom-nav');
                 }
+            }
+
+            // Guard: Results screen needs actual analysis data
+            if (num === 3 && !state.analysisResult) {
+                goToScreen(1);
+                showToast('Please upload a photo to get your analysis.', 'info');
+                return;
             }
 
             // Animate gauges + position zone dots when results screen shows
@@ -14065,7 +14077,9 @@ Please try again with a different photo.`;
 
         function setupAdmin() {
             // Back button
-            document.getElementById('admin-back-btn').addEventListener('click', () => handleLogout());
+            document.getElementById('admin-back-btn').addEventListener('click', () => {
+    if (window.confirm('Leave the admin panel? You will be logged out.')) handleLogout();
+});
 
             // Search with debounce
             const searchInput = document.getElementById('admin-search');
