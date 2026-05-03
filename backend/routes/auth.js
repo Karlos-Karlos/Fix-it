@@ -54,19 +54,13 @@ router.post('/register', authLimiter, validate(registerSchema), async (req, res,
         [user.id, tokenHash]
       );
       await client.query('COMMIT');
-      let emailSent = true;
-      try {
-        await sendVerificationEmail(email, verificationCode);
-      } catch (emailErr) {
-        emailSent = false;
-        console.error('[register] Failed to send verification email:', emailErr.message);
-      }
+      // Fire-and-forget — respond immediately, email sends in background
+      sendVerificationEmail(email, verificationCode)
+        .catch(err => console.error('[register] Failed to send verification email:', err.message));
       res.status(201).json({
-        message: emailSent
-          ? 'Account created. Check your email for your verification code.'
-          : 'Account created but we could not send the verification email. Use "Resend verification" to try again.',
+        message: 'Account created. Check your email for your verification code.',
         user,
-        emailSent,
+        emailSent: true,
       });
     } else {
       await client.query('COMMIT');
@@ -125,11 +119,8 @@ router.post('/resend-verification', resendLimiter, validate(resendVerificationSc
         [user.id, tokenHash]
       );
 
-      try {
-        await sendVerificationEmail(req.body.email, verificationCode);
-      } catch (emailErr) {
-        console.error('[resend] Failed to send verification email:', emailErr.message);
-      }
+      sendVerificationEmail(req.body.email, verificationCode)
+        .catch(err => console.error('[resend] Failed to send verification email:', err.message));
     }
 
     // Always 200 to prevent email enumeration
@@ -279,11 +270,8 @@ router.post('/forgot-password', authLimiter, validate(forgotPasswordSchema), asy
         [user.id, hashToken(rawToken)]
       );
 
-      try {
-        await sendPasswordResetEmail(req.body.email, rawToken);
-      } catch (emailErr) {
-        console.error('[forgot-password] Failed to send reset email:', emailErr.message);
-      }
+      sendPasswordResetEmail(req.body.email, rawToken)
+        .catch(err => console.error('[forgot-password] Failed to send reset email:', err.message));
     }
 
     // Always 200

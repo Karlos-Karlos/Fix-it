@@ -8,6 +8,8 @@ function getTransport() {
     _transport = nodemailer.createTransport({
       service: 'gmail',
       auth: { user: process.env.GMAIL_USER, pass: process.env.GMAIL_PASS },
+      connectionTimeout: 10000,
+      socketTimeout: 10000,
     });
     return _transport;
   }
@@ -18,6 +20,8 @@ function getTransport() {
       port: parseInt(process.env.SMTP_PORT, 10) || 587,
       secure: process.env.SMTP_PORT === '465',
       auth: { user: process.env.SMTP_USER, pass: process.env.SMTP_PASS },
+      connectionTimeout: 10000,
+      socketTimeout: 10000,
     });
     return _transport;
   }
