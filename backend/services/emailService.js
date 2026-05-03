@@ -1,26 +1,40 @@
-// ── Nodemailer (SMTP — Gmail or any provider) ──
+const nodemailer = require('nodemailer');
+
 let _transport = null;
 function getTransport() {
   if (_transport) return _transport;
-  if (!process.env.SMTP_HOST) return null;
-  const nodemailer = require('nodemailer');
-  _transport = nodemailer.createTransport({
-    host: process.env.SMTP_HOST,
-    port: parseInt(process.env.SMTP_PORT, 10) || 587,
-    secure: false,
-    auth: { user: process.env.SMTP_USER, pass: process.env.SMTP_PASS },
-  });
-  return _transport;
+
+  if (process.env.GMAIL_USER && process.env.GMAIL_PASS) {
+    _transport = nodemailer.createTransport({
+      service: 'gmail',
+      auth: { user: process.env.GMAIL_USER, pass: process.env.GMAIL_PASS },
+    });
+    return _transport;
+  }
+
+  if (process.env.SMTP_HOST) {
+    _transport = nodemailer.createTransport({
+      host: process.env.SMTP_HOST,
+      port: parseInt(process.env.SMTP_PORT, 10) || 587,
+      secure: process.env.SMTP_PORT === '465',
+      auth: { user: process.env.SMTP_USER, pass: process.env.SMTP_PASS },
+    });
+    return _transport;
+  }
+
+  return null;
 }
+
+const FROM_ADDRESS = process.env.EMAIL_FROM || process.env.GMAIL_USER || process.env.SMTP_USER || 'noreply@fixit.app';
 
 async function sendMail({ to, subject, html }) {
   const transport = getTransport();
   if (transport) {
-    await transport.sendMail({ from: process.env.SMTP_USER, to, subject, html });
+    await transport.sendMail({ from: `"FiX-it" <${FROM_ADDRESS}>`, to, subject, html });
     return;
   }
 
-  // No SMTP configured — log to console (dev only)
+  // No email provider configured — log to console (dev only)
   console.log('──────────────────────────────────────');
   console.log(`EMAIL: ${subject}`);
   console.log(`TO:    ${to}`);

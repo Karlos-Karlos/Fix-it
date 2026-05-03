@@ -29,7 +29,7 @@ router.post('/register', authLimiter, validate(registerSchema), async (req, res,
     const passwordHash = await bcrypt.hash(password, SALT_ROUNDS);
 
     // Auto-verify only when neither Resend nor SMTP is configured
-    const emailConfigured = !!(process.env.RESEND_API_KEY || process.env.SMTP_HOST);
+    const emailConfigured = !!(process.env.GMAIL_USER || process.env.RESEND_API_KEY || process.env.SMTP_HOST);
     const autoVerify = !emailConfigured;
 
     const userResult = await client.query(
