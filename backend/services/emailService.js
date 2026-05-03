@@ -34,7 +34,9 @@ const FROM_ADDRESS = process.env.EMAIL_FROM || process.env.GMAIL_USER || process
 async function sendMail({ to, subject, html }) {
   const transport = getTransport();
   if (transport) {
+    console.log(`[email] Sending "${subject}" to ${to} via ${process.env.GMAIL_USER ? 'Gmail' : 'SMTP'}`);
     await transport.sendMail({ from: `"FiX-it" <${FROM_ADDRESS}>`, to, subject, html });
+    console.log(`[email] Delivered "${subject}" to ${to}`);
     return;
   }
 

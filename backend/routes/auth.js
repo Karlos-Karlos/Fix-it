@@ -56,7 +56,7 @@ router.post('/register', authLimiter, validate(registerSchema), async (req, res,
       await client.query('COMMIT');
       // Fire-and-forget — respond immediately, email sends in background
       sendVerificationEmail(email, verificationCode)
-        .catch(err => console.error('[register] Failed to send verification email:', err.message));
+        .catch(err => console.error('[register] Failed to send verification email:', err.message, err.code, err.responseCode));
       res.status(201).json({
         message: 'Account created. Check your email for your verification code.',
         user,
@@ -271,7 +271,7 @@ router.post('/forgot-password', authLimiter, validate(forgotPasswordSchema), asy
       );
 
       sendPasswordResetEmail(req.body.email, rawToken)
-        .catch(err => console.error('[forgot-password] Failed to send reset email:', err.message));
+        .catch(err => console.error('[forgot-password] Failed to send reset email:', err.message, err.code, err.responseCode));
     }
 
     // Always 200
