@@ -1,7 +1,7 @@
 const https = require('https');
 
 // ── Brevo HTTP API (no SMTP — works on Railway) ──
-function sendViaBrovo({ to, subject, html }) {
+function sendViaBrevo({ to, subject, html }) {
   const FROM_NAME = 'FiX-it';
   const FROM_EMAIL = process.env.EMAIL_FROM || 'noreply@fixit-app.com';
 
@@ -43,7 +43,7 @@ function sendViaBrovo({ to, subject, html }) {
 async function sendMail({ to, subject, html }) {
   if (process.env.BREVO_API_KEY) {
     console.log(`[email] Sending "${subject}" to ${to} via Brevo`);
-    await sendViaBrovo({ to, subject, html });
+    await sendViaBrevo({ to, subject, html });
     console.log(`[email] Delivered "${subject}" to ${to}`);
     return;
   }
