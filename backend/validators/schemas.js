@@ -1,5 +1,14 @@
 const { z } = require('zod');
 
+// Strict email: must have valid chars, real domain, and a TLD of 2+ real letters
+const emailSchema = z.string()
+  .email('Invalid email address')
+  .max(255)
+  .refine(
+    e => /^[a-zA-Z0-9._%+\-]+@[a-zA-Z0-9\-]+(\.[a-zA-Z0-9\-]+)*\.[a-zA-Z]{2,}$/.test(e),
+    'Please enter a valid email address (e.g. name@example.com)'
+  );
+
 // Password: min 8 chars, at least 1 uppercase, 1 lowercase, 1 number
 const passwordSchema = z.string().min(8).max(128)
   .refine(p => /[A-Z]/.test(p), 'Password must contain at least one uppercase letter')
@@ -8,7 +17,7 @@ const passwordSchema = z.string().min(8).max(128)
 
 // ── Auth ──
 const registerSchema = z.object({
-  email: z.string().email(),
+  email: emailSchema,
   password: passwordSchema,
   display_name: z.string().min(1).max(100),
   gender: z.enum(['male', 'female', 'other']).optional(),
@@ -21,7 +30,7 @@ const registerSchema = z.object({
 });
 
 const loginSchema = z.object({
-  email: z.string().email(),
+  email: emailSchema,
   password: z.string().min(1),
 });
 
@@ -30,11 +39,11 @@ const verifyEmailSchema = z.object({
 });
 
 const resendVerificationSchema = z.object({
-  email: z.string().email(),
+  email: emailSchema,
 });
 
 const forgotPasswordSchema = z.object({
-  email: z.string().email(),
+  email: emailSchema,
 });
 
 const resetPasswordSchema = z.object({
@@ -53,7 +62,7 @@ const refreshSchema = z.object({
 
 // ── Users ──
 const updateProfileSchema = z.object({
-  email: z.string().email().max(255).optional(),
+  email: emailSchema.optional(),
   display_name: z.string().max(100).optional(),
   gender: z.enum(['male', 'female', 'other']).optional(),
   height: z.number().positive().optional(),
@@ -194,7 +203,7 @@ const adminUpdateUserSchema = z.object({
   role: z.enum(['user', 'admin']).optional(),
   email_verified: z.boolean().optional(),
   display_name: z.string().max(100).optional(),
-  email: z.string().email().max(255).optional(),
+  email: emailSchema.optional(),
 });
 
 const uuidParamSchema = z.object({

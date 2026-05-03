@@ -391,7 +391,8 @@
         }
 
         function isValidEmail(email) {
-            return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
+            // Requires: valid local part, domain ≥2 chars, alphabetic TLD ≥2 chars
+            return /^[a-zA-Z0-9._%+\-]+@[a-zA-Z0-9\-]{2,}(\.[a-zA-Z0-9\-]+)*\.[a-zA-Z]{2,}$/.test(email);
         }
 
         function showAuthMessage(text, type) {
