@@ -11559,6 +11559,23 @@
             border-color: var(--accent-danger);
         }
 
+        .account-delete-btn--clear {
+            background: rgba(180, 140, 60, 0.08);
+            color: var(--accent-primary);
+            border-color: rgba(180, 140, 60, 0.25);
+        }
+
+        .account-delete-btn--clear:hover {
+            background: rgba(180, 140, 60, 0.15);
+            border-color: var(--accent-primary);
+        }
+
+        .danger-zone-divider {
+            border: none;
+            border-top: 1px solid rgba(199, 93, 93, 0.15);
+            margin: 18px 0;
+        }
+
         /* Preferences toggles */
         .pref-toggle-row {
             display: flex;

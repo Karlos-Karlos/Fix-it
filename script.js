@@ -8375,8 +8375,8 @@ Please try again with a different photo.`;
                     `Live Posture Check uses your camera to give real-time form feedback during workouts! On the Workout screen, tap "Start Live Posture Check" and it monitors your shoulder, spine, and hip alignment with live correction cues. Great for making sure every rep counts!`
                 ],
                 explain_data_management: (ctx) => [
-                    `The Data Management card is at the bottom of the Upload screen! It shows how much local storage the app is using and has a "Clear All Data" button to remove locally stored session data, scan history, and logs. Perfect for a fresh start! Note: this only clears local data — your account info on the server stays safe.`,
-                    `Find Data Management at the bottom of the Upload screen — it shows your local storage usage and lets you clear all local data. Your account and server data stay intact, so no worries there. Perfect for when you want a clean slate!`
+                    `The "Clear All Data" button is in the Danger Zone section of your Profile Settings (tap your avatar → My Account, scroll to the bottom)! It removes locally stored session data, scan history, and logs — perfect for a fresh start. Your account and server data stay safe.`,
+                    `Find "Clear All Data" in the Danger Zone at the bottom of Profile Settings (My Account). It wipes your local data — scan history, habits, logs — without touching your account or server data. Clean slate, no account loss!`
                 ],
                 explain_auth: (ctx) => [
                     `Creating an account is quick and easy! Click "Sign Up", enter your email, choose a password, add your display name, and you're in. Check your email for a verification link, confirm it, and you're ready! Already registered? Just log in. Forgot your password? Use "Forgot Password" to reset via email. Accounts keep your progress synced across sessions!`,
@@ -8651,7 +8651,7 @@ Please try again with a different photo.`;
                     `Live Posture Check: Workout screen → "Start Live Posture Check". Function: camera-based real-time kinematic analysis using MediaPipe Pose. Evaluates: shoulder alignment, spinal alignment, hip alignment. Output: continuous corrective cue overlays. Recommended use during exercise for form monitoring.`
                 ],
                 explain_data_management: (ctx) => [
-                    `Data Management panel: Upload screen (bottom). Displays: localStorage utilization metrics. Function: "Clear All Data" removes client-side session state, scan history, and log data. Scope: local storage only. Server-side account data unaffected. Use when resetting app state or freeing device storage.`
+                    `"Clear All Data" is in the Danger Zone — Profile Settings (My Account), scroll to bottom. Function: removes client-side session state, scan history, and log data. Scope: local storage only. Server-side account data unaffected. Use when resetting app state or freeing device storage.`
                 ],
                 explain_auth: (ctx) => [
                     `Authentication flow:\n- Register: email + password + display name → email verification → login\n- Existing users: login with credentials\n- Password recovery: "Forgot Password" → email reset link\nBenefits: server-side data persistence, cross-session synchronization, progress continuity.`
@@ -8945,8 +8945,8 @@ Please try again with a different photo.`;
                     `The Live Posture Check is fascinating from a biomechanics perspective! It uses computer vision to analyze your posture in real time through your camera, detecting shoulder asymmetry, forward head posture, hip tilt, and other compensatory patterns, then gives immediate correction cues. Good posture during exercise prevents injury and maximizes muscle activation efficiency!`
                 ],
                 explain_data_management: (ctx) => [
-                    `The Data Management section (bottom of Upload screen) shows how much local storage the app is using and provides a "Clear All Data" option. This removes all client-side data: session state, scan history, food logs, workout logs, and habit data. Important: this only clears local browser storage — your server-side account and synced data remain intact. Use it for a fresh start or to free up device storage!`,
-                    `Local data management is important for app performance! The Data Management card on the Upload screen shows your localStorage usage and has a "Clear All Data" button. Browser localStorage has limited capacity, so clearing occasionally can prevent slowdowns. Your account data lives on the server and isn't affected — only locally cached data gets cleared!`
+                    `The "Clear All Data" button is now in the Danger Zone section of Profile Settings (tap your avatar → My Account, scroll to the bottom). It removes all client-side data — session state, scan history, food logs, workout logs, and habit data — without touching your server account or synced data. Use it for a fresh start or to free up device storage!`,
+                    `"Clear All Data" lives in the Danger Zone at the bottom of Profile Settings (My Account). Browser localStorage has limited capacity, so clearing occasionally can prevent slowdowns. Your account data lives on the server and isn't affected — only locally cached data gets cleared!`
                 ],
                 explain_auth: (ctx) => [
                     `Authentication lets you securely access your personalized data across sessions! To create an account, click "Sign Up", enter your email and a password (minimum 8 characters), choose a display name, and verify your email via the confirmation link. Your account stores analysis history, progress data, and settings server-side — accessible from any device!`,
@@ -9261,8 +9261,8 @@ Please try again with a different photo.`;
                     `The Live Posture Check catches you slouching in real time, which is embarrassing but extremely useful! Workout screen → "Start Live Posture Check" → camera on → instant posture feedback. Shoulder alignment, spine, hips — all monitored continuously. The AI is basically the "sit up straight" your parents always nagged about, but with more data!`
                 ],
                 explain_data_management: (ctx) => [
-                    `Data Management is at the very bottom of the Upload screen, where most people never look. It shows how much storage the app is using and has a "Clear All Data" button for when you want a truly fresh start (or you're in a dramatic mood). Clears local data only — your actual account on the server is untouched. The nuclear option, but a very targeted nuclear option!`,
-                    `"Clear All Data" in the Data Management section (Upload screen, bottom) is the app equivalent of "turn it off and back on again." Wipes all local scan history, logs, and session data. Does NOT delete your account or server data. Perfect for when your phone is running low on storage or you've decided to spiritually restart. Available whenever needed!`
+                    `"Clear All Data" has been moved to the Danger Zone — scroll to the bottom of Profile Settings (My Account). It wipes all local scan history, logs, and session data — the nuclear option, but a very targeted one! Clears local data only — your actual account on the server is completely untouched.`,
+                    `Find "Clear All Data" in the Danger Zone at the bottom of Profile Settings (tap your avatar → My Account). The app equivalent of "turn it off and back on again." Wipes local history, logs, and session data. Does NOT delete your account or server data. Perfect for a spiritual restart!`
                 ],
                 explain_auth: (ctx) => [
                     `Signing up for an account is easier than most things in fitness! Click "Sign Up," enter your email, pick a password (not "password", please, we're past that), add your display name, confirm your email when the verification arrives, and you're in. Forgot your password? "Forgot Password" sends a reset email. Having an account means your data actually persists. Revolutionary!`,
