@@ -3363,6 +3363,7 @@ Please try again with a different photo.`;
                 'light': 1.375,
                 'moderate': 1.55,
                 'very': 1.725,
+                'very_active': 1.725,
                 'athlete': 1.9
             };
             const multiplier = activityMultipliers[activityLevel] || 1.55;
@@ -3468,7 +3469,7 @@ Please try again with a different photo.`;
                 goalSel.value = goal;
             }
 
-            const activityMultipliers = { sedentary: 1.2, light: 1.375, moderate: 1.55, very: 1.725, athlete: 1.9 };
+            const activityMultipliers = { sedentary: 1.2, light: 1.375, moderate: 1.55, very: 1.725, very_active: 1.725, athlete: 1.9 };
             const mult = activityMultipliers[activityLevel] || 1.55;
 
             const bmr = state._bmr || computeBMR(weight, height, age, gender);
@@ -3519,7 +3520,7 @@ Please try again with a different photo.`;
 
                     if (!weight) return;
 
-                    const activityMultipliers = { sedentary: 1.2, light: 1.375, moderate: 1.55, very: 1.725, athlete: 1.9 };
+                    const activityMultipliers = { sedentary: 1.2, light: 1.375, moderate: 1.55, very: 1.725, very_active: 1.725, athlete: 1.9 };
                     const mult = activityMultipliers[activityLevel] || 1.55;
                     const bmr = computeBMR(weight, height, age, gender);
                     const tdee = Math.round(bmr * mult);
