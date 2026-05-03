@@ -17219,24 +17219,6 @@
     }
 }
 
-/* ── Upload screen back button ── */
-.upload-back-btn {
-    display: flex;
-    align-items: center;
-    gap: 6px;
-    padding: 10px 18px;
-    margin-bottom: 8px;
-    background: transparent;
-    border: 1px solid var(--border-subtle);
-    border-radius: 10px;
-    color: var(--text-secondary);
-    font-size: 0.875rem;
-    font-weight: 600;
-    cursor: pointer;
-    transition: color 0.2s, border-color 0.2s;
-}
-.upload-back-btn:hover { color: var(--accent-primary); border-color: var(--accent-primary); }
-
 /* ── Fixed Bottom Navigation ── */
 .bottom-nav {
     display: none;
