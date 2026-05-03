@@ -17289,12 +17289,22 @@
 }
 
 .bnav-item.bnav-new {
-    color: var(--accent-warm);
+    color: #fff;
+    background: var(--accent-warm);
+    border-radius: 12px;
+    margin: 4px 2px;
+    padding-top: 6px;
+    padding-bottom: 6px;
+    opacity: 0.9;
 }
 
-.bnav-item.bnav-new.active {
-    color: var(--accent-warm);
-    background: rgba(184, 115, 81, 0.12);
+.bnav-item.bnav-new svg { stroke: #fff; }
+
+.bnav-item.bnav-new.active,
+.bnav-item.bnav-new:hover {
+    opacity: 1;
+    background: var(--accent-warm);
+    color: #fff;
 }
 
 .bnav-item:first-child { margin-left: 4px; }
