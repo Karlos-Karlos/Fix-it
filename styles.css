@@ -17289,12 +17289,12 @@
 }
 
 .bnav-item.bnav-new {
-    color: var(--accent-primary);
-    opacity: 0.75;
+    color: var(--accent-warm);
 }
 
 .bnav-item.bnav-new.active {
-    opacity: 1;
+    color: var(--accent-warm);
+    background: rgba(184, 115, 81, 0.12);
 }
 
 .bnav-item:first-child { margin-left: 4px; }
