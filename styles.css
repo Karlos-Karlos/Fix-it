@@ -9038,7 +9038,7 @@
             border: 1px solid var(--border-subtle, rgba(255, 255, 255, 0.08));
             background: var(--bg-primary, #141211);
             color: var(--text-primary, #f5f0e8);
-            font-size: 0.82rem;
+            font-size: 1rem;
             font-family: inherit;
             outline: none;
             transition: border-color 0.2s ease, box-shadow 0.2s ease;
@@ -10893,7 +10893,7 @@
             border-radius: 10px;
             color: var(--text-primary);
             font-family: 'Plus Jakarta Sans', sans-serif;
-            font-size: 0.9rem;
+            font-size: 1rem;
             transition: all 0.3s var(--transition-smooth);
         }
 
@@ -17337,6 +17337,11 @@ body.has-bottom-nav .coach-panel {
         max-height: calc(50vh - 180px);
         min-height: 60px;
     }
+}
+
+/* ── Prevent iOS Safari auto-zoom on input focus (font-size must be ≥ 16px) ── */
+@media (max-width: 768px) {
+    input, textarea, select { font-size: 16px !important; }
 }
 
 /* ── Offline banner ── */
