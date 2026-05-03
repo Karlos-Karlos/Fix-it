@@ -101,7 +101,7 @@ router.get('/hydration', async (req, res, next) => {
 router.put('/goal-weight', async (req, res, next) => {
   try {
     const { goal_kg, start_kg } = req.body;
-    if (!goal_kg || goal_kg <= 0) throw appError(ErrorCodes.VALIDATION_ERROR, 'goal_kg required');
+    if (!goal_kg || goal_kg < 30 || goal_kg > 300) throw appError(ErrorCodes.VALIDATION_ERROR, 'goal_kg must be between 30 and 300');
 
     const result = await db.query(
       `INSERT INTO goal_weight (user_id, goal_kg, start_kg)
@@ -134,7 +134,7 @@ router.get('/goal-weight', async (req, res, next) => {
 router.post('/weight-log', async (req, res, next) => {
   try {
     const { weight_kg, log_date } = req.body;
-    if (!weight_kg || weight_kg <= 0) throw appError(ErrorCodes.VALIDATION_ERROR, 'weight_kg required');
+    if (!weight_kg || weight_kg < 30 || weight_kg > 300) throw appError(ErrorCodes.VALIDATION_ERROR, 'weight_kg must be between 30 and 300');
     const dateVal = log_date || new Date().toISOString().split('T')[0];
 
     const result = await db.query(
@@ -170,6 +170,10 @@ router.post('/measurements', async (req, res, next) => {
   try {
     const { chest, waist, hips, arms, log_date } = req.body;
     if (!chest && !waist && !hips && !arms) throw appError(ErrorCodes.VALIDATION_ERROR, 'At least one measurement required');
+    if (chest && (chest < 50 || chest > 200)) throw appError(ErrorCodes.VALIDATION_ERROR, 'chest must be between 50 and 200 cm');
+    if (waist && (waist < 40 || waist > 200)) throw appError(ErrorCodes.VALIDATION_ERROR, 'waist must be between 40 and 200 cm');
+    if (hips  && (hips  < 50 || hips  > 200)) throw appError(ErrorCodes.VALIDATION_ERROR, 'hips must be between 50 and 200 cm');
+    if (arms  && (arms  < 20 || arms  > 80))  throw appError(ErrorCodes.VALIDATION_ERROR, 'arms must be between 20 and 80 cm');
     const dateVal = log_date || new Date().toISOString().split('T')[0];
 
     const result = await db.query(
@@ -209,7 +213,7 @@ router.post('/lifts', async (req, res, next) => {
   try {
     const { exercise_name, weight_kg, reps, e1rm, log_date } = req.body;
     if (!exercise_name || exercise_name.length > 100) throw appError(ErrorCodes.VALIDATION_ERROR, 'exercise_name required and must be ≤100 characters');
-    if (!weight_kg || weight_kg <= 0) throw appError(ErrorCodes.VALIDATION_ERROR, 'weight_kg required');
+    if (!weight_kg || weight_kg < 30 || weight_kg > 300) throw appError(ErrorCodes.VALIDATION_ERROR, 'weight_kg must be between 30 and 300');
     if (!reps || reps <= 0) throw appError(ErrorCodes.VALIDATION_ERROR, 'reps required');
     const dateVal = log_date || new Date().toISOString().split('T')[0];
 
