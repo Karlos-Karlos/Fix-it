@@ -9109,7 +9109,7 @@
                 left: 8px;
                 right: 8px;
                 bottom: 0;
-                max-height: 70vh;
+                max-height: 50vh;
                 border-radius: 16px 16px 0 0;
                 transform: translateY(100%);
             }
@@ -17328,16 +17328,14 @@ body.has-bottom-nav .coach-panel {
 @media (max-width: 480px) {
     body.has-bottom-nav .coach-panel {
         bottom: calc(94px + env(safe-area-inset-bottom, 0px));
-        /* Limit height so panel stays within the visible area above the nav */
-        max-height: calc(100vh - 180px);
+        max-height: 50vh;
         border-radius: 16px;
-        /* Prevent clipping of internal content */
         overflow: hidden;
     }
 
     body.has-bottom-nav .coach-messages {
-        max-height: calc(100vh - 430px);
-        min-height: 80px;
+        max-height: calc(50vh - 180px);
+        min-height: 60px;
     }
 }
 
