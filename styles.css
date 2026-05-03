@@ -17281,6 +17281,8 @@
     line-height: 1;
 }
 
+#open-simulator-btn span { font-size: 0.55rem; }
+
 .bnav-item.active {
     color: var(--accent-primary);
     background: rgba(201, 169, 98, 0.1);
