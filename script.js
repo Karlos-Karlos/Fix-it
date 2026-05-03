@@ -2557,8 +2557,15 @@
                 if (stepNum < num) step.classList.add('completed');
             });
 
+            state.previousScreen = state.currentScreen;
             state.currentScreen = num;
             document.dispatchEvent(new CustomEvent('screenChange', { detail: { screen: num } }));
+
+            // Show back button on upload screen only when a previous analysis exists
+            const uploadBackBtn = document.getElementById('upload-back-btn');
+            if (uploadBackBtn) {
+                uploadBackBtn.style.display = (num === 1 && state.analysisResult) ? 'flex' : 'none';
+            }
 
             // Show/hide nav steps (hidden for admin screen)
             if (num !== 10) {
@@ -3546,10 +3553,13 @@ Please try again with a different photo.`;
             document.querySelectorAll('.bnav-item[data-screen]').forEach(btn => {
                 btn.addEventListener('click', () => {
                     const screen = parseInt(btn.dataset.screen);
-                    if (screen === 1) clearPreview();
                     goToScreen(screen);
                 });
             });
+            const uploadBackBtn = document.getElementById('upload-back-btn');
+            if (uploadBackBtn) {
+                uploadBackBtn.addEventListener('click', () => goToScreen(state.previousScreen || 3));
+            }
         }
 
         // Mock data fallback
