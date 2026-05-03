@@ -1,12 +1,18 @@
 const { z } = require('zod');
 
-// Strict email: must have valid chars, real domain, and a TLD of 2+ real letters
+// Allowed TLDs — generic + major country codes (no .uk, .acom, etc.)
+const ALLOWED_TLDS = /\.(com|net|org|edu|gov|io|co|info|biz|me|app|dev|pt|us|ca|au|de|fr|es|it|br|jp|nl|be|ch|mx|ar|cl|pl|in|cn|za|ng|ao|mz|cv|gq)$/i;
+
 const emailSchema = z.string()
   .email('Invalid email address')
   .max(255)
   .refine(
-    e => /^[a-zA-Z0-9._%+\-]+@[a-zA-Z0-9\-]+(\.[a-zA-Z0-9\-]+)*\.[a-zA-Z]{2,}$/.test(e),
+    e => /^[a-zA-Z0-9._%+\-]+@[a-zA-Z0-9\-]{2,}(\.[a-zA-Z0-9\-]+)*\.[a-zA-Z]{2,}$/.test(e),
     'Please enter a valid email address (e.g. name@example.com)'
+  )
+  .refine(
+    e => ALLOWED_TLDS.test(e),
+    'Email domain not accepted. Please use a common provider (e.g. Gmail, Outlook) or your school email.'
   );
 
 // Password: min 8 chars, at least 1 uppercase, 1 lowercase, 1 number

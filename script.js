@@ -391,8 +391,9 @@
         }
 
         function isValidEmail(email) {
-            // Requires: valid local part, domain ≥2 chars, alphabetic TLD ≥2 chars
-            return /^[a-zA-Z0-9._%+\-]+@[a-zA-Z0-9\-]{2,}(\.[a-zA-Z0-9\-]+)*\.[a-zA-Z]{2,}$/.test(email);
+            const formatOk = /^[a-zA-Z0-9._%+\-]+@[a-zA-Z0-9\-]{2,}(\.[a-zA-Z0-9\-]+)*\.[a-zA-Z]{2,}$/.test(email);
+            const allowedTld = /\.(com|net|org|edu|gov|io|co|info|biz|me|app|dev|pt|us|ca|au|de|fr|es|it|br|jp|nl|be|ch|mx|ar|cl|pl|in|cn|za|ng|ao|mz|cv|gq)$/i.test(email);
+            return formatOk && allowedTld;
         }
 
         function showAuthMessage(text, type) {
