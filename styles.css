@@ -17272,7 +17272,7 @@
 }
 
 .bnav-item span {
-    font-size: 0.65rem;
+    font-size: 0.52rem;
     letter-spacing: 0.01em;
     white-space: nowrap;
     overflow: hidden;
@@ -17280,8 +17280,6 @@
     max-width: 100%;
     line-height: 1;
 }
-
-#open-simulator-btn span { font-size: 0.55rem; }
 
 .bnav-item.active {
     color: var(--accent-primary);
