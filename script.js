@@ -1187,30 +1187,35 @@
         }
 
 
-        // Clear All Data Function
+        // Clear All Data Function — wipes everything except the account profile
         async function clearAllData() {
             try {
-                // Clear only the current user's localStorage items (keep theme, keep other users' data)
+                // 1. Clear server-side data (scans, logs, history, gamification reset)
+                if (state.accessToken) {
+                    try {
+                        await apiFetch('/users/me/data', { method: 'DELETE' });
+                    } catch (e) {
+                        dbg.warn('Server data clear failed:', e.message);
+                    }
+                }
+
+                // 2. Clear all fixit localStorage keys for this user (keep auth tokens + theme)
                 const uid = state.user && state.user.id;
                 const keysToRemove = [];
                 for (let i = 0; i < localStorage.length; i++) {
                     const key = localStorage.key(i);
                     if (!key || !key.startsWith('fixit-')) continue;
-                    // Skip auth tokens (shared)
                     if (key === 'fixit-access-token' || key === 'fixit-refresh-token') continue;
-                    // Skip theme keys (keep per-user themes)
                     if (key.startsWith('fixit-theme')) continue;
-                    // If user is logged in, only remove keys belonging to this user
                     if (uid) {
                         if (key.endsWith('-' + uid)) keysToRemove.push(key);
                     } else {
-                        // No user context — remove unscoped keys only
                         keysToRemove.push(key);
                     }
                 }
                 keysToRemove.forEach(key => localStorage.removeItem(key));
 
-                // Clear IndexedDB
+                // 3. Clear IndexedDB snapshots
                 try {
                     const db = await openSnapshotDB();
                     const tx = db.transaction(SNAPSHOT_STORE, 'readwrite');
@@ -1223,7 +1228,7 @@
                     dbg.warn('Could not clear IndexedDB:', e);
                 }
 
-                // Reset state
+                // 4. Reset in-memory state (keep user/tokens — account stays intact)
                 state.gender = null;
                 state.height = null;
                 state.weight = null;
@@ -8375,8 +8380,8 @@ Please try again with a different photo.`;
                     `Live Posture Check uses your camera to give real-time form feedback during workouts! On the Workout screen, tap "Start Live Posture Check" and it monitors your shoulder, spine, and hip alignment with live correction cues. Great for making sure every rep counts!`
                 ],
                 explain_data_management: (ctx) => [
-                    `The "Clear All Data" button is in the Danger Zone section of your Profile Settings (tap your avatar → My Account, scroll to the bottom)! It removes locally stored session data, scan history, and logs — perfect for a fresh start. Your account and server data stay safe.`,
-                    `Find "Clear All Data" in the Danger Zone at the bottom of Profile Settings (My Account). It wipes your local data — scan history, habits, logs — without touching your account or server data. Clean slate, no account loss!`
+                    `The "Clear All Data" button is in the Danger Zone section of your Profile Settings (tap your avatar → My Account, scroll to the bottom)! It deletes ALL your data — scans, logs, workouts, food history, measurements, and progress — from both the device and server. Your profile (name, email, password) stays intact. A true fresh start!`,
+                    `Find "Clear All Data" in the Danger Zone at the bottom of Profile Settings (My Account). It wipes everything — scan history, all logs, workouts, progress — locally and on the server. Your account stays, but all data is gone. Use with intention!`
                 ],
                 explain_auth: (ctx) => [
                     `Creating an account is quick and easy! Click "Sign Up", enter your email, choose a password, add your display name, and you're in. Check your email for a verification link, confirm it, and you're ready! Already registered? Just log in. Forgot your password? Use "Forgot Password" to reset via email. Accounts keep your progress synced across sessions!`,
@@ -8945,8 +8950,8 @@ Please try again with a different photo.`;
                     `The Live Posture Check is fascinating from a biomechanics perspective! It uses computer vision to analyze your posture in real time through your camera, detecting shoulder asymmetry, forward head posture, hip tilt, and other compensatory patterns, then gives immediate correction cues. Good posture during exercise prevents injury and maximizes muscle activation efficiency!`
                 ],
                 explain_data_management: (ctx) => [
-                    `The "Clear All Data" button is now in the Danger Zone section of Profile Settings (tap your avatar → My Account, scroll to the bottom). It removes all client-side data — session state, scan history, food logs, workout logs, and habit data — without touching your server account or synced data. Use it for a fresh start or to free up device storage!`,
-                    `"Clear All Data" lives in the Danger Zone at the bottom of Profile Settings (My Account). Browser localStorage has limited capacity, so clearing occasionally can prevent slowdowns. Your account data lives on the server and isn't affected — only locally cached data gets cleared!`
+                    `The "Clear All Data" button is in the Danger Zone section of Profile Settings (tap your avatar → My Account, scroll to the bottom). It deletes all data — scans, food logs, workout logs, sleep/hydration/measurements, and progress — from both your device and the server. Your account (name, email, password) stays. Use for a completely fresh start!`,
+                    `"Clear All Data" lives in the Danger Zone at the bottom of Profile Settings (My Account). It wipes all data locally and on the server — no scan history, no logs, gamification resets to zero. Your account credentials are preserved. The complete reset option!`
                 ],
                 explain_auth: (ctx) => [
                     `Authentication lets you securely access your personalized data across sessions! To create an account, click "Sign Up", enter your email and a password (minimum 8 characters), choose a display name, and verify your email via the confirmation link. Your account stores analysis history, progress data, and settings server-side — accessible from any device!`,
@@ -9261,8 +9266,8 @@ Please try again with a different photo.`;
                     `The Live Posture Check catches you slouching in real time, which is embarrassing but extremely useful! Workout screen → "Start Live Posture Check" → camera on → instant posture feedback. Shoulder alignment, spine, hips — all monitored continuously. The AI is basically the "sit up straight" your parents always nagged about, but with more data!`
                 ],
                 explain_data_management: (ctx) => [
-                    `"Clear All Data" has been moved to the Danger Zone — scroll to the bottom of Profile Settings (My Account). It wipes all local scan history, logs, and session data — the nuclear option, but a very targeted one! Clears local data only — your actual account on the server is completely untouched.`,
-                    `Find "Clear All Data" in the Danger Zone at the bottom of Profile Settings (tap your avatar → My Account). The app equivalent of "turn it off and back on again." Wipes local history, logs, and session data. Does NOT delete your account or server data. Perfect for a spiritual restart!`
+                    `"Clear All Data" is in the Danger Zone — scroll to the bottom of Profile Settings (My Account). The true nuclear option! Wipes all scan history, logs, workouts, food history, measurements, and progress — local AND server. Your account stays. It's a spiritual AND literal restart!`,
+                    `Find "Clear All Data" in the Danger Zone at the bottom of Profile Settings (tap your avatar → My Account). Deletes everything — all logs, scans, habits, progress — from your device and the server. Your profile (name, email, password) stays intact. The full reset!`
                 ],
                 explain_auth: (ctx) => [
                     `Signing up for an account is easier than most things in fitness! Click "Sign Up," enter your email, pick a password (not "password", please, we're past that), add your display name, confirm your email when the verification arrives, and you're in. Forgot your password? "Forgot Password" sends a reset email. Having an account means your data actually persists. Revolutionary!`,

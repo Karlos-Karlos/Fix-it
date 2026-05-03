@@ -144,6 +144,62 @@ router.get('/me/gamification', async (req, res, next) => {
   }
 });
 
+// DELETE /me/data — wipe all user data but keep the account profile
+router.delete('/me/data', async (req, res, next) => {
+  const uid = req.user.id;
+  try {
+    // Delete uploaded scan images from disk first
+    const scans = (await db.query(
+      'SELECT image_url, thumbnail_url FROM analysis_scans WHERE user_id = $1', [uid]
+    )).rows;
+    const uploadsDir = path.join(__dirname, '..', 'uploads');
+    scans.forEach(scan => {
+      [scan.image_url, scan.thumbnail_url].forEach(url => {
+        if (url) fs.unlink(path.join(uploadsDir, path.basename(url)), () => {});
+      });
+    });
+
+    // Delete all user-owned data (keep users + user_preferences rows)
+    const tables = [
+      'analysis_scans',
+      'analysis_results',
+      'coach_conversations',
+      'food_log',
+      'goal_weight',
+      'hydration_logs',
+      'lift_log',
+      'measurement_logs',
+      'meals',
+      'sleep_logs',
+      'user_achievements',
+      'user_personas_used',
+      'user_sessions',
+      'wearable_sessions',
+      'weekly_challenges',
+      'weekly_plans',
+      'weight_log',
+      'workout_sessions',
+    ];
+    for (const table of tables) {
+      await db.query(`DELETE FROM ${table} WHERE user_id = $1`, [uid]).catch(() => {});
+    }
+
+    // Reset gamification to fresh state instead of deleting
+    await db.query(
+      `UPDATE user_gamification
+       SET xp=0, level=1, scans_completed=0, workouts_logged=0,
+           meals_logged=0, streak_days=0, meal_plans_generated=0,
+           updated_at=NOW()
+       WHERE user_id = $1`,
+      [uid]
+    ).catch(() => {});
+
+    res.json({ message: 'All data cleared. Your account is ready for a fresh start.' });
+  } catch (err) {
+    next(err);
+  }
+});
+
 // DELETE /me
 router.delete('/me', async (req, res, next) => {
   try {
