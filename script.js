@@ -8156,8 +8156,8 @@ Please try again with a different photo.`;
                     `This is an AI-powered fitness analysis tool. It uses computer vision to analyze your body from a photo, then gives you personalized insights for workouts, nutrition, and body composition. Everything runs right in your browser!`
                 ],
                 explain_upload: (ctx) => [
-                    `The Upload screen is where it all begins! You can either take a photo with your camera or upload an existing image. For the best results, use a clear, well-lit, full-body front-facing photo. You'll also enter your height, weight, and fitness goal here to personalize your analysis.`,
-                    `The first step is uploading your photo! You can snap one with your camera or pick from your gallery. Tips for a great scan: stand straight, face forward, good lighting, and make sure your whole body is visible. You'll also set your gender, height, weight, and fitness goal!`
+                    `The Upload screen is where it all begins! You can take a photo with your camera or upload an existing image. For the best results follow the 4 tips shown: full body visible, good lighting, neutral background, and minimal clothing. You'll also enter your height, weight, and fitness goal to personalize your analysis.`,
+                    `The first step is uploading your photo! Snap one with your camera or pick from your gallery. The 4 tips make a real difference: stand in full view, good lighting, plain background, and wear minimal clothing so the AI can accurately read your body shape. You'll also set your gender, height, weight, and fitness goal!`
                 ],
                 explain_results: (ctx) => [
                     `The Results screen is your main dashboard! It shows your overall body composition score (${ctx.bodyScore}/100), your category ("${ctx.category}"), fitness index, and an overall grade (${ctx.grade}). It also shows the confidence level of the analysis and gives you navigation buttons to explore Breakdown, Simulator, Workout, and Nutrition in more detail.`,
@@ -8364,8 +8364,8 @@ Please try again with a different photo.`;
                     `Head to the user menu (top right) and tap "My Account" — update everything there: display name, email, fitness stats like height/weight/goal, plus change your password. Stay updated, stay optimized!`
                 ],
                 explain_optional_measurements: (ctx) => [
-                    `The optional measurements on the upload screen (chest, waist, hips, arms in cm) are absolutely worth filling in! They give the AI real body proportion data to complement the photo analysis, making your results much more accurate. Just grab a soft tape measure and measure relaxed at the widest point for each area!`,
-                    `Filling in those optional measurements really pays off! The AI uses chest, waist, hips, and arm circumferences to better understand your body shape beyond what the camera alone can see. Takes less than 2 minutes and noticeably improves your analysis accuracy!`
+                    `The optional measurements on the upload screen are absolutely worth filling in! Enter chest (50–200 cm), waist (40–200 cm), hips (50–200 cm), and arms (20–70 cm) using a soft tape measure at the widest point. They give the AI real body proportion data to complement the photo, making your results much more accurate!`,
+                    `Filling in those optional measurements really pays off! Chest (50–200 cm), waist (40–200 cm), hips (50–200 cm), arms (20–70 cm) — all measured at the widest point with a soft tape. The AI uses them to understand your body shape beyond what the camera alone can see. Takes 2 minutes, noticeably improves accuracy!`
                 ],
                 explain_export: (ctx) => [
                     `On the Results screen, tap "Export Data" to save your full analysis report, or "Share Card" to generate a gorgeous shareable summary card — perfect for documenting progress or sharing with friends! After a workout in the Player, "Share Workout" lets you share your session summary too. Show the world your hard work!`,
@@ -8487,7 +8487,7 @@ Please try again with a different photo.`;
                     `Fix-it: Browser-based body composition analysis tool.\n- Input: user photo + optional height/weight\n- Processing: MediaPipe Pose (client-side AI)\n- Output: body score, muscle tone, posture, workout/nutrition plans\n- Purpose: educational fitness awareness (non-medical)`,
                 ],
                 explain_upload: (ctx) => [
-                    `Upload screen function:\n- Input methods: camera capture or file upload\n- Required data: full-body photo\n- Optional data: gender, height (cm), weight (kg), fitness goal\n- Photo requirements: front-facing, well-lit, full body visible\n- Impact: data quality directly affects analysis confidence level`,
+                    `Upload screen function:\n- Input methods: camera capture or file upload\n- Required data: full-body photo\n- Optional data: gender, height (cm), weight (kg), fitness goal\n- Photo requirements: front-facing, well-lit, full body visible, neutral background, minimal clothing\n- Impact: data quality directly affects analysis confidence level`,
                 ],
                 explain_results: (ctx) => [
                     `Results screen output:\n- Body Composition Score: ${ctx.bodyScore}/100 (${ctx.category})\n- Overall Grade: ${ctx.grade}\n- Fitness Index: ${ctx.fitnessIndex}\n- Body Type: ${ctx.bodyType}\n- Confidence: ${ctx.confidence}\n- Navigation: links to Breakdown, Simulator, Workout, Nutrition screens`,
@@ -8644,7 +8644,7 @@ Please try again with a different photo.`;
                     `My Account — access via user menu (top right). Functions: update display name, email, fitness profile parameters (height, weight, gender, age range, activity level, fitness goal), change password, delete account. Update fitness profile regularly for accurate analysis and recommendations.`
                 ],
                 explain_optional_measurements: (ctx) => [
-                    `Upload screen optional inputs: chest, waist, hips, arms (cm). Function: supplements photo-based landmark detection with direct circumference data. Protocol: soft tape measure, relaxed stance, tape perpendicular to body axis at widest point. Effect: measurably improves body composition estimation accuracy.`
+                    `Upload screen optional inputs: chest (50–200 cm), waist (40–200 cm), hips (50–200 cm), arms (20–70 cm). Function: supplements photo-based landmark detection with direct circumference data. Protocol: soft tape measure, relaxed stance, tape perpendicular to body axis at widest point. Effect: measurably improves body composition estimation accuracy.`
                 ],
                 explain_export: (ctx) => [
                     `Export options on Results screen:\n- Export Data: saves complete analysis metrics as a structured file\n- Share Card: generates formatted visual summary for sharing\nWorkout Player: Share Workout — creates post-session summary. All accessible via respective screen action buttons.`
@@ -8761,8 +8761,8 @@ Please try again with a different photo.`;
                     `Fix-it combines computer vision with exercise science! It uses MediaPipe Pose (Google's open-source body tracking AI) to analyze your photo, then applies fitness science research to generate personalized insights. Everything runs in your browser -- no data leaves your device. It's a great example of how AI can make health awareness more accessible!`,
                 ],
                 explain_upload: (ctx) => [
-                    `The Upload screen uses the HTML5 File API and MediaDevices API (for camera access) to capture your photo. Interestingly, image quality directly affects AI accuracy -- computer vision models rely on pixel data to detect edges and landmarks. The height/weight inputs enable BMI calculation using Quetelet's formula (weight/height^2), developed in 1832!`,
-                    `Upload is the data collection phase. The photo goes through the browser's Canvas API for preprocessing before AI analysis. Fun fact: the reason front-facing photos work best is that MediaPipe Pose was primarily trained on frontal body images, so it has the highest landmark detection accuracy from that angle!`
+                    `The Upload screen uses the HTML5 File API and MediaDevices API (for camera access) to capture your photo. The 4 photo tips shown (full body, good lighting, neutral background, minimal clothing) are scientifically grounded — MediaPipe Pose landmark detection accuracy drops significantly with heavy clothing, poor lighting, or partial body views. Height/weight inputs enable BMI via Quetelet's formula (weight/height²), developed in 1832!`,
+                    `Upload is the data collection phase. The photo goes through the browser's Canvas API for preprocessing before AI analysis. Fun fact: the "minimal clothing" tip is critical — clothing occludes body landmarks and biases circumference estimation. Front-facing angle is optimal because MediaPipe Pose was primarily trained on frontal body images!`
                 ],
                 explain_results: (ctx) => [
                     `The Results screen applies a concept from data visualization called "progressive disclosure" -- it shows you the high-level summary first (body score, category, grade) before letting you drill into details. Your score of ${ctx.bodyScore}/100 is derived using kinanthropometry -- the science of body measurement in relation to physical activity, developed in the 1970s!`,
@@ -8934,8 +8934,8 @@ Please try again with a different photo.`;
                     `Your account settings live in the user menu → My Account. This is where you can edit your identity details (name, email) and your full fitness profile. Keeping these accurate matters because the AI uses your biometric data to personalize everything from calorie targets to workout recommendations!`
                 ],
                 explain_optional_measurements: (ctx) => [
-                    `The optional measurements on the upload screen are scientifically valuable! The AI primarily uses MediaPipe Pose landmarks from your photo, but actual circumference measurements (chest, waist, hips, arms in cm) provide real-world body proportion data that photos can't perfectly capture. Use a soft tape measure, stand relaxed, measure at the widest point for each area. This hybrid approach significantly improves estimation accuracy!`,
-                    `Those optional measurement fields are genuinely worth filling in! Photo analysis estimates body proportions from camera geometry, but actual tape measurements are direct data. When the AI has both inputs, it cross-validates the photo estimates and refines results — the difference between an educated guess and a data-informed analysis!`
+                    `The optional measurements are scientifically valuable! Actual circumference data (chest 50–200 cm, waist 40–200 cm, hips 50–200 cm, arms 20–70 cm) provides real-world body proportion data photos can't perfectly capture. Use a soft tape measure, stand relaxed, measure at the widest point for each area. This hybrid photo + measurement approach significantly improves estimation accuracy!`,
+                    `Those optional measurement fields are genuinely worth filling in! Chest (50–200 cm), waist (40–200 cm), hips (50–200 cm), arms (20–70 cm) — measured with a soft tape at the widest point. When the AI has both photo landmarks AND direct measurements, it cross-validates and refines results — the difference between an educated guess and a data-informed analysis!`
                 ],
                 explain_export: (ctx) => [
                     `Export and sharing features help you document and celebrate your journey! "Export Data" on the Results screen saves your complete analysis as a structured file — great for personal records. "Share Card" generates a visual summary formatted for social sharing. Research consistently shows that sharing fitness milestones increases long-term adherence to training goals!`,
@@ -9059,8 +9059,8 @@ Please try again with a different photo.`;
                     `Fix-it: it's like having a personal trainer, nutritionist, and that one friend who knows too many fitness facts -- all in your browser. Upload a photo, get analyzed by AI, receive workout and meal recommendations. No gym membership required. Pants optional.`,
                 ],
                 explain_upload: (ctx) => [
-                    `The Upload screen: where you bravely submit a photo of yourself to be judged by a robot. You can snap one with your camera or upload an existing pic. Pro tip: good lighting and a front-facing pose will make the AI less confused. Think passport photo, but you're allowed to smile.`,
-                    `Step 1: Upload a photo. Step 2: Enter your height and weight (the AI promises not to gossip). Step 3: Pick your fitness goal. That's it! The AI handles the rest. Just make sure you're in the photo and not your cat. We haven't trained it for cats. Yet.`
+                    `The Upload screen: where you bravely submit a photo of yourself to be judged by a robot. Follow the 4 tips shown — full body visible, good lighting, neutral background, and minimal clothing (yes, really — baggy clothes confuse the AI). Think passport photo vibes, but you're allowed to smile.`,
+                    `Step 1: Upload a photo (follow the 4 tips: full body, good lighting, plain background, minimal clothing — the AI isn't being weird, it just needs to actually see your body shape). Step 2: Enter your height and weight. Step 3: Pick your fitness goal. That's it! We haven't trained it for cats. Yet.`
                 ],
                 explain_results: (ctx) => [
                     `The Results screen: your fitness report card! Body score: ${ctx.bodyScore}/100. Category: "${ctx.category}". Grade: ${ctx.grade}. Unlike school report cards, there's no parent-teacher conference. From here, you can explore your breakdown, try the simulator, or check workout and nutrition plans. It's like a choose-your-own-adventure book, but for fitness!`,
@@ -9250,8 +9250,8 @@ Please try again with a different photo.`;
                     `Great news: you don't have to stay who you were when you created your account! Head to the user menu → My Account to update your display name, email, height, weight, fitness goal, and more. No judgment on how outdated your old stats were. Much judgment. Just kidding. Mostly.`
                 ],
                 explain_optional_measurements: (ctx) => [
-                    `Those optional measurements? Highly recommend doing them. The AI's photo analysis is good, but adding actual tape measurements (chest, waist, hips, arms in cm) is like telling it "here, I measured myself, stop guessing." It massively improves accuracy. Grab a tape measure — the one you bought for a home project you haven't started yet — and measure at the widest points!`,
-                    `"Optional" is doing a lot of work in "Optional Measurements." Technically optional. Practically? They make the analysis way more accurate. Chest, waist, hips, arms — all in cm, all from a tape measure. Takes maybe 3 minutes. The AI will reward you with better results, which is as close to gratitude as it gets!`
+                    `Those optional measurements? Highly recommend doing them. Chest (50–200 cm), waist (40–200 cm), hips (50–200 cm), arms (20–70 cm) — all at the widest point with a tape measure. It's like telling the AI "here, I measured myself, stop guessing." It massively improves accuracy. Grab the tape measure — the one you bought for that home project you haven't started yet.`,
+                    `"Optional" is doing a lot of work in "Optional Measurements." Technically optional. Practically? Way more accurate results. Chest (50–200 cm), waist (40–200 cm), hips (50–200 cm), arms (20–70 cm) — tape measure, widest point, 3 minutes. The AI will reward you with better results, which is as close to gratitude as it gets!`
                 ],
                 explain_export: (ctx) => [
                     `The Results screen has "Export Data" (saves your full analysis — for the spreadsheet lovers among us) and "Share Card" (generates a pretty shareable card, because documenting fitness wins is important). After a workout session, there's also "Share Workout" — for when you absolutely need your social media to know you finished leg day. Accountability with style!`,
