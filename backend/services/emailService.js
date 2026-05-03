@@ -1,50 +1,56 @@
-const nodemailer = require('nodemailer');
+const https = require('https');
 
-let _transport = null;
-function getTransport() {
-  if (_transport) return _transport;
+// ── Brevo HTTP API (no SMTP — works on Railway) ──
+function sendViaBrovo({ to, subject, html }) {
+  const FROM_NAME = 'FiX-it';
+  const FROM_EMAIL = process.env.EMAIL_FROM || 'noreply@fixit-app.com';
 
-  if (process.env.GMAIL_USER && process.env.GMAIL_PASS) {
-    _transport = nodemailer.createTransport({
-      service: 'gmail',
-      auth: { user: process.env.GMAIL_USER, pass: process.env.GMAIL_PASS },
-      connectionTimeout: 10000,
-      socketTimeout: 10000,
+  const payload = JSON.stringify({
+    sender: { name: FROM_NAME, email: FROM_EMAIL },
+    to: [{ email: to }],
+    subject,
+    htmlContent: html,
+  });
+
+  return new Promise((resolve, reject) => {
+    const req = https.request({
+      hostname: 'api.brevo.com',
+      path: '/v3/smtp/email',
+      method: 'POST',
+      headers: {
+        'api-key': process.env.BREVO_API_KEY,
+        'Content-Type': 'application/json',
+        'Content-Length': Buffer.byteLength(payload),
+      },
+    }, (res) => {
+      let body = '';
+      res.on('data', chunk => body += chunk);
+      res.on('end', () => {
+        if (res.statusCode >= 200 && res.statusCode < 300) {
+          resolve();
+        } else {
+          reject(new Error(`Brevo API error ${res.statusCode}: ${body}`));
+        }
+      });
     });
-    return _transport;
-  }
-
-  if (process.env.SMTP_HOST) {
-    _transport = nodemailer.createTransport({
-      host: process.env.SMTP_HOST,
-      port: parseInt(process.env.SMTP_PORT, 10) || 587,
-      secure: process.env.SMTP_PORT === '465',
-      auth: { user: process.env.SMTP_USER, pass: process.env.SMTP_PASS },
-      connectionTimeout: 10000,
-      socketTimeout: 10000,
-    });
-    return _transport;
-  }
-
-  return null;
+    req.on('error', reject);
+    req.setTimeout(15000, () => { req.destroy(new Error('Brevo request timed out')); });
+    req.write(payload);
+    req.end();
+  });
 }
 
-const FROM_ADDRESS = process.env.EMAIL_FROM || process.env.GMAIL_USER || process.env.SMTP_USER || 'noreply@fixit.app';
-
 async function sendMail({ to, subject, html }) {
-  const transport = getTransport();
-  if (transport) {
-    console.log(`[email] Sending "${subject}" to ${to} via ${process.env.GMAIL_USER ? 'Gmail' : 'SMTP'}`);
-    await transport.sendMail({ from: `"FiX-it" <${FROM_ADDRESS}>`, to, subject, html });
+  if (process.env.BREVO_API_KEY) {
+    console.log(`[email] Sending "${subject}" to ${to} via Brevo`);
+    await sendViaBrovo({ to, subject, html });
     console.log(`[email] Delivered "${subject}" to ${to}`);
     return;
   }
 
-  // No email provider configured — log to console (dev only)
+  // No provider configured — log to console (dev only)
   console.log('──────────────────────────────────────');
-  console.log(`EMAIL: ${subject}`);
-  console.log(`TO:    ${to}`);
-  console.log(`HTML:  ${html.replace(/<[^>]+>/g, '').trim().slice(0, 200)}`);
+  console.log(`EMAIL (no provider): ${subject} → ${to}`);
   console.log('──────────────────────────────────────');
 }
 
