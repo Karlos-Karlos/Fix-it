@@ -628,7 +628,7 @@
             display: flex;
             gap: 6px;
             margin-top: 12px;
-            margin-bottom: 24px;
+            margin-bottom: 12px;
             animation: s1FadeUp 0.7s ease both;
             animation-delay: 0.2s;
         }
