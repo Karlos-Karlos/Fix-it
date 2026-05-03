@@ -14063,10 +14063,7 @@ Please try again with a different photo.`;
 
         function setupAdmin() {
             // Back button
-            document.getElementById('admin-back-btn').addEventListener('click', () => {
-    const prev = state.previousScreen;
-    goToScreen(prev >= 3 && prev <= 9 ? prev : 3);
-});
+            document.getElementById('admin-back-btn').addEventListener('click', () => handleLogout());
 
             // Search with debounce
             const searchInput = document.getElementById('admin-search');
