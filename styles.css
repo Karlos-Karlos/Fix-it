@@ -6149,7 +6149,7 @@
             align-items: flex-end;
             justify-content: center;
             flex: 1;
-            padding: 0;
+            padding: 0 0 calc(96px + env(safe-area-inset-bottom, 0px)) 0;
         }
 
         .fc-mode-sheet {
@@ -6157,11 +6157,11 @@
             max-width: 480px;
             background: linear-gradient(160deg, #1e1b18 0%, #161311 100%);
             border: 1px solid rgba(255, 255, 255, 0.07);
-            border-bottom: none;
-            border-radius: 24px 24px 0 0;
-            padding: 14px 20px 36px;
+            border-radius: 24px;
+            padding: 14px 20px 24px;
             animation: fcSheetUp 0.38s cubic-bezier(0.22, 1, 0.36, 1);
             box-shadow: 0 -12px 48px rgba(0, 0, 0, 0.5);
+            margin: 0 12px;
         }
 
         @keyframes fcSheetUp {
