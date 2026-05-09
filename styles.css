@@ -4560,6 +4560,19 @@
             border-color: var(--border-accent);
         }
 
+        .player-form-check-btn {
+            border-color: rgba(201, 169, 98, 0.3);
+        }
+
+        .player-form-check-btn svg {
+            stroke: var(--accent-primary) !important;
+        }
+
+        .player-form-check-btn:hover {
+            border-color: var(--accent-primary);
+            background: rgba(201, 169, 98, 0.1);
+        }
+
         .player-close-btn svg {
             width: 20px;
             height: 20px;
