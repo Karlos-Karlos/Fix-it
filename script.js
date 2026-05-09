@@ -4413,12 +4413,14 @@ Please try again with a different photo.`;
             const randomMsg = motivationalMessages[Math.floor(Math.random() * motivationalMessages.length)];
             document.getElementById('player-motivation').querySelector('p').textContent = `"${randomMsg}"`;
 
-            // Update routine stats
-            document.getElementById('routine-exercise-count').textContent = workoutPlayerState.exercises.length;
+            // Update routine stats (elements may not exist in all player states)
+            const rcEl = document.getElementById('routine-exercise-count');
+            if (rcEl) rcEl.textContent = workoutPlayerState.exercises.length;
             const totalTime = workoutPlayerState.exercises.reduce((sum, ex) => {
-                return sum + (ex.sets * (45 + ex.rest)); // Approx time per exercise
+                return sum + (ex.sets * (45 + ex.rest));
             }, 0);
-            document.getElementById('routine-duration').textContent = `~${Math.round(totalTime / 60)}`;
+            const rdEl = document.getElementById('routine-duration');
+            if (rdEl) rdEl.textContent = `~${Math.round(totalTime / 60)}`;
         }
 
         function updateUpNext() {
