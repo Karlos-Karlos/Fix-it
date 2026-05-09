@@ -4563,7 +4563,7 @@
         .workout-player-container {
             flex: 1;
             height: 100%;
-            padding: 16px 20px 12px;
+            padding: 16px 20px calc(70px + env(safe-area-inset-bottom, 0px));
             display: flex;
             flex-direction: column;
             overflow: hidden;
