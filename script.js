@@ -1805,28 +1805,39 @@
         // Handle pose detection results
         function onPoseResults(results) {
             if (results.poseLandmarks && results.poseLandmarks.length >= 25) {
-                // Validate key body landmarks are visible with reasonable confidence
-                const keyLandmarks = [
-                    results.poseLandmarks[11], // left shoulder
-                    results.poseLandmarks[12], // right shoulder
-                    results.poseLandmarks[23], // left hip
-                    results.poseLandmarks[24], // right hip
-                ];
+                const lm = results.poseLandmarks;
 
-                // Check if key landmarks have sufficient visibility
-                const minVisibility = 0.3;
-                const validLandmarks = keyLandmarks.filter(lm =>
-                    lm && lm.visibility && lm.visibility > minVisibility
-                );
+                // ── 1. ALL four torso anchors must be confident ──────────────────
+                const lShoulder = lm[11], rShoulder = lm[12];
+                const lHip = lm[23],      rHip      = lm[24];
+                const torsoAnchors = [lShoulder, rShoulder, lHip, rHip];
+                const ANCHOR_VIS = 0.6; // raised from 0.3
+                const allAnchorsVisible = torsoAnchors.every(p => p && p.visibility >= ANCHOR_VIS);
 
-                if (validLandmarks.length >= 3) {
-                    // Valid human body detected
+                // ── 2. Enough landmarks are confident across the full body ────────
+                const confidentCount = lm.filter(p => p && p.visibility >= 0.5).length;
+                const CONFIDENT_MIN = 10; // at least 10 of 33 landmarks confident
+
+                // ── 3. Geometric sanity: shoulders must be above hips ─────────────
+                // (in normalised image coords y increases downward)
+                const shouldersAboveHips =
+                    ((lShoulder.y + rShoulder.y) / 2) < ((lHip.y + rHip.y) / 2);
+
+                // ── 4. Body spans a meaningful portion of image height ─────────────
+                const nose    = lm[0];
+                const lAnkle  = lm[27], rAnkle = lm[28];
+                const topY    = nose ? nose.y : Math.min(lShoulder.y, rShoulder.y);
+                const bottomY = Math.max(lHip.y, rHip.y, lAnkle?.y ?? 0, rAnkle?.y ?? 0);
+                const bodySpan = bottomY - topY; // fraction of image height
+                const SPAN_MIN = 0.15; // body must span at least 15% of image height
+
+                if (allAnchorsVisible && confidentCount >= CONFIDENT_MIN &&
+                    shouldersAboveHips && bodySpan >= SPAN_MIN) {
                     state.humanDetected = true;
-                    state.landmarks = results.poseLandmarks;
+                    state.landmarks = lm;
                     state.segmentationMask = results.segmentationMask || null;
-                    state.analysisResult = calculateBodyMetrics(results.poseLandmarks, results.segmentationMask, results.image);
+                    state.analysisResult = calculateBodyMetrics(lm, results.segmentationMask, results.image);
                 } else {
-                    // Landmarks detected but not a valid body pose
                     state.humanDetected = false;
                     state.landmarks = null;
                     state.analysisResult = null;
