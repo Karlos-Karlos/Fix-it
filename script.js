@@ -185,363 +185,299 @@
         // Called once after login — server is the source of truth for history
         async function syncTrackingDataFromServer() {
             if (!state.accessToken) return;
+
+            // Single round-trip: fetch everything at once from /sync/all
+            let d = null;
             try {
-                // Sleep log
-                const sleepRes = await apiFetch('/tracking/sleep?days=365');
-                if (sleepRes.ok) {
-                    const rows = await sleepRes.json();
-                    if (rows.length) {
-                        const existing = getSleepLog();
-                        const existingDates = new Set(existing.map(e => e.date));
-                        const merged = [...existing];
-                        rows.forEach(r => {
-                            if (!existingDates.has(r.date)) merged.push({ date: r.date, hours: parseFloat(r.hours), quality: r.quality });
-                        });
-                        merged.sort((a, b) => b.date.localeCompare(a.date));
-                        localStorage.setItem(userKey(SLEEP_LOG_KEY), JSON.stringify(merged));
+                const res = await apiFetch('/sync/all');
+                if (res.ok) d = await res.json();
+            } catch (_) {}
+
+            if (!d) {
+                // Server unreachable — skip sync silently
+                _renderAfterSync();
+                return;
+            }
+
+            // ── Profile ─────────────────────────────────────────────────────────
+            try {
+                const me = d.profile;
+                if (me) {
+                    if (me.height)          state.height         = parseFloat(me.height);
+                    if (me.weight)          state.weight         = parseFloat(me.weight);
+                    if (me.gender)          state.gender         = me.gender;
+                    if (me.fitness_goal)    state.fitnessGoal    = me.fitness_goal;
+                    if (me.experience_level) {
+                        state.experienceLevel = me.experience_level;
+                        localStorage.setItem(userKey('fixit-experience-level'), me.experience_level);
+                    }
+                    if (!state.bmi && state.height && state.weight) {
+                        const hm = state.height / 100;
+                        state.bmi = parseFloat((state.weight / (hm * hm)).toFixed(1));
+                    }
+                    saveSessionState();
+                }
+            } catch (_) {}
+
+            // ── Preferences ──────────────────────────────────────────────────────
+            try {
+                const prefs = d.preferences;
+                if (prefs) {
+                    if (prefs.coach_persona) {
+                        state.coachPersona = prefs.coach_persona;
+                        localStorage.setItem(userKey('fixit-coach-persona'), prefs.coach_persona);
+                    }
+                    if (prefs.step_goal) localStorage.setItem(userKey('fixit-step-goal'), String(prefs.step_goal));
+                    if (prefs.weight_unit || prefs.height_unit) {
+                        const p = JSON.parse(localStorage.getItem(userKey('fixit-preferences')) || '{}');
+                        if (prefs.weight_unit) p['pref-weight-unit'] = prefs.weight_unit;
+                        if (prefs.height_unit) p['pref-height-unit'] = prefs.height_unit;
+                        localStorage.setItem(userKey('fixit-preferences'), JSON.stringify(p));
                     }
                 }
             } catch (_) {}
 
+            // ── Gamification ─────────────────────────────────────────────────────
             try {
-                // Hydration history — take max of local vs server per day
-                const hydRes = await apiFetch('/tracking/hydration/history?days=30');
-                if (hydRes.ok) {
-                    const rows = await hydRes.json();
+                const gam = d.gamification;
+                if (gam) {
+                    if (typeof gam.total_xp === 'number') {
+                        const localXP = parseInt(localStorage.getItem(userKey('fixit-total-xp')) || '0');
+                        localStorage.setItem(userKey('fixit-total-xp'), String(Math.max(localXP, gam.total_xp)));
+                    }
+                    if (typeof gam.total_workouts === 'number') {
+                        const localTW = parseInt(localStorage.getItem(userKey('fixit-total-workouts')) || '0');
+                        localStorage.setItem(userKey('fixit-total-workouts'), String(Math.max(localTW, gam.total_workouts)));
+                    }
+                    if (typeof gam.total_analyses === 'number') {
+                        const localTA = parseInt(localStorage.getItem(userKey('fixit-total-analyses')) || '0');
+                        localStorage.setItem(userKey('fixit-total-analyses'), String(Math.max(localTA, gam.total_analyses)));
+                    }
+                    if (typeof gam.current_streak === 'number') {
+                        const localStreak = parseInt(localStorage.getItem(userKey('fixit-workout-streak')) || '0');
+                        const syncedStreak = Math.max(localStreak, gam.current_streak);
+                        localStorage.setItem(userKey('fixit-workout-streak'), String(syncedStreak));
+                        const localBest = parseInt(localStorage.getItem(userKey('fixit-best-streak')) || '0');
+                        if (syncedStreak > localBest) localStorage.setItem(userKey('fixit-best-streak'), String(syncedStreak));
+                    }
+                }
+            } catch (_) {}
+
+            // ── Sleep log ────────────────────────────────────────────────────────
+            try {
+                const rows = d.sleep || [];
+                if (rows.length) {
+                    const existing = getSleepLog();
+                    const existingDates = new Set(existing.map(e => e.date));
+                    const merged = [...existing];
                     rows.forEach(r => {
-                        const k = userKey('fixit-water-' + r.date);
-                        const local = parseInt(localStorage.getItem(k) || '0');
-                        const server = parseInt(r.glasses_drunk || 0);
-                        localStorage.setItem(k, String(Math.max(local, server)));
+                        if (!existingDates.has(r.date)) merged.push({ date: r.date, hours: parseFloat(r.hours), quality: r.quality });
                     });
+                    merged.sort((a, b) => b.date.localeCompare(a.date));
+                    localStorage.setItem(userKey(SLEEP_LOG_KEY), JSON.stringify(merged));
                 }
             } catch (_) {}
 
+            // ── Hydration ────────────────────────────────────────────────────────
             try {
-                // Goal weight — server is source of truth; always overwrite local
-                const gwRes = await apiFetch('/tracking/goal-weight');
-                if (gwRes.ok) {
-                    const row = await gwRes.json();
-                    if (row && row.goal_kg) {
-                        const local = loadGoalData();
-                        const serverSetAt = new Date(row.set_at || 0).getTime();
-                        const localSetAt  = new Date((local && local.setAt) || 0).getTime();
-                        if (!local || serverSetAt >= localSetAt) {
-                            localStorage.setItem(userKey('fixit-goal-weight'), JSON.stringify({
-                                goal: parseFloat(row.goal_kg),
-                                start: row.start_kg ? parseFloat(row.start_kg) : null,
-                                setAt: row.set_at,
-                            }));
+                (d.hydration || []).forEach(r => {
+                    const k = userKey('fixit-water-' + r.date);
+                    const local = parseInt(localStorage.getItem(k) || '0');
+                    const server = parseInt(r.glasses_drunk || 0);
+                    localStorage.setItem(k, String(Math.max(local, server)));
+                });
+            } catch (_) {}
+
+            // ── Goal weight ──────────────────────────────────────────────────────
+            try {
+                const row = d.goalWeight;
+                if (row && row.goal_kg) {
+                    const local = loadGoalData();
+                    const serverSetAt = new Date(row.set_at || 0).getTime();
+                    const localSetAt  = new Date((local && local.setAt) || 0).getTime();
+                    if (!local || serverSetAt >= localSetAt) {
+                        localStorage.setItem(userKey('fixit-goal-weight'), JSON.stringify({
+                            goal: parseFloat(row.goal_kg),
+                            start: row.start_kg ? parseFloat(row.start_kg) : null,
+                            setAt: row.set_at,
+                        }));
+                    }
+                }
+            } catch (_) {}
+
+            // ── Weight log ───────────────────────────────────────────────────────
+            try {
+                const rows = d.weightLog || [];
+                if (rows.length) {
+                    const existing = getWeightLog();
+                    const existingDates = new Set(existing.map(e => e.date));
+                    const merged = [...existing];
+                    rows.forEach(r => {
+                        if (!existingDates.has(r.date)) merged.push({ date: r.date, weight: parseFloat(r.weight) });
+                    });
+                    merged.sort((a, b) => b.date.localeCompare(a.date));
+                    localStorage.setItem(userKey(WEIGHT_LOG_KEY), JSON.stringify(merged));
+                }
+            } catch (_) {}
+
+            // ── Measurements ─────────────────────────────────────────────────────
+            try {
+                const rows = d.measurements || [];
+                if (rows.length) {
+                    const existing = getMeasurementLog();
+                    const existingDates = new Set(existing.map(e => e.date));
+                    const merged = [...existing];
+                    rows.forEach(r => {
+                        if (!existingDates.has(r.date)) {
+                            const entry = { date: r.date };
+                            if (r.chest) entry.chest = parseFloat(r.chest);
+                            if (r.waist) entry.waist = parseFloat(r.waist);
+                            if (r.hips)  entry.hips  = parseFloat(r.hips);
+                            if (r.arms)  entry.arms  = parseFloat(r.arms);
+                            merged.push(entry);
+                        }
+                    });
+                    merged.sort((a, b) => b.date.localeCompare(a.date));
+                    localStorage.setItem(userKey(MEAS_LOG_KEY), JSON.stringify(merged));
+                }
+            } catch (_) {}
+
+            // ── Workout sessions ─────────────────────────────────────────────────
+            try {
+                const rows = d.workoutSessions || [];
+                if (rows.length) {
+                    const existing = getWorkoutLog();
+                    const existingDates = new Set(existing.map(e => (e.date || '').split('T')[0]));
+                    const merged = [...existing];
+                    rows.forEach(r => {
+                        const dateStr = typeof r.workout_date === 'string'
+                            ? r.workout_date.split('T')[0]
+                            : new Date(r.workout_date).toISOString().split('T')[0];
+                        if (!existingDates.has(dateStr)) {
+                            merged.push({
+                                id: r.id,
+                                date: dateStr + 'T12:00:00.000Z',
+                                label: r.notes || r.workout_type || 'Workout',
+                                exercises: [],
+                                durationSec: r.duration_minutes ? r.duration_minutes * 60 : 0,
+                                caloriesBurned: 0,
+                                xp: r.xp_earned || 25,
+                            });
+                        }
+                    });
+                    merged.sort((a, b) => b.date.localeCompare(a.date));
+                    localStorage.setItem(userKey(WORKOUT_LOG_KEY), JSON.stringify(merged));
+                    if (merged.length > 0) {
+                        const latestDate = (merged[0].date || '').split('T')[0];
+                        const localLast  = localStorage.getItem(userKey('fixit-last-workout-day')) || '';
+                        if (latestDate && latestDate > localLast) {
+                            localStorage.setItem(userKey('fixit-last-workout-day'), latestDate);
                         }
                     }
                 }
             } catch (_) {}
 
+            // ── Lift log (PRs) ───────────────────────────────────────────────────
             try {
-                // Weight log
-                const wlRes = await apiFetch('/tracking/weight-log?days=365');
-                if (wlRes.ok) {
-                    const rows = await wlRes.json();
-                    if (rows.length) {
-                        const existing = getWeightLog();
-                        const existingDates = new Set(existing.map(e => e.date));
-                        const merged = [...existing];
-                        rows.forEach(r => {
-                            if (!existingDates.has(r.date)) merged.push({ date: r.date, weight: parseFloat(r.weight) });
-                        });
-                        merged.sort((a, b) => b.date.localeCompare(a.date));
-                        localStorage.setItem(userKey(WEIGHT_LOG_KEY), JSON.stringify(merged));
-                    }
-                }
-            } catch (_) {}
-
-            try {
-                // Measurement log
-                const mlRes = await apiFetch('/tracking/measurements?days=365');
-                if (mlRes.ok) {
-                    const rows = await mlRes.json();
-                    if (rows.length) {
-                        const existing = getMeasurementLog();
-                        const existingDates = new Set(existing.map(e => e.date));
-                        const merged = [...existing];
-                        rows.forEach(r => {
-                            if (!existingDates.has(r.date)) {
-                                const entry = { date: r.date };
-                                if (r.chest) entry.chest = parseFloat(r.chest);
-                                if (r.waist) entry.waist = parseFloat(r.waist);
-                                if (r.hips)  entry.hips  = parseFloat(r.hips);
-                                if (r.arms)  entry.arms  = parseFloat(r.arms);
-                                merged.push(entry);
-                            }
-                        });
-                        merged.sort((a, b) => b.date.localeCompare(a.date));
-                        localStorage.setItem(userKey(MEAS_LOG_KEY), JSON.stringify(merged));
-                    }
-                }
-            } catch (_) {}
-
-            try {
-                // Workout sessions
-                const wsRes = await apiFetch('/workouts/sessions?limit=40');
-                if (wsRes.ok) {
-                    const wsData = await wsRes.json();
-                    const rows = wsData.data || [];
-                    if (rows.length) {
-                        const existing = getWorkoutLog();
-                        const existingDates = new Set(existing.map(e => (e.date || '').split('T')[0]));
-                        const merged = [...existing];
-                        rows.forEach(r => {
-                            // workout_date comes back as ISO string from JSON serialization
-                            const dateStr = typeof r.workout_date === 'string'
-                                ? r.workout_date.split('T')[0]
-                                : new Date(r.workout_date).toISOString().split('T')[0];
-                            if (!existingDates.has(dateStr)) {
-                                merged.push({
-                                    id: r.id,
-                                    date: dateStr + 'T12:00:00.000Z',
-                                    label: r.notes || r.workout_type || 'Workout',
-                                    exercises: [],
-                                    durationSec: r.duration_minutes ? r.duration_minutes * 60 : 0,
-                                    caloriesBurned: 0,
-                                    xp: r.xp_earned || 25,
-                                });
-                            }
-                        });
-                        merged.sort((a, b) => b.date.localeCompare(a.date));
-                        localStorage.setItem(userKey(WORKOUT_LOG_KEY), JSON.stringify(merged));
-
-                        // Keep last-workout-day in sync so streak continues correctly on any device
-                        if (merged.length > 0) {
-                            const latestDate = (merged[0].date || '').split('T')[0];
-                            const localLast  = localStorage.getItem(userKey('fixit-last-workout-day')) || '';
-                            if (latestDate && latestDate > localLast) {
-                                localStorage.setItem(userKey('fixit-last-workout-day'), latestDate);
-                            }
+                const rows = d.lifts || [];
+                if (rows.length) {
+                    const existing = getLiftLog();
+                    rows.forEach(r => {
+                        const name = r.exercise_name;
+                        if (!existing[name]) existing[name] = [];
+                        const dateStr = String(r.date || '').split('T')[0];
+                        if (!existing[name].some(e => e.date === dateStr)) {
+                            existing[name].push({
+                                date: dateStr,
+                                weight: parseFloat(r.weight) || 0,
+                                reps: parseInt(r.reps) || 0,
+                                e1rm: r.e1rm != null ? parseFloat(r.e1rm) : 0,
+                            });
                         }
-                    }
+                    });
+                    Object.keys(existing).forEach(name => {
+                        existing[name].sort((a, b) => b.date.localeCompare(a.date));
+                        if (existing[name].length > 50) existing[name].length = 50;
+                    });
+                    saveLiftLog(existing);
                 }
             } catch (_) {}
 
+            // ── Wearable sessions ────────────────────────────────────────────────
             try {
-                // Lift log (Personal Records)
-                const liftRes = await apiFetch('/tracking/lifts');
-                if (liftRes.ok) {
-                    const rows = await liftRes.json();
-                    if (rows.length) {
-                        const existing = getLiftLog();
-                        rows.forEach(r => {
-                            const name = r.exercise_name;
-                            if (!existing[name]) existing[name] = [];
-                            const dateStr = typeof r.date === 'string' ? r.date.split('T')[0] : new Date(r.date).toISOString().split('T')[0];
-                            const alreadyHas = existing[name].some(e => e.date === dateStr);
-                            if (!alreadyHas) {
-                                existing[name].push({
-                                    date: dateStr,
-                                    weight: parseFloat(r.weight) || 0,
-                                    reps: parseInt(r.reps) || 0,
-                                    e1rm: r.e1rm != null ? parseFloat(r.e1rm) : 0,
-                                });
-                            }
-                        });
-                        // Sort each exercise by date desc
-                        Object.keys(existing).forEach(name => {
-                            existing[name].sort((a, b) => b.date.localeCompare(a.date));
-                            if (existing[name].length > 50) existing[name].length = 50;
-                        });
-                        saveLiftLog(existing);
-                    }
+                const rows = d.wearable || [];
+                if (rows.length) {
+                    const existing = JSON.parse(localStorage.getItem(userKey('fixit-wearable-sessions')) || '[]');
+                    const existingDates = new Set(existing.map(s => s.date));
+                    rows.forEach(r => {
+                        const dateStr = r.date || String(r.session_date || '').split('T')[0];
+                        if (dateStr && !existingDates.has(dateStr)) {
+                            existing.push({ date: dateStr, steps: r.steps || 0, calories: parseFloat(r.calories) || 0, hrAvg: r.hr_avg || 0, activeSecs: r.active_secs || 0, synced: true });
+                            existingDates.add(dateStr);
+                        }
+                    });
+                    existing.sort((a, b) => b.date.localeCompare(a.date));
+                    localStorage.setItem(userKey('fixit-wearable-sessions'), JSON.stringify(existing));
                 }
             } catch (_) {}
 
+            // ── Achievements ─────────────────────────────────────────────────────
             try {
-                // Gamification counters — server is source of truth across devices
-                const gamRes = await apiFetch('/users/me/gamification');
-                if (gamRes.ok) {
-                    const gam = await gamRes.json();
-                    if (gam) {
-                        // XP: take max of local vs server
-                        if (typeof gam.total_xp === 'number') {
-                            const localXP = parseInt(localStorage.getItem(userKey('fixit-total-xp')) || '0');
-                            localStorage.setItem(userKey('fixit-total-xp'), String(Math.max(localXP, gam.total_xp)));
-                        }
-                        // Total workouts: take max
-                        if (typeof gam.total_workouts === 'number') {
-                            const localTW = parseInt(localStorage.getItem(userKey('fixit-total-workouts')) || '0');
-                            localStorage.setItem(userKey('fixit-total-workouts'), String(Math.max(localTW, gam.total_workouts)));
-                        }
-                        // Total analyses: take max
-                        if (typeof gam.total_analyses === 'number') {
-                            const localTA = parseInt(localStorage.getItem(userKey('fixit-total-analyses')) || '0');
-                            localStorage.setItem(userKey('fixit-total-analyses'), String(Math.max(localTA, gam.total_analyses)));
-                        }
-                        // Current streak: take max (server tracks it across devices)
-                        if (typeof gam.current_streak === 'number') {
-                            const localStreak = parseInt(localStorage.getItem(userKey('fixit-workout-streak')) || '0');
-                            const syncedStreak = Math.max(localStreak, gam.current_streak);
-                            localStorage.setItem(userKey('fixit-workout-streak'), String(syncedStreak));
-                            const localBest = parseInt(localStorage.getItem(userKey('fixit-best-streak')) || '0');
-                            if (syncedStreak > localBest) localStorage.setItem(userKey('fixit-best-streak'), String(syncedStreak));
-                        }
-                    }
+                const rows = d.achievements || [];
+                if (rows.length) {
+                    let local;
+                    try { local = JSON.parse(localStorage.getItem(userKey('fixit-achievements')) || '[]'); } catch { local = []; }
+                    rows.forEach(r => { if (!local.includes(r.achievement_id)) local.push(r.achievement_id); });
+                    localStorage.setItem(userKey('fixit-achievements'), JSON.stringify(local));
                 }
             } catch (_) {}
 
+            // ── Weekly plan ──────────────────────────────────────────────────────
             try {
-                // Rebuild workout-dates heatmap from the synced workout log so the
-                // heatmap matches across devices (workout log was already synced above)
-                const allLog = getWorkoutLog();
-                const derivedDates = [...new Set(
-                    allLog.map(e => (e.date || '').split('T')[0]).filter(Boolean)
-                )];
-                if (derivedDates.length > 0) {
-                    let existing = [];
-                    try { existing = JSON.parse(localStorage.getItem(userKey('fixit-workout-dates')) || '[]'); } catch { existing = []; }
-                    const merged = [...new Set([...existing, ...derivedDates])];
-                    localStorage.setItem(userKey('fixit-workout-dates'), JSON.stringify(merged));
+                const plan = d.latestPlan;
+                if (plan && plan.plan_data && !localStorage.getItem(userKey('fixit-weekly-plan'))) {
+                    localStorage.setItem(userKey('fixit-weekly-plan'), JSON.stringify(plan.plan_data));
                 }
             } catch (_) {}
 
+            // ── Today's food ─────────────────────────────────────────────────────
             try {
-                // Food / calorie log for today — not stored persistently like other logs,
-                // so we fetch it here so the Nutrition habit shows correctly on the progress screen
-                const today = new Date().toISOString().split('T')[0];
-                const foodRes = await apiFetch('/nutrition/food-log/daily?date=' + today);
-                if (foodRes.ok) {
-                    const data = await foodRes.json();
-                    const totals = data.totals || {};
-                    const tCal = parseFloat(totals.total_calories) || 0;
-                    const tP   = parseFloat(totals.total_protein)  || 0;
-                    const tC   = parseFloat(totals.total_carbs)    || 0;
-                    const tF   = parseFloat(totals.total_fats)     || 0;
+                const tf = d.todayFood;
+                if (tf) {
+                    const today = new Date().toISOString().split('T')[0];
+                    const tCal = parseFloat(tf.total_calories) || 0;
+                    const tP   = parseFloat(tf.total_protein)  || 0;
+                    const tC   = parseFloat(tf.total_carbs)    || 0;
+                    const tF   = parseFloat(tf.total_fats)     || 0;
                     if (tCal > 0) saveCalorieLogEntry(today, tCal, tP, tC, tF);
                 }
             } catch (_) {}
 
+            // ── Heatmap rebuild ──────────────────────────────────────────────────
             try {
-                // Preferences: coach persona, step goal, unit prefs — server is source of truth
-                const prefRes = await apiFetch('/users/me/preferences');
-                if (prefRes.ok) {
-                    const prefs = await prefRes.json();
-                    if (prefs) {
-                        if (prefs.coach_persona) {
-                            state.coachPersona = prefs.coach_persona;
-                            localStorage.setItem(userKey('fixit-coach-persona'), prefs.coach_persona);
-                        }
-                        if (prefs.step_goal) {
-                            localStorage.setItem(userKey('fixit-step-goal'), String(prefs.step_goal));
-                        }
-                        if (prefs.weight_unit) {
-                            const p = JSON.parse(localStorage.getItem(userKey('fixit-preferences')) || '{}');
-                            p['pref-weight-unit'] = prefs.weight_unit;
-                            localStorage.setItem(userKey('fixit-preferences'), JSON.stringify(p));
-                        }
-                        if (prefs.height_unit) {
-                            const p = JSON.parse(localStorage.getItem(userKey('fixit-preferences')) || '{}');
-                            p['pref-height-unit'] = prefs.height_unit;
-                            localStorage.setItem(userKey('fixit-preferences'), JSON.stringify(p));
-                        }
-                    }
+                const allLog = getWorkoutLog();
+                const derivedDates = [...new Set(allLog.map(e => (e.date || '').split('T')[0]).filter(Boolean))];
+                if (derivedDates.length > 0) {
+                    let existing = [];
+                    try { existing = JSON.parse(localStorage.getItem(userKey('fixit-workout-dates')) || '[]'); } catch { existing = []; }
+                    localStorage.setItem(userKey('fixit-workout-dates'), JSON.stringify([...new Set([...existing, ...derivedDates])]));
                 }
             } catch (_) {}
 
+            // ── Challenge baseline (prevent double XP on fresh devices) ──────────
             try {
-                // User profile: height, weight, gender, goal, experience level
-                // Server is source of truth — fills gaps on devices with no local session
-                const meRes = await apiFetch('/users/me');
-                if (meRes.ok) {
-                    const me = await meRes.json();
-                    if (me) {
-                        if (me.height)          state.height         = parseFloat(me.height);
-                        if (me.weight)          state.weight         = parseFloat(me.weight);
-                        if (me.gender)          state.gender         = me.gender;
-                        if (me.fitness_goal)    state.fitnessGoal    = me.fitness_goal;
-                        if (me.experience_level) {
-                            state.experienceLevel = me.experience_level;
-                            localStorage.setItem(userKey('fixit-experience-level'), me.experience_level);
-                        }
-                        // Recalculate BMI if not already set from scan metadata
-                        if (!state.bmi && state.height && state.weight) {
-                            const hm = state.height / 100;
-                            state.bmi = parseFloat((state.weight / (hm * hm)).toFixed(1));
-                        }
-                        saveSessionState();
-                    }
-                }
-            } catch (_) {}
-
-            try {
-                // Wearable sessions: pull history so step/calorie charts populate on any device
-                const wRes = await apiFetch('/wearable/sessions?limit=90');
-                if (wRes.ok) {
-                    const rows = await wRes.json();
-                    if (rows.length) {
-                        const existing = JSON.parse(localStorage.getItem(userKey('fixit-wearable-sessions')) || '[]');
-                        const existingDates = new Set(existing.map(s => s.date));
-                        rows.forEach(r => {
-                            const dateStr = r.date || String(r.session_date || '').split('T')[0];
-                            if (dateStr && !existingDates.has(dateStr)) {
-                                existing.push({
-                                    date: dateStr,
-                                    steps: r.steps || 0,
-                                    calories: parseFloat(r.calories) || 0,
-                                    hrAvg: r.hr_avg || 0,
-                                    activeSecs: r.active_secs || 0,
-                                    synced: true,
-                                });
-                                existingDates.add(dateStr);
-                            }
-                        });
-                        existing.sort((a, b) => b.date.localeCompare(a.date));
-                        localStorage.setItem(userKey('fixit-wearable-sessions'), JSON.stringify(existing));
-                    }
-                }
-            } catch (_) {}
-
-            try {
-                // Achievements: merge server-unlocked badges into local list
-                const achRes = await apiFetch('/gamification/user-achievements');
-                if (achRes.ok) {
-                    const rows = await achRes.json();
-                    if (rows.length) {
-                        let local;
-                        try { local = JSON.parse(localStorage.getItem(userKey('fixit-achievements')) || '[]'); } catch { local = []; }
-                        rows.forEach(r => {
-                            if (!local.includes(r.achievement_id)) local.push(r.achievement_id);
-                        });
-                        localStorage.setItem(userKey('fixit-achievements'), JSON.stringify(local));
-                    }
-                }
-            } catch (_) {}
-
-            try {
-                // Weekly workout plan — restore latest saved plan on fresh devices
-                const plansRes = await apiFetch('/workouts/plans?limit=1');
-                if (plansRes.ok) {
-                    const data = await plansRes.json();
-                    const rows = data.data || data.rows || data || [];
-                    const latest = Array.isArray(rows) ? rows[0] : null;
-                    if (latest && latest.plan_data) {
-                        const local = localStorage.getItem(userKey('fixit-weekly-plan'));
-                        if (!local) {
-                            localStorage.setItem(userKey('fixit-weekly-plan'), JSON.stringify(latest.plan_data));
-                        }
-                    }
-                }
-            } catch (_) {}
-
-            try {
-                // Seed fixit-week-challenges-done from current progress so that renderChallenges()
-                // never awards XP that was already earned on another device
                 const challenges = getWeeklyChallenges();
                 const doneSoFar = challenges.filter(c => c.done).length;
                 const prevDone = parseInt(localStorage.getItem(userKey('fixit-week-challenges-done')) || '0');
-                if (doneSoFar > prevDone) {
-                    localStorage.setItem(userKey('fixit-week-challenges-done'), doneSoFar);
-                }
+                if (doneSoFar > prevDone) localStorage.setItem(userKey('fixit-week-challenges-done'), doneSoFar);
             } catch (_) {}
 
-            // Re-render after sync (only if Stats screen is visible, else data is
-            // fresh when the user navigates there)
+            _renderAfterSync();
+        }
+
+        function _renderAfterSync() {
+            // Re-render widgets with freshly synced localStorage data.
+            // Only do the expensive Stats re-renders if the user is on that screen.
             const onStats = state.currentScreen === 8;
             try { renderGoalWeight(); } catch (_) {}
             try { renderSleepTracker(); } catch (_) {}

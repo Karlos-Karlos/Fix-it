@@ -125,6 +125,7 @@ app.use('/api/coach',         require('./routes/coach'));
 app.use('/api/admin',         require('./routes/admin'));
 app.use('/api/tracking',      require('./routes/tracking'));
 app.use('/api/wearable',      require('./routes/wearable'));
+app.use('/api/sync',          require('./routes/sync'));
 
 // ── Serve frontend (same origin, no CORS issues) ──
 app.use(express.static(path.join(__dirname, '..')));

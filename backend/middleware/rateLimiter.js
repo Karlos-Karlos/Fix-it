@@ -1,12 +1,8 @@
 const rateLimit = require('express-rate-limit');
 
-const isDev = process.env.NODE_ENV === 'development';
-// In development, use generous limits to avoid blocking during testing
-const devMultiplier = isDev ? 10 : 1;
-
 const generalLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
-  max: 300 * devMultiplier,
+  max: 2000,                    // ~133 req/min — enough for normal multi-device usage + sync burst
   standardHeaders: true,
   legacyHeaders: false,
   message: { error: { code: 'RATE_LIMITED', message: 'Too many requests, try again later' } },
@@ -14,7 +10,7 @@ const generalLimiter = rateLimit({
 
 const authLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
-  max: 30 * devMultiplier,
+  max: 60,                      // 4 logins/min — prevents brute-force, won't block real use
   standardHeaders: true,
   legacyHeaders: false,
   message: { error: { code: 'RATE_LIMITED', message: 'Too many auth attempts, try again later' } },
@@ -22,7 +18,7 @@ const authLimiter = rateLimit({
 
 const resendLimiter = rateLimit({
   windowMs: 60 * 60 * 1000,
-  max: 3 * devMultiplier,
+  max: 5,
   standardHeaders: true,
   legacyHeaders: false,
   message: { error: { code: 'RATE_LIMITED', message: 'Resend limit reached, try again in an hour' } },
@@ -30,7 +26,7 @@ const resendLimiter = rateLimit({
 
 const uploadLimiter = rateLimit({
   windowMs: 60 * 60 * 1000,
-  max: 20 * devMultiplier,
+  max: 40,
   standardHeaders: true,
   legacyHeaders: false,
   message: { error: { code: 'RATE_LIMITED', message: 'Upload limit reached, try again in an hour' } },
@@ -38,7 +34,7 @@ const uploadLimiter = rateLimit({
 
 const adminLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
-  max: 60 * devMultiplier,
+  max: 300,
   standardHeaders: true,
   legacyHeaders: false,
   message: { error: { code: 'RATE_LIMITED', message: 'Too many admin requests, try again later' } },
@@ -46,7 +42,7 @@ const adminLimiter = rateLimit({
 
 const coachLimiter = rateLimit({
   windowMs: 60 * 60 * 1000,
-  max: 60 * devMultiplier,
+  max: 120,                     // 2 messages/min — enough for a conversation
   standardHeaders: true,
   legacyHeaders: false,
   message: { error: { code: 'RATE_LIMITED', message: 'Coach message limit reached, try again later' } },
