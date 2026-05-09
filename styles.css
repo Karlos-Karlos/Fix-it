@@ -9329,6 +9329,8 @@
             white-space: nowrap;
         }
 
+        .coach-fab.hidden-by-player { display: none !important; }
+
         .coach-fab.visible {
             display: flex;
         }
