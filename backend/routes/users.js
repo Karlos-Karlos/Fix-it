@@ -159,7 +159,10 @@ router.delete('/me/data', async (req, res, next) => {
       });
     });
 
-    // Delete all user-owned data (keep users + user_preferences rows)
+    // Delete all user-owned data (keep users + user_preferences + user_sessions rows)
+    // user_sessions is intentionally kept so all devices stay logged in after a data clear —
+    // deleting it would orphan the current device's token and prevent the next scan from
+    // syncing to the backend (saveSnapshot skips backend sync when accessToken is null).
     const tables = [
       'analysis_results',
       'analysis_scans',
@@ -172,7 +175,6 @@ router.delete('/me/data', async (req, res, next) => {
       'sleep_logs',
       'user_achievements',
       'user_personas_used',
-      'user_sessions',
       'wearable_sessions',
       'weekly_challenges',
       'weekly_plans',
