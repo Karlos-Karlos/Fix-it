@@ -24,7 +24,7 @@
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="styles.css?v=90">
+    <link rel="stylesheet" href="styles.css?v=91">
     <link rel="manifest" href="manifest.json">
     <!-- Chart.js for Progress Charts -->
     <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
@@ -2175,37 +2175,36 @@
 
                     <!-- Mode picker — shown first -->
                     <div class="fc-mode-picker" id="fc-mode-picker">
-                        <p class="fc-mode-hint">How do you want to check your form?</p>
-                        <button class="fc-mode-btn" id="fc-mode-live">
-                            <div class="fc-mode-icon">
-                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                                    <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/>
-                                    <circle cx="12" cy="12" r="3"/>
-                                </svg>
+                        <div class="fc-mode-sheet">
+                            <div class="fc-sheet-handle"></div>
+                            <p class="fc-mode-hint">How do you want to check your form?</p>
+                            <div class="fc-mode-cards">
+                                <button class="fc-mode-btn" id="fc-mode-live">
+                                    <div class="fc-mode-icon">
+                                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                            <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/>
+                                            <circle cx="12" cy="12" r="3"/>
+                                        </svg>
+                                    </div>
+                                    <div class="fc-mode-info">
+                                        <span class="fc-mode-title">Live Check</span>
+                                        <span class="fc-mode-desc">Real-time AI feedback as you move</span>
+                                    </div>
+                                </button>
+                                <button class="fc-mode-btn fc-mode-btn--record" id="fc-mode-record">
+                                    <div class="fc-mode-icon fc-mode-icon--record">
+                                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                            <circle cx="12" cy="12" r="10"/>
+                                            <circle cx="12" cy="12" r="3.5" fill="currentColor" stroke="none"/>
+                                        </svg>
+                                    </div>
+                                    <div class="fc-mode-info">
+                                        <span class="fc-mode-title">Record &amp; Replay</span>
+                                        <span class="fc-mode-desc">Save and review AI corrections after</span>
+                                    </div>
+                                </button>
                             </div>
-                            <div class="fc-mode-info">
-                                <span class="fc-mode-title">Live Check</span>
-                                <span class="fc-mode-desc">Real-time AI feedback while you exercise</span>
-                            </div>
-                            <svg class="fc-mode-arrow" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                                <polyline points="9 18 15 12 9 6"/>
-                            </svg>
-                        </button>
-                        <button class="fc-mode-btn fc-mode-btn--record" id="fc-mode-record">
-                            <div class="fc-mode-icon fc-mode-icon--record">
-                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                                    <circle cx="12" cy="12" r="10"/>
-                                    <circle cx="12" cy="12" r="3" fill="currentColor" stroke="none"/>
-                                </svg>
-                            </div>
-                            <div class="fc-mode-info">
-                                <span class="fc-mode-title">Record &amp; Replay</span>
-                                <span class="fc-mode-desc">Save your set and review AI corrections after</span>
-                            </div>
-                            <svg class="fc-mode-arrow" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                                <polyline points="9 18 15 12 9 6"/>
-                            </svg>
-                        </button>
+                        </div>
                     </div>
 
                     <!-- Camera view — shown after mode selection -->
