@@ -1986,7 +1986,8 @@
                 else if (state.bmi < 25) bmiAdjust = 8;
                 else if (state.bmi < 30) bmiAdjust = -2;
                 else if (state.bmi < 35) bmiAdjust = -14;
-                else                     bmiAdjust = -22;
+                else if (state.bmi < 40) bmiAdjust = -28;
+                else                     bmiAdjust = -42; // severe obesity
             }
 
             // Males typically show more visible muscle tone at the same BMI
@@ -2007,17 +2008,35 @@
             else if (muscleScore >= 30) leanMassEstimate = "Below Average";
             else leanMassEstimate = "Low";
 
-            // Upper body assessment — uses V-taper + muscle score
+            // Upper body assessment — uses V-taper + muscle score, capped by body comp
             let upperBodyAssessment;
-            if (muscleScore >= 68 && waistHipIndicator < 0.92) upperBodyAssessment = "Well Developed";
-            else if (muscleScore >= 48) upperBodyAssessment = "Moderate";
-            else upperBodyAssessment = "Needs Development";
+            if (bodyCompScore < 30) {
+                // Obese range: skeleton spread is from body mass, not muscle
+                upperBodyAssessment = muscleScore >= 55 ? "Moderate" : "Needs Development";
+            } else if (muscleScore >= 68 && waistHipIndicator < 0.92) {
+                upperBodyAssessment = "Well Developed";
+            } else if (muscleScore >= 48) {
+                upperBodyAssessment = "Moderate";
+            } else {
+                upperBodyAssessment = "Needs Development";
+            }
 
-            // Core assessment — based on muscle score
+            // Core assessment — muscle score capped by body comp score
+            // Fat coverage prevents core definition regardless of skeleton geometry
             let coreAssessment;
-            if (muscleScore >= 65) coreAssessment = "Defined";
-            else if (muscleScore >= 45) coreAssessment = "Moderate";
-            else coreAssessment = "Needs Work";
+            if (bodyCompScore < 30) {
+                // Obese/severely obese: core cannot appear defined
+                coreAssessment = "Needs Work";
+            } else if (bodyCompScore < 45) {
+                // Overweight: at best moderate
+                coreAssessment = muscleScore >= 65 ? "Moderate" : "Needs Work";
+            } else if (muscleScore >= 65) {
+                coreAssessment = "Defined";
+            } else if (muscleScore >= 45) {
+                coreAssessment = "Moderate";
+            } else {
+                coreAssessment = "Needs Work";
+            }
 
             // Lower body assessment — hip width relative to height
             let lowerBodyAssessment;
