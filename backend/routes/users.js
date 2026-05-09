@@ -85,13 +85,16 @@ router.get('/me/preferences', async (req, res, next) => {
 // PUT /me/preferences
 router.put('/me/preferences', validate(updatePreferencesSchema), async (req, res, next) => {
   try {
-    const { theme, coach_persona } = req.body;
+    const { theme, coach_persona, step_goal, weight_unit, height_unit } = req.body;
     const sets = [];
     const vals = [];
     let idx = 1;
 
-    if (theme !== undefined) { sets.push(`theme = $${idx++}`); vals.push(theme); }
-    if (coach_persona !== undefined) { sets.push(`coach_persona = $${idx++}`); vals.push(coach_persona); }
+    if (theme !== undefined)       { sets.push(`theme = $${idx++}`);       vals.push(theme); }
+    if (coach_persona !== undefined){ sets.push(`coach_persona = $${idx++}`); vals.push(coach_persona); }
+    if (step_goal !== undefined)   { sets.push(`step_goal = $${idx++}`);   vals.push(step_goal); }
+    if (weight_unit !== undefined) { sets.push(`weight_unit = $${idx++}`); vals.push(weight_unit); }
+    if (height_unit !== undefined) { sets.push(`height_unit = $${idx++}`); vals.push(height_unit); }
 
     if (sets.length === 0) return res.json({ message: 'Nothing to update' });
 

@@ -405,13 +405,97 @@
             } catch (_) {}
 
             try {
-                // Coach persona — server is source of truth across devices
+                // Preferences: coach persona, step goal, unit prefs — server is source of truth
                 const prefRes = await apiFetch('/users/me/preferences');
                 if (prefRes.ok) {
                     const prefs = await prefRes.json();
-                    if (prefs && prefs.coach_persona) {
-                        state.coachPersona = prefs.coach_persona;
-                        localStorage.setItem(userKey('fixit-coach-persona'), prefs.coach_persona);
+                    if (prefs) {
+                        if (prefs.coach_persona) {
+                            state.coachPersona = prefs.coach_persona;
+                            localStorage.setItem(userKey('fixit-coach-persona'), prefs.coach_persona);
+                        }
+                        if (prefs.step_goal) {
+                            localStorage.setItem(userKey('fixit-step-goal'), String(prefs.step_goal));
+                        }
+                        if (prefs.weight_unit) {
+                            const p = JSON.parse(localStorage.getItem(userKey('fixit-preferences')) || '{}');
+                            p['pref-weight-unit'] = prefs.weight_unit;
+                            localStorage.setItem(userKey('fixit-preferences'), JSON.stringify(p));
+                        }
+                        if (prefs.height_unit) {
+                            const p = JSON.parse(localStorage.getItem(userKey('fixit-preferences')) || '{}');
+                            p['pref-height-unit'] = prefs.height_unit;
+                            localStorage.setItem(userKey('fixit-preferences'), JSON.stringify(p));
+                        }
+                    }
+                }
+            } catch (_) {}
+
+            try {
+                // User profile: height, weight, gender, goal, experience level
+                // Server is source of truth — fills gaps on devices with no local session
+                const meRes = await apiFetch('/users/me');
+                if (meRes.ok) {
+                    const me = await meRes.json();
+                    if (me) {
+                        if (me.height)          state.height         = parseFloat(me.height);
+                        if (me.weight)          state.weight         = parseFloat(me.weight);
+                        if (me.gender)          state.gender         = me.gender;
+                        if (me.fitness_goal)    state.fitnessGoal    = me.fitness_goal;
+                        if (me.experience_level) {
+                            state.experienceLevel = me.experience_level;
+                            localStorage.setItem(userKey('fixit-experience-level'), me.experience_level);
+                        }
+                        // Recalculate BMI if not already set from scan metadata
+                        if (!state.bmi && state.height && state.weight) {
+                            const hm = state.height / 100;
+                            state.bmi = parseFloat((state.weight / (hm * hm)).toFixed(1));
+                        }
+                        saveSessionState();
+                    }
+                }
+            } catch (_) {}
+
+            try {
+                // Wearable sessions: pull history so step/calorie charts populate on any device
+                const wRes = await apiFetch('/wearable/sessions?limit=90');
+                if (wRes.ok) {
+                    const rows = await wRes.json();
+                    if (rows.length) {
+                        const existing = JSON.parse(localStorage.getItem(userKey('fixit-wearable-sessions')) || '[]');
+                        const existingDates = new Set(existing.map(s => s.date));
+                        rows.forEach(r => {
+                            const dateStr = r.date || String(r.session_date || '').split('T')[0];
+                            if (dateStr && !existingDates.has(dateStr)) {
+                                existing.push({
+                                    date: dateStr,
+                                    steps: r.steps || 0,
+                                    calories: parseFloat(r.calories) || 0,
+                                    hrAvg: r.hr_avg || 0,
+                                    activeSecs: r.active_secs || 0,
+                                    synced: true,
+                                });
+                                existingDates.add(dateStr);
+                            }
+                        });
+                        existing.sort((a, b) => b.date.localeCompare(a.date));
+                        localStorage.setItem(userKey('fixit-wearable-sessions'), JSON.stringify(existing));
+                    }
+                }
+            } catch (_) {}
+
+            try {
+                // Achievements: merge server-unlocked badges into local list
+                const achRes = await apiFetch('/gamification/user-achievements');
+                if (achRes.ok) {
+                    const rows = await achRes.json();
+                    if (rows.length) {
+                        let local;
+                        try { local = JSON.parse(localStorage.getItem(userKey('fixit-achievements')) || '[]'); } catch { local = []; }
+                        rows.forEach(r => {
+                            if (!local.includes(r.achievement_id)) local.push(r.achievement_id);
+                        });
+                        localStorage.setItem(userKey('fixit-achievements'), JSON.stringify(local));
                     }
                 }
             } catch (_) {}
@@ -7420,7 +7504,7 @@ Please try again with a different photo.`;
             const todayKey = new Date().toISOString().split('T')[0];
             const wSessions = JSON.parse(localStorage.getItem(userKey('fixit-wearable-sessions')) || '[]');
             const todaySteps = wSessions.filter(s => s.date === todayKey).reduce((t, s) => t + (s.steps || 0), 0);
-            const stepGoal = parseInt(localStorage.getItem('fixit-wearable-daily-goal')) || 10000;
+            const stepGoal = parseInt(localStorage.getItem(userKey('fixit-step-goal'))) || 10000;
             return {
                 screen: COACH_SCREEN_NAMES[state.currentScreen] || 'results',
                 bodyScore: bc.score || 50,
@@ -15984,7 +16068,7 @@ Please try again with a different photo.`;
             const arc = document.getElementById('wo-ring-arc');
             const overflow = document.getElementById('wo-ring-overflow');
             if (arc) {
-                const GOAL = parseInt(localStorage.getItem('fixit-wearable-daily-goal')) || 10000;
+                const GOAL = parseInt(localStorage.getItem(userKey('fixit-step-goal'))) || 10000;
                 const goalLbl = document.getElementById('wo-goal-label');
                 if (goalLbl) goalLbl.textContent = `Goal: ${GOAL.toLocaleString()}`;
                 const pct = Math.min(wearableState.steps / GOAL, 1);
@@ -16343,7 +16427,7 @@ Please try again with a different photo.`;
 
                 let _goalType = 'steps';
 
-                const _getGoalSteps = () => parseInt(localStorage.getItem('fixit-wearable-daily-goal')) || 10000;
+                const _getGoalSteps = () => parseInt(localStorage.getItem(userKey('fixit-step-goal'))) || 10000;
                 const _updateGoalDisplay = () => {
                     const g = _getGoalSteps();
                     const el = document.getElementById('wr-goal-display');
@@ -16382,7 +16466,8 @@ Please try again with a different photo.`;
                     const raw = parseFloat(goalInput.value);
                     if (!raw || raw <= 0) return;
                     const steps = _goalType === 'km' ? Math.round(raw / 0.00076) : Math.round(raw);
-                    localStorage.setItem('fixit-wearable-daily-goal', steps);
+                    localStorage.setItem(userKey('fixit-step-goal'), steps);
+                    _apiSave('/users/me/preferences', { step_goal: steps }, 'PUT');
                     _updateGoalDisplay();
                     if (editor) editor.style.display = 'none';
                     _loadWearableData();
@@ -16455,7 +16540,7 @@ Please try again with a different photo.`;
             el('today-calories', cal ? `${cal}` : '—');
             el('today-active', activeSecs ? `${Math.round(activeSecs / 60)}` : '—');
 
-            const GOAL = parseInt(localStorage.getItem('fixit-wearable-daily-goal')) || 10000;
+            const GOAL = parseInt(localStorage.getItem(userKey('fixit-step-goal'))) || 10000;
             const pct = Math.min(steps / GOAL, 1);
             const fillEl = document.getElementById('today-goal-fill');
             const pctEl = document.getElementById('today-goal-pct');
@@ -16534,7 +16619,7 @@ Please try again with a different photo.`;
         function _renderWearableInsights(sessions) {
             if (!sessions || sessions.length === 0) return;
 
-            const GOAL = parseInt(localStorage.getItem('fixit-wearable-daily-goal')) || 10000;
+            const GOAL = parseInt(localStorage.getItem(userKey('fixit-step-goal'))) || 10000;
             const today = new Date();
             const todayKey = today.toISOString().split('T')[0];
 
@@ -16629,7 +16714,7 @@ Please try again with a different photo.`;
             const canvas = document.getElementById('wr-steps-chart');
             if (!canvas) return;
 
-            const GOAL = parseInt(localStorage.getItem('fixit-wearable-daily-goal')) || 10000;
+            const GOAL = parseInt(localStorage.getItem(userKey('fixit-step-goal'))) || 10000;
             const today = new Date();
 
             // Build a map of date → aggregated totals (sum across multiple sessions per day)

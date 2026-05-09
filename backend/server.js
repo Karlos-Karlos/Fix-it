@@ -273,6 +273,11 @@ async function runMigrations() {
       created_at   TIMESTAMPTZ NOT NULL DEFAULT NOW()
     )`,
     'CREATE INDEX IF NOT EXISTS idx_wearable_sessions_user_id ON wearable_sessions(user_id)',
+
+    // Step goal and unit preferences — persisted so they sync across devices
+    'ALTER TABLE user_preferences ADD COLUMN IF NOT EXISTS step_goal INTEGER NOT NULL DEFAULT 10000',
+    "ALTER TABLE user_preferences ADD COLUMN IF NOT EXISTS weight_unit VARCHAR(5) NOT NULL DEFAULT 'kg'",
+    "ALTER TABLE user_preferences ADD COLUMN IF NOT EXISTS height_unit VARCHAR(5) NOT NULL DEFAULT 'cm'",
   ];
 
   for (const sql of migrations) {
