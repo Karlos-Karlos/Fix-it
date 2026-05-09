@@ -743,6 +743,20 @@
             // Hide auth screen
             document.getElementById('screen-auth').classList.remove('active');
             document.querySelector('.nav-steps').style.display = 'flex';
+
+            // Clear IndexedDB snapshots when a different user logs in on this device.
+            // IndexedDB is browser-local and unscoped — without this, snapshots from a
+            // deleted or previously logged-in account bleed into the new account's history.
+            const currentUserId = state.user && state.user.id;
+            const lastUserId    = localStorage.getItem('fixit-last-user-id');
+            if (currentUserId && lastUserId && lastUserId !== currentUserId) {
+                openSnapshotDB().then(db => {
+                    const tx = db.transaction(SNAPSHOT_STORE, 'readwrite');
+                    tx.objectStore(SNAPSHOT_STORE).clear();
+                }).catch(() => {});
+            }
+            if (currentUserId) localStorage.setItem('fixit-last-user-id', currentUserId);
+
             // Re-load session state with the stable device-ID key
             loadSessionState();
             // Load this user's preferences (theme, coach persona, etc.)
