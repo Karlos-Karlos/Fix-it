@@ -601,10 +601,10 @@
             // Wait until all setup*() functions in init() have run before routing.
             await setupDonePromise;
 
-            // 1. Session state already loaded — go straight to Results
+            // 1. Session state already loaded — restore last screen (or Results)
             if (state.analysisResult) {
                 populateResults();
-                goToScreen(3);
+                goToScreen(state.lastScreen || 3);
                 return;
             }
 
@@ -633,7 +633,7 @@
                             state.fitnessGoal   = latest.userProfile.goal    || state.fitnessGoal;
                         }
                         populateResults();
-                        goToScreen(3);
+                        goToScreen(state.lastScreen || 3);
                         return;
                     }
                 } catch (e) {}
@@ -655,7 +655,7 @@
                     state.fitnessGoal = latest.userProfile.goal   || state.fitnessGoal;
                 }
                 populateResults();
-                goToScreen(3);
+                goToScreen(state.lastScreen || 3);
                 return;
             }
 
@@ -1115,6 +1115,10 @@
                 state.analysisResult = sessionData.analysisResult;
                 state.landmarks = sessionData.landmarks || null;
                 state.coachPersona = sessionData.coachPersona || 'encouraging';
+                // Restore last screen (screens 3-9 are valid post-login screens)
+                if (sessionData.currentScreen >= 3 && sessionData.currentScreen <= 9) {
+                    state.lastScreen = sessionData.currentScreen;
+                }
 
                 // Restore image
                 const savedImage = localStorage.getItem(userKey('fixit-session-image'));
