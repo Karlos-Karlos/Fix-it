@@ -364,7 +364,6 @@
         /* Main container */
         .app-container {
             position: relative;
-            z-index: 1;
             min-height: 100vh;
             padding: 20px;
             padding-bottom: 40px;
@@ -4563,7 +4562,7 @@
         .workout-player-container {
             flex: 1;
             height: 100%;
-            padding: 16px 20px calc(70px + env(safe-area-inset-bottom, 0px));
+            padding: 16px 20px 20px;
             display: flex;
             flex-direction: column;
             overflow: hidden;
