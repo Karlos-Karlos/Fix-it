@@ -4989,12 +4989,8 @@ Please try again with a different photo.`;
             const ctx = formCheckRecordCanvas.getContext('2d');
             const w = formCheckRecordCanvas.width, h = formCheckRecordCanvas.height;
             ctx.clearRect(0, 0, w, h);
-            ctx.save();
-            ctx.translate(w, 0);
-            ctx.scale(-1, 1);
             ctx.drawImage(video, 0, 0, w, h);
-            ctx.restore();
-            if (lm) drawFormSkeleton(formCheckRecordCanvas, lm, false, true);
+            if (lm) drawFormSkeleton(formCheckRecordCanvas, lm, false, false);
         }
 
         // Show panel with mode picker (no camera yet)
@@ -5049,7 +5045,7 @@ Please try again with a different photo.`;
 
             try {
                 formCheckStream = await navigator.mediaDevices.getUserMedia({
-                    video: { facingMode: 'user', width: { ideal: 480 }, height: { ideal: 640 } }
+                    video: { facingMode: 'environment', width: { ideal: 640 }, height: { ideal: 480 } }
                 });
                 video.srcObject = formCheckStream;
                 await video.play();
