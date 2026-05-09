@@ -663,29 +663,35 @@
                 }
             }
 
-            // 3. Check IndexedDB — only use if server also has scans (prevents stale
-            //    snapshots from a deleted account being restored for a new account)
+            // 3. Check IndexedDB — only use if it has a snapshot NEWER than the latest
+            //    server scan. This prevents a stale phone-local snapshot (e.g. from before
+            //    a "Clear All Data" on another device) from overriding a freshly uploaded scan.
             if (serverScans.length > 0) {
                 try {
                     const snapshots = await getAllSnapshots();
-                    const latest = snapshots.find(s => s.analysisResult);
-                    if (latest) {
-                        state.analysisResult = latest.analysisResult;
-                        if (latest.userProfile) {
-                            state.gender        = latest.userProfile.gender  || state.gender;
-                            state.height        = latest.userProfile.height  || state.height;
-                            state.weight        = latest.userProfile.weight  || state.weight;
-                            state.bmi           = latest.userProfile.bmi     || state.bmi;
-                            state.fitnessGoal   = latest.userProfile.goal    || state.fitnessGoal;
+                    const latestLocal = snapshots.find(s => s.analysisResult);
+                    if (latestLocal) {
+                        const localDate  = new Date(latestLocal.date || 0).getTime();
+                        const serverDate = new Date(serverScans[0].date || 0).getTime();
+                        if (localDate >= serverDate) {
+                            state.analysisResult = latestLocal.analysisResult;
+                            if (latestLocal.userProfile) {
+                                state.gender      = latestLocal.userProfile.gender  || state.gender;
+                                state.height      = latestLocal.userProfile.height  || state.height;
+                                state.weight      = latestLocal.userProfile.weight  || state.weight;
+                                state.bmi         = latestLocal.userProfile.bmi     || state.bmi;
+                                state.fitnessGoal = latestLocal.userProfile.goal    || state.fitnessGoal;
+                            }
+                            populateResults();
+                            goToScreen(state.lastScreen || 3);
+                            return;
                         }
-                        populateResults();
-                        goToScreen(state.lastScreen || 3);
-                        return;
+                        // Server scan is newer — fall through to step 4 (server wins)
                     }
                 } catch (e) {}
             }
 
-            // 4. Use server scan directly if no local snapshot matched
+            // 4. Use server scan — either no local snapshot exists, or server scan is newer
             if (serverScans.length > 0) {
                 const latest = serverScans[0];
                 state.analysisResult = latest.analysisResult;
