@@ -341,15 +341,50 @@
             } catch (_) {}
 
             try {
-                // Gamification XP — use server value if higher than local
+                // Gamification counters — server is source of truth across devices
                 const gamRes = await apiFetch('/users/me/gamification');
                 if (gamRes.ok) {
                     const gam = await gamRes.json();
-                    if (gam && typeof gam.total_xp === 'number') {
-                        const localXP = parseInt(localStorage.getItem(userKey('fixit-total-xp')) || '0');
-                        const xp = Math.max(localXP, gam.total_xp);
-                        localStorage.setItem(userKey('fixit-total-xp'), String(xp));
+                    if (gam) {
+                        // XP: take max of local vs server
+                        if (typeof gam.total_xp === 'number') {
+                            const localXP = parseInt(localStorage.getItem(userKey('fixit-total-xp')) || '0');
+                            localStorage.setItem(userKey('fixit-total-xp'), String(Math.max(localXP, gam.total_xp)));
+                        }
+                        // Total workouts: take max
+                        if (typeof gam.total_workouts === 'number') {
+                            const localTW = parseInt(localStorage.getItem(userKey('fixit-total-workouts')) || '0');
+                            localStorage.setItem(userKey('fixit-total-workouts'), String(Math.max(localTW, gam.total_workouts)));
+                        }
+                        // Total analyses: take max
+                        if (typeof gam.total_analyses === 'number') {
+                            const localTA = parseInt(localStorage.getItem(userKey('fixit-total-analyses')) || '0');
+                            localStorage.setItem(userKey('fixit-total-analyses'), String(Math.max(localTA, gam.total_analyses)));
+                        }
+                        // Current streak: take max (server tracks it across devices)
+                        if (typeof gam.current_streak === 'number') {
+                            const localStreak = parseInt(localStorage.getItem(userKey('fixit-workout-streak')) || '0');
+                            const syncedStreak = Math.max(localStreak, gam.current_streak);
+                            localStorage.setItem(userKey('fixit-workout-streak'), String(syncedStreak));
+                            const localBest = parseInt(localStorage.getItem(userKey('fixit-best-streak')) || '0');
+                            if (syncedStreak > localBest) localStorage.setItem(userKey('fixit-best-streak'), String(syncedStreak));
+                        }
                     }
+                }
+            } catch (_) {}
+
+            try {
+                // Rebuild workout-dates heatmap from the synced workout log so the
+                // heatmap matches across devices (workout log was already synced above)
+                const allLog = getWorkoutLog();
+                const derivedDates = [...new Set(
+                    allLog.map(e => (e.date || '').split('T')[0]).filter(Boolean)
+                )];
+                if (derivedDates.length > 0) {
+                    let existing = [];
+                    try { existing = JSON.parse(localStorage.getItem(userKey('fixit-workout-dates')) || '[]'); } catch { existing = []; }
+                    const merged = [...new Set([...existing, ...derivedDates])];
+                    localStorage.setItem(userKey('fixit-workout-dates'), JSON.stringify(merged));
                 }
             } catch (_) {}
 
@@ -381,13 +416,24 @@
                 }
             } catch (_) {}
 
-            // Re-render after sync
+            // Re-render after sync (only if Stats screen is visible, else data is
+            // fresh when the user navigates there)
+            const onStats = state.currentScreen === 8;
             try { renderGoalWeight(); } catch (_) {}
             try { renderSleepTracker(); } catch (_) {}
             try { renderWorkoutLog(); } catch (_) {}
             try { renderPersonalRecords(); } catch (_) {}
             try { renderLevelXP(); } catch (_) {}
             try { renderHabitTracker(); } catch (_) {}
+            if (onStats) {
+                try { checkAchievements(); } catch (_) {}
+                try { renderStreakTracker(); } catch (_) {}
+                try { renderHeatmap(); } catch (_) {}
+                try { renderBadges(); } catch (_) {}
+                try { renderChallenges(); } catch (_) {}
+                try { renderWeeklyReport(); } catch (_) {}
+                try { renderInsights(); } catch (_) {}
+            }
         }
 
         function isValidEmail(email) {
