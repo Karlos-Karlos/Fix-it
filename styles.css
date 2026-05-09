@@ -17925,7 +17925,7 @@ body.has-bottom-nav .screen.active {
 
 /* Extra room on the Train screen so exercise log inputs stay visible when keyboard opens */
 body.has-bottom-nav #screen-workout {
-    padding-bottom: calc(400px + env(safe-area-inset-bottom, 0px));
+    padding-bottom: calc(300px + env(safe-area-inset-bottom, 0px));
 }
 
 /* Lift coach FAB and panel above the bottom nav */
