@@ -3362,6 +3362,7 @@ Please try again with a different photo.`;
                 'sedentary': 1.2,
                 'light': 1.375,
                 'moderate': 1.55,
+                'active': 1.65,
                 'very': 1.725,
                 'very_active': 1.725,
                 'athlete': 1.9
@@ -3469,7 +3470,7 @@ Please try again with a different photo.`;
                 goalSel.value = goal;
             }
 
-            const activityMultipliers = { sedentary: 1.2, light: 1.375, moderate: 1.55, very: 1.725, very_active: 1.725, athlete: 1.9 };
+            const activityMultipliers = { sedentary: 1.2, light: 1.375, moderate: 1.55, active: 1.65, very: 1.725, very_active: 1.725, athlete: 1.9 };
             const mult = activityMultipliers[activityLevel] || 1.55;
 
             const bmr = state._bmr || computeBMR(weight, height, age, gender);
@@ -3520,7 +3521,7 @@ Please try again with a different photo.`;
 
                     if (!weight) return;
 
-                    const activityMultipliers = { sedentary: 1.2, light: 1.375, moderate: 1.55, very: 1.725, very_active: 1.725, athlete: 1.9 };
+                    const activityMultipliers = { sedentary: 1.2, light: 1.375, moderate: 1.55, active: 1.65, very: 1.725, very_active: 1.725, athlete: 1.9 };
                     const mult = activityMultipliers[activityLevel] || 1.55;
                     const bmr = computeBMR(weight, height, age, gender);
                     const tdee = Math.round(bmr * mult);
@@ -5049,6 +5050,7 @@ Please try again with a different photo.`;
                 await video.play();
             } catch (err) {
                 document.getElementById('form-check-panel').classList.remove('active');
+                formCheckMode = null;
                 const msg = err.name === 'NotAllowedError'
                     ? 'Camera permission denied — allow camera access and try again'
                     : 'Could not open camera for form check';
@@ -5247,7 +5249,10 @@ Please try again with a different photo.`;
                     });
                 });
 
-                replayVideo.addEventListener('timeupdate', () => {
+                if (replayVideo._fcTimeUpdate) {
+                    replayVideo.removeEventListener('timeupdate', replayVideo._fcTimeUpdate);
+                }
+                replayVideo._fcTimeUpdate = () => {
                     const cur = replayVideo.currentTime;
                     let activeIdx = 0;
                     formCheckFeedbackLog.forEach((snap, i) => {
@@ -5256,7 +5261,8 @@ Please try again with a different photo.`;
                     timeline.querySelectorAll('.fc-snap').forEach((el, i) => {
                         el.classList.toggle('active', i === activeIdx);
                     });
-                });
+                };
+                replayVideo.addEventListener('timeupdate', replayVideo._fcTimeUpdate);
             }
 
             panel.classList.add('active');
@@ -5267,6 +5273,10 @@ Please try again with a different photo.`;
             const replayVideo = document.getElementById('fc-replay-video');
             if (replayVideo) {
                 replayVideo.pause();
+                if (replayVideo._fcTimeUpdate) {
+                    replayVideo.removeEventListener('timeupdate', replayVideo._fcTimeUpdate);
+                    replayVideo._fcTimeUpdate = null;
+                }
                 if (replayVideo.src) { URL.revokeObjectURL(replayVideo.src); replayVideo.src = ''; }
             }
             if (panel) panel.classList.remove('active');

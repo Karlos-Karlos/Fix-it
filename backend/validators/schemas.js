@@ -31,7 +31,7 @@ const registerSchema = z.object({
   weight: z.number().min(30).max(300).optional(),
   age_range: z.string().max(10).optional(),
   activity_level: z.enum(['sedentary', 'light', 'moderate', 'active', 'very_active', 'athlete']).optional(),
-  fitness_goal: z.enum(['lose_weight', 'build_muscle', 'maintain', 'improve_posture', 'general']).optional(),
+  fitness_goal: z.enum(['lose_weight', 'build_muscle', 'maintain', 'improve_posture', 'general', 'lose-weight', 'build-muscle', 'recomp']).optional(),
   experience_level: z.enum(['beginner', 'intermediate', 'advanced']).optional(),
 });
 
@@ -75,14 +75,14 @@ const updateProfileSchema = z.object({
   weight: z.number().min(30).max(300).optional(),
   age_range: z.string().max(10).optional(),
   activity_level: z.enum(['sedentary', 'light', 'moderate', 'active', 'very_active', 'athlete']).optional(),
-  fitness_goal: z.enum(['lose_weight', 'build_muscle', 'maintain', 'improve_posture', 'general']).optional(),
+  fitness_goal: z.enum(['lose_weight', 'build_muscle', 'maintain', 'improve_posture', 'general', 'lose-weight', 'build-muscle', 'recomp']).optional(),
   experience_level: z.enum(['beginner', 'intermediate', 'advanced']).optional(),
   avatar_url: z.string().max(200000).nullable().optional(),
 });
 
 const updatePreferencesSchema = z.object({
   theme: z.enum(['dark', 'light']).optional(),
-  coach_persona: z.enum(['encouraging', 'drill_sergeant', 'scientific', 'casual']).optional(),
+  coach_persona: z.enum(['encouraging', 'drill_sergeant', 'scientific', 'casual', 'structured', 'educational', 'humorous']).optional(),
 });
 
 // ── Analysis ──
@@ -197,7 +197,7 @@ const logFoodSchema = z.object({
 // ── Coach ──
 const coachMessageSchema = z.object({
   message: z.string().min(1).max(1000),
-  persona: z.enum(['encouraging', 'drill_sergeant', 'scientific', 'casual']).default('encouraging'),
+  persona: z.enum(['encouraging', 'drill_sergeant', 'scientific', 'casual', 'structured', 'educational', 'humorous']).default('encouraging'),
 });
 
 // ── Admin ──

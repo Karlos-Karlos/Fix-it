@@ -161,15 +161,14 @@ router.delete('/me/data', async (req, res, next) => {
 
     // Delete all user-owned data (keep users + user_preferences rows)
     const tables = [
-      'analysis_scans',
       'analysis_results',
+      'analysis_scans',
       'coach_conversations',
       'food_log',
       'goal_weight',
       'hydration_logs',
       'lift_log',
       'measurement_logs',
-      'meals',
       'sleep_logs',
       'user_achievements',
       'user_personas_used',
@@ -187,8 +186,8 @@ router.delete('/me/data', async (req, res, next) => {
     // Reset gamification to fresh state instead of deleting
     await db.query(
       `UPDATE user_gamification
-       SET xp=0, level=1, scans_completed=0, workouts_logged=0,
-           meals_logged=0, streak_days=0, meal_plans_generated=0,
+       SET total_xp=0, current_streak=0, total_workouts=0,
+           total_analyses=0, meal_plans_generated=0,
            updated_at=NOW()
        WHERE user_id = $1`,
       [uid]
