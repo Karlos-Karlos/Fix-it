@@ -4351,6 +4351,8 @@ Please try again with a different photo.`;
         }
 
         function closeWorkoutPlayer() {
+            stopFormCheck();
+            closeFormReplay();
             const modal = document.getElementById('workout-player-modal');
             modal.classList.remove('active');
             document.body.style.overflow = '';
@@ -4727,6 +4729,15 @@ Please try again with a different photo.`;
             document.getElementById('skip-rest-btn')?.addEventListener('click', skipRest);
             document.getElementById('add-rep-btn')?.addEventListener('click', addRep);
             document.getElementById('complete-set-btn')?.addEventListener('click', completeSet);
+            document.getElementById('check-form-btn')?.addEventListener('click', startFormCheck);
+            document.getElementById('fc-mode-live')?.addEventListener('click', startLiveCheck);
+            document.getElementById('fc-mode-record')?.addEventListener('click', startRecordAndReplay);
+            document.getElementById('form-check-stop')?.addEventListener('click', () => {
+                if (formCheckMode === 'record') stopRecordingAndReview();
+                else stopFormCheck();
+            });
+            document.getElementById('fc-replay-close')?.addEventListener('click', closeFormReplay);
+            document.getElementById('fc-replay-download')?.addEventListener('click', downloadFormRecording);
 
             // Complete screen actions
             document.getElementById('finish-workout-btn')?.addEventListener('click', closeWorkoutPlayer);
@@ -4741,6 +4752,539 @@ Please try again with a different photo.`;
                     // Don't close on background click during workout
                 }
             });
+        }
+
+        // ========== LIVE FORM CHECK ==========
+        let formCheckStream = null;
+        let formCheckActive = false;
+        let formCheckRAF = null;
+        let formCheckMode = null; // 'live' | 'record'
+        let formCheckIsRecording = false;
+        let formCheckRecorder = null;
+        let formCheckChunks = [];
+        let formCheckFeedbackLog = [];
+        let formCheckRecordStart = 0;
+        let formCheckRecordCanvas = null;
+        let formCheckRecordingBlob = null;
+        let formCheckLastLandmarks = null;
+        let formCheckRecordTimerInterval = null;
+        let formCheckLastCompositeDraw = 0;
+
+        function getJointAngle(a, b, c) {
+            const rad = Math.atan2(c.y - b.y, c.x - b.x) - Math.atan2(a.y - b.y, a.x - b.x);
+            let deg = Math.abs(rad * 180 / Math.PI);
+            return deg > 180 ? 360 - deg : deg;
+        }
+
+        function classifyExercise(name) {
+            const n = name.toLowerCase();
+            if (/squat|goblet|leg press|box squat|front squat/.test(n)) return 'squat';
+            if (/lunge|step.?up|split squat|bulgarian/.test(n)) return 'lunge';
+            if (/push.?up|chest press|bench|dip|chest fly|pec/.test(n)) return 'push';
+            if (/deadlift|rdl|romanian|hip hinge|good morning/.test(n)) return 'deadlift';
+            if (/plank|hollow|bear crawl/.test(n)) return 'plank';
+            if (/row|pull.?down|lat|chin.?up|pull.?up/.test(n)) return 'pull';
+            if (/curl|bicep|hammer/.test(n)) return 'curl';
+            if (/press|ohp|overhead|military/.test(n)) return 'press';
+            if (/glute bridge|hip thrust|hip extension/.test(n)) return 'glute';
+            return 'generic';
+        }
+
+        function analyzeExerciseForm(exerciseName, lm) {
+            const type = classifyExercise(exerciseName);
+            const fb = [];
+            const vis = (p) => p && p.visibility > 0.45;
+
+            const ls = lm[11], rs = lm[12];
+            const le = lm[13], re = lm[14];
+            const lw = lm[15], rw = lm[16];
+            const lh = lm[23], rh = lm[24];
+            const lk = lm[25], rk = lm[26];
+            const la = lm[27], ra = lm[28];
+
+            if (type === 'squat') {
+                if (vis(lh) && vis(lk) && vis(la)) {
+                    const lKnee = getJointAngle(lh, lk, la);
+                    const rKnee = vis(rh) && vis(rk) && vis(ra) ? getJointAngle(rh, rk, ra) : lKnee;
+                    const avg = (lKnee + rKnee) / 2;
+                    if (avg < 90) fb.push({ type: 'good', msg: 'Great depth — below parallel' });
+                    else if (avg < 115) fb.push({ type: 'good', msg: 'Good squat depth' });
+                    else fb.push({ type: 'warn', msg: 'Go deeper — aim for parallel' });
+                }
+                if (vis(ls) && vis(lh) && vis(lk)) {
+                    const torso = getJointAngle(ls, lh, lk);
+                    if (torso < 55) fb.push({ type: 'warn', msg: 'Chest up — too much forward lean' });
+                    else fb.push({ type: 'good', msg: 'Torso upright' });
+                }
+                if (vis(lk) && vis(la) && vis(rk) && vis(ra)) {
+                    const lDiff = lk.x - la.x;
+                    const rDiff = rk.x - ra.x;
+                    if (lDiff < -0.05 && rDiff > 0.05) fb.push({ type: 'warn', msg: 'Push knees out — avoid caving in' });
+                    else fb.push({ type: 'good', msg: 'Knee tracking good' });
+                }
+
+            } else if (type === 'lunge') {
+                if (vis(lh) && vis(lk) && vis(la)) {
+                    const lKnee = getJointAngle(lh, lk, la);
+                    const rKnee = vis(rh) && vis(rk) && vis(ra) ? getJointAngle(rh, rk, ra) : lKnee;
+                    const front = Math.min(lKnee, rKnee);
+                    if (front < 105) fb.push({ type: 'good', msg: 'Front knee angle good' });
+                    else fb.push({ type: 'warn', msg: 'Lower into the lunge deeper' });
+                }
+                if (vis(ls) && vis(lh)) {
+                    const lean = Math.abs(ls.x - lh.x);
+                    if (lean < 0.05) fb.push({ type: 'good', msg: 'Torso upright' });
+                    else fb.push({ type: 'warn', msg: 'Keep torso upright — shoulders over hips' });
+                }
+
+            } else if (type === 'push') {
+                if (vis(ls) && vis(le) && vis(lw)) {
+                    const lElbow = getJointAngle(ls, le, lw);
+                    const rElbow = vis(rs) && vis(re) && vis(rw) ? getJointAngle(rs, re, rw) : lElbow;
+                    const avg = (lElbow + rElbow) / 2;
+                    if (avg < 70) fb.push({ type: 'good', msg: 'Full range — chest to floor' });
+                    else if (avg < 110) fb.push({ type: 'good', msg: 'Good depth' });
+                    else fb.push({ type: 'warn', msg: 'Go lower — elbows near 90°' });
+                }
+                if (vis(ls) && vis(lh) && vis(la)) {
+                    const bodyLine = getJointAngle(ls, lh, la);
+                    if (bodyLine > 160) fb.push({ type: 'good', msg: 'Body alignment straight' });
+                    else if (bodyLine > 140) fb.push({ type: 'warn', msg: 'Keep hips level — slight misalignment' });
+                    else fb.push({ type: 'error', msg: 'Hips sagging or piking — engage core' });
+                }
+
+            } else if (type === 'deadlift') {
+                if (vis(ls) && vis(lh) && vis(lk)) {
+                    const hip = getJointAngle(ls, lh, lk);
+                    if (hip > 155) fb.push({ type: 'good', msg: 'Hips fully extended at lockout' });
+                    else if (hip > 130) fb.push({ type: 'warn', msg: 'Drive hips forward to lockout' });
+                    else fb.push({ type: 'warn', msg: 'Complete the hip extension' });
+                }
+                if (vis(ls) && vis(lh)) {
+                    const spineAngle = Math.abs(Math.atan2(lh.y - ls.y, lh.x - ls.x) * 180 / Math.PI);
+                    if (spineAngle > 65) fb.push({ type: 'warn', msg: 'Avoid rounding — keep back neutral' });
+                    else fb.push({ type: 'good', msg: 'Back position neutral' });
+                }
+
+            } else if (type === 'plank') {
+                if (vis(ls) && vis(lh) && vis(la)) {
+                    const line = getJointAngle(ls, lh, la);
+                    if (line > 165) fb.push({ type: 'good', msg: 'Body in a straight line' });
+                    else if (lh.y < ls.y - 0.05 && lh.y < la.y - 0.05) {
+                        fb.push({ type: 'warn', msg: 'Hips too high — lower to align' });
+                    } else {
+                        fb.push({ type: 'error', msg: 'Hips sagging — brace core and glutes' });
+                    }
+                }
+                if (vis(ls) && vis(rs)) {
+                    const shoulderWidth = Math.abs(ls.x - rs.x);
+                    if (shoulderWidth > 0.05) fb.push({ type: 'good', msg: 'Shoulders stacked over wrists' });
+                }
+
+            } else if (type === 'pull') {
+                if (vis(ls) && vis(le) && vis(lw)) {
+                    const lElbow = getJointAngle(ls, le, lw);
+                    const rElbow = vis(rs) && vis(re) && vis(rw) ? getJointAngle(rs, re, rw) : lElbow;
+                    const avg = (lElbow + rElbow) / 2;
+                    if (avg < 80) fb.push({ type: 'good', msg: 'Good pull — elbows driven back' });
+                    else fb.push({ type: 'warn', msg: 'Pull further — drive elbows behind torso' });
+                }
+
+            } else if (type === 'curl') {
+                if (vis(ls) && vis(le) && vis(lw)) {
+                    const lElbow = getJointAngle(ls, le, lw);
+                    const rElbow = vis(rs) && vis(re) && vis(rw) ? getJointAngle(rs, re, rw) : lElbow;
+                    const avg = (lElbow + rElbow) / 2;
+                    if (avg < 55) fb.push({ type: 'good', msg: 'Full bicep contraction' });
+                    else fb.push({ type: 'warn', msg: 'Curl higher for full contraction' });
+                }
+                if (vis(le) && vis(lh)) {
+                    const drift = Math.abs(le.x - lh.x);
+                    const rDrift = vis(re) && vis(rh) ? Math.abs(re.x - rh.x) : drift;
+                    if (drift > 0.13 || rDrift > 0.13) fb.push({ type: 'warn', msg: 'Pin elbows to your sides' });
+                    else fb.push({ type: 'good', msg: 'Elbows stationary — good form' });
+                }
+
+            } else if (type === 'press') {
+                if (vis(ls) && vis(le) && vis(lw)) {
+                    const lElbow = getJointAngle(ls, le, lw);
+                    const rElbow = vis(rs) && vis(re) && vis(rw) ? getJointAngle(rs, re, rw) : lElbow;
+                    const avg = (lElbow + rElbow) / 2;
+                    if (avg > 155) fb.push({ type: 'good', msg: 'Arms fully extended at top' });
+                    else fb.push({ type: 'warn', msg: 'Fully extend arms at the top' });
+                }
+                if (vis(ls) && vis(lh)) {
+                    const leanBack = Math.abs(lh.x - ls.x);
+                    if (leanBack > 0.1) fb.push({ type: 'warn', msg: 'Avoid excessive back arch — brace core' });
+                    else fb.push({ type: 'good', msg: 'Spine neutral — good alignment' });
+                }
+
+            } else if (type === 'glute') {
+                if (vis(lh) && vis(ls)) {
+                    const diff = ls.y - lh.y;
+                    if (diff > 0.05) fb.push({ type: 'good', msg: 'Full hip extension — squeeze at top' });
+                    else if (diff > -0.03) fb.push({ type: 'warn', msg: 'Push hips higher — squeeze glutes' });
+                    else fb.push({ type: 'warn', msg: 'Drive hips up for full extension' });
+                }
+
+            } else {
+                if (vis(ls) && vis(lh)) {
+                    const lean = Math.abs(ls.x - lh.x);
+                    if (lean < 0.06) fb.push({ type: 'good', msg: 'Good posture and alignment' });
+                    else fb.push({ type: 'warn', msg: 'Stay centered — avoid leaning' });
+                }
+                fb.push({ type: 'good', msg: 'Control the movement — steady breathing' });
+            }
+
+            return fb;
+        }
+
+        function drawFormSkeleton(canvas, lm, clearFirst = true, mirrorX = false) {
+            const ctx = canvas.getContext('2d');
+            const w = canvas.width, h = canvas.height;
+            if (clearFirst) ctx.clearRect(0, 0, w, h);
+
+            const xp = (p) => mirrorX ? (1 - p.x) * w : p.x * w;
+            const yp = (p) => p.y * h;
+
+            const connections = [
+                [11, 12], [11, 13], [13, 15], [12, 14], [14, 16],
+                [11, 23], [12, 24], [23, 24],
+                [23, 25], [25, 27], [24, 26], [26, 28],
+                [27, 29], [28, 30], [29, 31], [30, 32]
+            ];
+
+            ctx.lineWidth = 2.5;
+            ctx.strokeStyle = 'rgba(201,169,98,0.85)';
+            ctx.lineCap = 'round';
+
+            for (const [i, j] of connections) {
+                const a = lm[i], b = lm[j];
+                if (!a || !b || a.visibility < 0.4 || b.visibility < 0.4) continue;
+                ctx.beginPath();
+                ctx.moveTo(xp(a), yp(a));
+                ctx.lineTo(xp(b), yp(b));
+                ctx.stroke();
+            }
+
+            const joints = [11, 12, 13, 14, 15, 16, 23, 24, 25, 26, 27, 28];
+            for (const i of joints) {
+                const p = lm[i];
+                if (!p || p.visibility < 0.4) continue;
+                ctx.beginPath();
+                ctx.arc(xp(p), yp(p), 4, 0, Math.PI * 2);
+                ctx.fillStyle = 'rgba(201,169,98,0.9)';
+                ctx.fill();
+            }
+        }
+
+        function drawCompositeForRecord(video, lm) {
+            if (!formCheckRecordCanvas || !formCheckIsRecording) return;
+            const ctx = formCheckRecordCanvas.getContext('2d');
+            const w = formCheckRecordCanvas.width, h = formCheckRecordCanvas.height;
+            ctx.clearRect(0, 0, w, h);
+            ctx.save();
+            ctx.translate(w, 0);
+            ctx.scale(-1, 1);
+            ctx.drawImage(video, 0, 0, w, h);
+            ctx.restore();
+            if (lm) drawFormSkeleton(formCheckRecordCanvas, lm, false, true);
+        }
+
+        // Show panel with mode picker (no camera yet)
+        function startFormCheck() {
+            const panel = document.getElementById('form-check-panel');
+            panel.classList.add('active');
+            document.getElementById('fc-mode-picker').style.display = 'flex';
+            document.getElementById('fc-video-wrap').style.display = 'none';
+            document.getElementById('form-check-feedback').style.display = 'none';
+            document.getElementById('fc-panel-title').textContent = 'Form Check';
+            document.getElementById('form-check-stop').textContent = 'Close';
+            const timeEl = document.getElementById('fc-record-time');
+            if (timeEl) { timeEl.textContent = '0:00'; timeEl.classList.remove('visible'); }
+            formCheckMode = null;
+        }
+
+        async function startLiveCheck() {
+            formCheckMode = 'live';
+            document.getElementById('fc-mode-picker').style.display = 'none';
+            document.getElementById('fc-panel-title').textContent = 'Live Form Check';
+            document.getElementById('form-check-stop').textContent = 'Stop';
+            await _openCamera();
+        }
+
+        async function startRecordAndReplay() {
+            formCheckMode = 'record';
+            document.getElementById('fc-mode-picker').style.display = 'none';
+            document.getElementById('fc-panel-title').textContent = 'Recording…';
+            document.getElementById('form-check-stop').textContent = 'Stop & Review';
+            await _openCamera();
+            if (formCheckActive) startRecording();
+        }
+
+        async function _openCamera() {
+            const video = document.getElementById('form-check-video');
+            const videoWrap = document.getElementById('fc-video-wrap');
+            const feedbackEl = document.getElementById('form-check-feedback');
+            const initEl = document.getElementById('form-check-init');
+
+            videoWrap.style.display = 'block';
+            feedbackEl.style.display = 'flex';
+            initEl.classList.remove('hidden');
+            feedbackEl.innerHTML = '<div class="fc-item fc-detecting"><span class="fc-dot"></span><span>Detecting pose…</span></div>';
+
+            if (!poseDetector) {
+                try { await initMediaPipe(); } catch {
+                    document.getElementById('form-check-panel').classList.remove('active');
+                    showToast('Could not initialize AI for form check', 'error');
+                    return;
+                }
+            }
+
+            try {
+                formCheckStream = await navigator.mediaDevices.getUserMedia({
+                    video: { facingMode: 'user', width: { ideal: 480 }, height: { ideal: 640 } }
+                });
+                video.srcObject = formCheckStream;
+                await video.play();
+            } catch (err) {
+                document.getElementById('form-check-panel').classList.remove('active');
+                const msg = err.name === 'NotAllowedError'
+                    ? 'Camera permission denied — allow camera access and try again'
+                    : 'Could not open camera for form check';
+                showToast(msg, 'error');
+                return;
+            }
+
+            initEl.classList.add('hidden');
+            formCheckActive = true;
+            formCheckLastLandmarks = null;
+            poseDetector.onResults(onFormCheckResults);
+
+            let lastSend = 0;
+            async function loop(ts) {
+                if (!formCheckActive) return;
+                if (formCheckIsRecording && video.readyState >= 2 && ts - formCheckLastCompositeDraw > 100) {
+                    formCheckLastCompositeDraw = ts;
+                    drawCompositeForRecord(video, formCheckLastLandmarks);
+                }
+                if (ts - lastSend > 200 && video.readyState >= 2) {
+                    lastSend = ts;
+                    try { await poseDetector.send({ image: video }); } catch {}
+                }
+                formCheckRAF = requestAnimationFrame(loop);
+            }
+            formCheckRAF = requestAnimationFrame(loop);
+        }
+
+        function onFormCheckResults(results) {
+            const canvas = document.getElementById('form-check-canvas');
+            const video = document.getElementById('form-check-video');
+            const feedbackEl = document.getElementById('form-check-feedback');
+            if (!canvas || !video || !feedbackEl) return;
+
+            canvas.width = video.videoWidth || 480;
+            canvas.height = video.videoHeight || 640;
+
+            if (results.poseLandmarks && results.poseLandmarks.length >= 25) {
+                formCheckLastLandmarks = results.poseLandmarks;
+                drawFormSkeleton(canvas, results.poseLandmarks);
+                const exercise = workoutPlayerState.exercises[workoutPlayerState.currentExerciseIndex];
+                const feedback = analyzeExerciseForm(exercise?.name || '', results.poseLandmarks);
+                feedbackEl.innerHTML = feedback.map(f =>
+                    `<div class="fc-item fc-${f.type}"><span class="fc-dot"></span><span>${escapeHtml(f.msg)}</span></div>`
+                ).join('');
+
+                // Log a feedback snapshot every 2s during recording
+                if (formCheckIsRecording && feedback.length > 0) {
+                    const elapsed = Date.now() - formCheckRecordStart;
+                    const last = formCheckFeedbackLog[formCheckFeedbackLog.length - 1];
+                    if (!last || elapsed - last.time > 2000) {
+                        formCheckFeedbackLog.push({ time: elapsed, items: feedback });
+                    }
+                }
+            } else {
+                formCheckLastLandmarks = null;
+                const ctx = canvas.getContext('2d');
+                ctx.clearRect(0, 0, canvas.width, canvas.height);
+                feedbackEl.innerHTML = '<div class="fc-item fc-detecting"><span class="fc-dot"></span><span>Move into frame — full body should be visible</span></div>';
+            }
+        }
+
+        function _stopFormCheckCamera() {
+            formCheckActive = false;
+            if (formCheckRAF) { cancelAnimationFrame(formCheckRAF); formCheckRAF = null; }
+            if (formCheckStream) { formCheckStream.getTracks().forEach(t => t.stop()); formCheckStream = null; }
+            if (poseDetector) poseDetector.onResults(onPoseResults);
+            const canvas = document.getElementById('form-check-canvas');
+            if (canvas) canvas.getContext('2d').clearRect(0, 0, canvas.width, canvas.height);
+            const feedbackEl = document.getElementById('form-check-feedback');
+            if (feedbackEl) feedbackEl.innerHTML = '<div class="fc-item fc-detecting"><span class="fc-dot"></span><span>Detecting pose…</span></div>';
+        }
+
+        function _resetRecordUI() {
+            const timeEl = document.getElementById('fc-record-time');
+            if (timeEl) { timeEl.textContent = '0:00'; timeEl.classList.remove('visible'); }
+            clearInterval(formCheckRecordTimerInterval);
+            formCheckRecordTimerInterval = null;
+        }
+
+        // Close form check — discards any recording, no replay
+        function stopFormCheck() {
+            if (formCheckIsRecording && formCheckRecorder && formCheckRecorder.state !== 'inactive') {
+                formCheckIsRecording = false;
+                formCheckRecorder.onstop = null; // discard blob
+                formCheckRecorder.stop();
+            }
+            formCheckIsRecording = false;
+            formCheckRecordCanvas = null;
+            formCheckMode = null;
+            _resetRecordUI();
+            _stopFormCheckCamera();
+            const panel = document.getElementById('form-check-panel');
+            if (panel) panel.classList.remove('active');
+        }
+
+        function startRecording() {
+            if (!formCheckActive) return;
+            const video = document.getElementById('form-check-video');
+            if (!video || !video.videoWidth) { showToast('Camera not ready yet', 'warning'); return; }
+
+            const testCanvas = document.createElement('canvas');
+            if (typeof testCanvas.captureStream !== 'function') {
+                showToast('Recording not supported in this browser', 'warning');
+                return;
+            }
+
+            formCheckRecordCanvas = document.createElement('canvas');
+            formCheckRecordCanvas.width = video.videoWidth;
+            formCheckRecordCanvas.height = video.videoHeight;
+            formCheckChunks = [];
+            formCheckFeedbackLog = [];
+            formCheckRecordStart = Date.now();
+            formCheckLastCompositeDraw = 0;
+
+            const stream = formCheckRecordCanvas.captureStream(10);
+            const mimeType = ['video/webm;codecs=vp9', 'video/webm', 'video/mp4']
+                .find(t => MediaRecorder.isTypeSupported(t)) || '';
+            try {
+                formCheckRecorder = new MediaRecorder(stream, mimeType ? { mimeType } : {});
+            } catch {
+                formCheckRecorder = new MediaRecorder(stream);
+            }
+            formCheckRecorder.ondataavailable = (e) => { if (e.data.size > 0) formCheckChunks.push(e.data); };
+            formCheckRecorder.start(500);
+            formCheckIsRecording = true;
+
+            // Show recording timer
+            const timeEl = document.getElementById('fc-record-time');
+            if (timeEl) timeEl.classList.add('visible');
+
+            formCheckRecordTimerInterval = setInterval(() => {
+                const el = document.getElementById('fc-record-time');
+                if (!el) return;
+                const elapsed = Math.floor((Date.now() - formCheckRecordStart) / 1000);
+                const m = Math.floor(elapsed / 60);
+                const s = elapsed % 60;
+                el.textContent = `${m}:${s.toString().padStart(2, '0')}`;
+            }, 1000);
+        }
+
+        function stopRecordingAndReview() {
+            if (!formCheckIsRecording || !formCheckRecorder) return;
+            formCheckIsRecording = false;
+            _resetRecordUI();
+
+            formCheckRecorder.onstop = () => {
+                const type = formCheckRecorder.mimeType || 'video/webm';
+                formCheckRecordingBlob = new Blob(formCheckChunks, { type });
+                _stopFormCheckCamera();
+                document.getElementById('form-check-panel')?.classList.remove('active');
+                showFormReplay();
+            };
+            if (formCheckRecorder.state !== 'inactive') formCheckRecorder.stop();
+            else formCheckRecorder.onstop();
+        }
+
+        function toggleRecording() {
+            if (formCheckIsRecording) stopRecordingAndReview();
+            else startRecording();
+        }
+
+        function showFormReplay() {
+            const panel = document.getElementById('fc-replay-panel');
+            const replayVideo = document.getElementById('fc-replay-video');
+            const timeline = document.getElementById('fc-replay-timeline');
+            if (!panel || !replayVideo || !timeline) return;
+
+            if (formCheckRecordingBlob) {
+                replayVideo.src = URL.createObjectURL(formCheckRecordingBlob);
+            }
+
+            if (formCheckFeedbackLog.length === 0) {
+                timeline.innerHTML = '<p class="fc-timeline-empty">No pose was detected during the recording.</p>';
+            } else {
+                timeline.innerHTML = formCheckFeedbackLog.map((snap, idx) => {
+                    const m = Math.floor(snap.time / 60000);
+                    const s = Math.floor((snap.time % 60000) / 1000);
+                    const timeStr = `${m}:${s.toString().padStart(2, '0')}`;
+                    const itemsHtml = snap.items.map(f =>
+                        `<div class="fc-item fc-${f.type}"><span class="fc-dot"></span><span>${escapeHtml(f.msg)}</span></div>`
+                    ).join('');
+                    return `<div class="fc-snap" data-idx="${idx}">
+                        <button class="fc-snap-seek" data-time="${snap.time / 1000}">
+                            <span class="fc-snap-time">${timeStr}</span>
+                            <svg class="fc-snap-seek-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="5 3 19 12 5 21 5 3"/></svg>
+                        </button>
+                        <div class="fc-snap-items">${itemsHtml}</div>
+                    </div>`;
+                }).join('');
+
+                timeline.querySelectorAll('.fc-snap-seek').forEach(btn => {
+                    btn.addEventListener('click', () => {
+                        const t = parseFloat(btn.dataset.time);
+                        if (!isNaN(t)) { replayVideo.currentTime = t; replayVideo.play(); }
+                    });
+                });
+
+                replayVideo.addEventListener('timeupdate', () => {
+                    const cur = replayVideo.currentTime;
+                    let activeIdx = 0;
+                    formCheckFeedbackLog.forEach((snap, i) => {
+                        if (snap.time / 1000 <= cur) activeIdx = i;
+                    });
+                    timeline.querySelectorAll('.fc-snap').forEach((el, i) => {
+                        el.classList.toggle('active', i === activeIdx);
+                    });
+                });
+            }
+
+            panel.classList.add('active');
+        }
+
+        function closeFormReplay() {
+            const panel = document.getElementById('fc-replay-panel');
+            const replayVideo = document.getElementById('fc-replay-video');
+            if (replayVideo) {
+                replayVideo.pause();
+                if (replayVideo.src) { URL.revokeObjectURL(replayVideo.src); replayVideo.src = ''; }
+            }
+            if (panel) panel.classList.remove('active');
+            formCheckRecordingBlob = null;
+            formCheckRecordCanvas = null;
+        }
+
+        function downloadFormRecording() {
+            if (!formCheckRecordingBlob) return;
+            const ext = formCheckRecordingBlob.type.includes('mp4') ? 'mp4' : 'webm';
+            const url = URL.createObjectURL(formCheckRecordingBlob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = `form-check-${new Date().toISOString().slice(0,19).replace(/[T:]/g, '-')}.${ext}`;
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+            setTimeout(() => URL.revokeObjectURL(url), 60000);
         }
 
         // ========== WEEKLY ROUTINE PLANNER ==========

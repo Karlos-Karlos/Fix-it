@@ -24,7 +24,7 @@
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="styles.css?v=85">
+    <link rel="stylesheet" href="styles.css?v=88">
     <link rel="manifest" href="manifest.json">
     <!-- Chart.js for Progress Charts -->
     <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
@@ -2056,6 +2056,13 @@
                             </svg>
                             Complete Set
                         </button>
+                        <button class="quick-action-btn" id="check-form-btn">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                <path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/>
+                                <circle cx="12" cy="13" r="4"/>
+                            </svg>
+                            Check Form
+                        </button>
                     </div>
 
                     <!-- Up Next -->
@@ -2143,6 +2150,93 @@
                             </button>
                         </div>
                     </div>
+                </div>
+
+                <!-- Form Check Panel -->
+                <div class="form-check-panel" id="form-check-panel">
+                    <div class="form-check-header">
+                        <div class="form-check-title">
+                            <span class="form-check-dot" id="fc-dot"></span>
+                            <span id="fc-panel-title">Form Check</span>
+                        </div>
+                        <div class="fc-header-actions">
+                            <span class="fc-record-time" id="fc-record-time">0:00</span>
+                            <button class="form-check-stop" id="form-check-stop">Close</button>
+                        </div>
+                    </div>
+
+                    <!-- Mode picker — shown first -->
+                    <div class="fc-mode-picker" id="fc-mode-picker">
+                        <p class="fc-mode-hint">How do you want to check your form?</p>
+                        <button class="fc-mode-btn" id="fc-mode-live">
+                            <div class="fc-mode-icon">
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                    <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/>
+                                    <circle cx="12" cy="12" r="3"/>
+                                </svg>
+                            </div>
+                            <div class="fc-mode-info">
+                                <span class="fc-mode-title">Live Check</span>
+                                <span class="fc-mode-desc">Real-time AI feedback while you exercise</span>
+                            </div>
+                            <svg class="fc-mode-arrow" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                <polyline points="9 18 15 12 9 6"/>
+                            </svg>
+                        </button>
+                        <button class="fc-mode-btn fc-mode-btn--record" id="fc-mode-record">
+                            <div class="fc-mode-icon fc-mode-icon--record">
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                    <circle cx="12" cy="12" r="10"/>
+                                    <circle cx="12" cy="12" r="3" fill="currentColor" stroke="none"/>
+                                </svg>
+                            </div>
+                            <div class="fc-mode-info">
+                                <span class="fc-mode-title">Record &amp; Replay</span>
+                                <span class="fc-mode-desc">Save your set and review AI corrections after</span>
+                            </div>
+                            <svg class="fc-mode-arrow" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                <polyline points="9 18 15 12 9 6"/>
+                            </svg>
+                        </button>
+                    </div>
+
+                    <!-- Camera view — shown after mode selection -->
+                    <div class="form-check-video-wrap" id="fc-video-wrap" style="display:none">
+                        <video id="form-check-video" autoplay playsinline muted></video>
+                        <canvas id="form-check-canvas"></canvas>
+                        <div class="form-check-init" id="form-check-init">
+                            <div class="form-check-spinner"></div>
+                            <span>Starting camera…</span>
+                        </div>
+                    </div>
+                    <div class="form-check-feedback" id="form-check-feedback" style="display:none">
+                        <div class="fc-item fc-detecting">
+                            <span class="fc-dot"></span>
+                            <span>Detecting pose…</span>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Form Replay Panel -->
+                <div class="fc-replay-panel" id="fc-replay-panel">
+                    <div class="fc-replay-header">
+                        <div class="form-check-title">Form Review</div>
+                        <div class="fc-header-actions">
+                            <button class="fc-replay-download" id="fc-replay-download" title="Download recording">
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                    <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+                                    <polyline points="7 10 12 15 17 10"/>
+                                    <line x1="12" y1="15" x2="12" y2="3"/>
+                                </svg>
+                                Save
+                            </button>
+                            <button class="form-check-stop" id="fc-replay-close">Close</button>
+                        </div>
+                    </div>
+                    <div class="fc-replay-video-wrap">
+                        <video id="fc-replay-video" controls playsinline></video>
+                    </div>
+                    <div class="fc-replay-timeline" id="fc-replay-timeline"></div>
                 </div>
             </div>
 
