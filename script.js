@@ -11475,8 +11475,17 @@ Please try again with a different photo.`;
             }
 
             ['el-name', 'el-sets', 'el-reps', 'el-weight'].forEach(id => {
-                document.getElementById(id)?.addEventListener('keydown', e => {
+                const el = document.getElementById(id);
+                if (!el) return;
+                el.addEventListener('keydown', e => {
                     if (e.key === 'Enter') { e.preventDefault(); submitExerciseQuickAdd(); }
+                });
+                // Scroll card into view after keyboard opens (350ms = keyboard animation)
+                el.addEventListener('focus', () => {
+                    setTimeout(() => {
+                        document.getElementById('exercise-log-card')
+                            ?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                    }, 350);
                 });
             });
 

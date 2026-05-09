@@ -17923,6 +17923,11 @@ body.has-bottom-nav .screen.active {
     padding-bottom: calc(104px + env(safe-area-inset-bottom, 0px));
 }
 
+/* Extra room on the Train screen so exercise log inputs stay visible when keyboard opens */
+body.has-bottom-nav #screen-workout {
+    padding-bottom: calc(260px + env(safe-area-inset-bottom, 0px));
+}
+
 /* Lift coach FAB and panel above the bottom nav */
 body.has-bottom-nav .coach-fab {
     bottom: calc(94px + env(safe-area-inset-bottom, 0px));
