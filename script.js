@@ -721,14 +721,11 @@
             // Wait until all setup*() functions in init() have run before routing.
             await setupDonePromise;
 
-            // 1. Session state already loaded — restore last screen (or Results)
-            if (state.analysisResult) {
-                populateResults();
-                goToScreen(state.lastScreen || 3);
-                return;
-            }
-
-            // 2. Check server for scans — source of truth for which account owns data
+            // ALWAYS check the server first — the server is the single source of truth
+            // for whether this account has any scans. Local session state (state.analysisResult
+            // from localStorage) must NOT be trusted blindly: if the user cleared data on
+            // another device, the backend deleted all scans but the local session on this
+            // device still has the old analysisResult, causing it to show Results incorrectly.
             let serverScans = [];
             let scanFetchFailed = false;
             if (state.accessToken) {
@@ -737,9 +734,37 @@
                 }
             }
 
-            // 3. Check IndexedDB — only use if it has a snapshot NEWER than the latest
-            //    server scan. This prevents a stale phone-local snapshot (e.g. from before
-            //    a "Clear All Data" on another device) from overriding a freshly uploaded scan.
+            // If the server has no scans, wipe any stale local session and go to Upload.
+            // This is the correct response to a data-clear on any device.
+            if (serverScans.length === 0 && !scanFetchFailed) {
+                state.analysisResult = null;
+                state.imageData = null;
+                state.hasImage = false;
+                goToScreen(1);
+                return;
+            }
+
+            // If the fetch failed (network error) AND we have a local session, fall back
+            // to showing local data so the app still works offline.
+            if (scanFetchFailed && state.analysisResult) {
+                populateResults();
+                goToScreen(state.lastScreen || 3);
+                return;
+            }
+
+            // Server has scans — prefer the local session if it is at least as new as the
+            // server scan (avoids unnecessary round-trip re-render on normal same-device use).
+            if (serverScans.length > 0 && state.analysisResult) {
+                const serverDate = new Date(serverScans[0].date || 0).getTime();
+                const sessionDate = new Date(state.savedAt || 0).getTime();
+                if (sessionDate >= serverDate) {
+                    populateResults();
+                    goToScreen(state.lastScreen || 3);
+                    return;
+                }
+            }
+
+            // Check IndexedDB — only use if newer than the server scan
             if (serverScans.length > 0) {
                 try {
                     const snapshots = await getAllSnapshots();
@@ -760,12 +785,11 @@
                             goToScreen(state.lastScreen || 3);
                             return;
                         }
-                        // Server scan is newer — fall through to step 4 (server wins)
                     }
                 } catch (e) {}
             }
 
-            // 4. Use server scan — either no local snapshot exists, or server scan is newer
+            // Use server scan directly — server is newer than any local data
             if (serverScans.length > 0) {
                 const latest = serverScans[0];
                 state.analysisResult = latest.analysisResult;
@@ -785,7 +809,7 @@
                 return;
             }
 
-            // 5. Genuinely new user with no scans anywhere — go to Upload
+            // No scans anywhere and fetch failed — warn and go to Upload
             if (scanFetchFailed) showToast('Could not load your previous data. Please check your connection.', 'warning');
             goToScreen(1);
         }
@@ -1239,6 +1263,7 @@
                 state.fitnessGoal = sessionData.fitnessGoal;
                 state.experienceLevel = sessionData.experienceLevel || 'intermediate';
                 state.analysisResult = sessionData.analysisResult;
+                state.savedAt = sessionData.savedAt || null;
                 state.landmarks = sessionData.landmarks || null;
                 state.coachPersona = sessionData.coachPersona || 'encouraging';
                 // Restore last screen (screens 3-9 are valid post-login screens)
