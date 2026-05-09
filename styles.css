@@ -4424,6 +4424,36 @@
         }
 
         /* Start Routine Button */
+        .start-workout-btn {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 10px;
+            width: 100%;
+            padding: 16px;
+            background: var(--accent-primary);
+            color: #141211;
+            border: none;
+            border-radius: 14px;
+            font-size: 1rem;
+            font-weight: 700;
+            font-family: inherit;
+            cursor: pointer;
+            margin-bottom: 14px;
+            transition: all 0.2s ease;
+        }
+
+        .start-workout-btn:hover {
+            transform: translateY(-1px);
+            box-shadow: 0 6px 20px rgba(201, 169, 98, 0.4);
+        }
+
+        .start-workout-btn svg {
+            width: 18px;
+            height: 18px;
+            stroke: #141211;
+        }
+
         .start-routine-btn {
             display: flex;
             align-items: center;

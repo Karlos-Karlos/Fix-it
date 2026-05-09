@@ -4716,6 +4716,9 @@ Please try again with a different photo.`;
         }
 
         function setupWorkoutPlayer() {
+            // Start workout from main screen
+            document.getElementById('start-workout-direct-btn')?.addEventListener('click', openWorkoutPlayer);
+
             // Close button
             document.getElementById('player-close-btn')?.addEventListener('click', closeWorkoutPlayer);
 
