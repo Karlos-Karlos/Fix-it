@@ -4997,6 +4997,8 @@ Please try again with a different photo.`;
         function startFormCheck() {
             const panel = document.getElementById('form-check-panel');
             panel.classList.add('active');
+            const modal = document.getElementById('workout-player-modal');
+            if (modal) modal.style.overflow = 'hidden';
             document.getElementById('fc-mode-picker').style.display = 'flex';
             document.getElementById('fc-video-wrap').style.display = 'none';
             document.getElementById('form-check-feedback').style.display = 'none';
@@ -5134,6 +5136,8 @@ Please try again with a different photo.`;
 
         // Close form check — discards any recording, no replay
         function stopFormCheck() {
+            const modal = document.getElementById('workout-player-modal');
+            if (modal) modal.style.overflow = '';
             if (formCheckIsRecording && formCheckRecorder && formCheckRecorder.state !== 'inactive') {
                 formCheckIsRecording = false;
                 formCheckRecorder.onstop = null; // discard blob
