@@ -4368,13 +4368,11 @@ Please try again with a different photo.`;
 
             modal.classList.add('active');
             lockScroll();
-            document.querySelector('.coach-fab')?.classList.add('hidden-by-player');
         }
 
         function closeWorkoutPlayer() {
             stopFormCheck();
             closeFormReplay();
-            document.querySelector('.coach-fab')?.classList.remove('hidden-by-player');
             const modal = document.getElementById('workout-player-modal');
             modal.classList.remove('active');
             unlockScroll();
@@ -6092,7 +6090,6 @@ Please try again with a different photo.`;
                         setPhase('get-ready', 5);
                         document.getElementById('workout-player-modal').classList.add('active');
                         lockScroll();
-                        document.querySelector('.coach-fab')?.classList.add('hidden-by-player');
                     }, 300);
                 }
             });
