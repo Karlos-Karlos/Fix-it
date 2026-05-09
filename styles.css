@@ -6143,30 +6143,29 @@
         }
         .fc-item.fc-detecting .fc-dot { background: var(--text-muted); }
 
-        /* ── Mode picker — bottom sheet overlay ── */
+        /* ── Mode picker — centered overlay ── */
         .fc-mode-picker {
             display: flex;
-            align-items: flex-end;
+            align-items: center;
             justify-content: center;
             flex: 1;
-            padding: 0 0 calc(96px + env(safe-area-inset-bottom, 0px)) 0;
+            padding: 20px;
         }
 
         .fc-mode-sheet {
             width: 100%;
-            max-width: 480px;
+            max-width: 360px;
             background: linear-gradient(160deg, #1e1b18 0%, #161311 100%);
             border: 1px solid rgba(255, 255, 255, 0.07);
             border-radius: 24px;
-            padding: 14px 20px 24px;
-            animation: fcSheetUp 0.38s cubic-bezier(0.22, 1, 0.36, 1);
-            box-shadow: 0 -12px 48px rgba(0, 0, 0, 0.5);
-            margin: 0 12px;
+            padding: 24px 20px 28px;
+            animation: fcSheetUp 0.35s cubic-bezier(0.22, 1, 0.36, 1);
+            box-shadow: 0 20px 60px rgba(0, 0, 0, 0.6);
         }
 
         @keyframes fcSheetUp {
-            from { transform: translateY(60px); opacity: 0; }
-            to   { transform: translateY(0);   opacity: 1; }
+            from { transform: scale(0.93); opacity: 0; }
+            to   { transform: scale(1);   opacity: 1; }
         }
 
         .fc-sheet-handle {
