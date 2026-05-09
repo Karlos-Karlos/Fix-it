@@ -1249,13 +1249,15 @@
                     }
                 }
 
-                // 2. Clear all fixit localStorage keys for this device (keep auth tokens + theme)
+                // 2. Clear all localStorage keys for this device (keep auth tokens + theme)
                 // Keys are scoped by device ID via userKey(), NOT by user UUID.
+                // Prefixes used: 'fixit-' (most keys) and 'exlog-' (exercise log per-date keys).
                 const deviceId = _getDeviceId();
                 const keysToRemove = [];
                 for (let i = 0; i < localStorage.length; i++) {
                     const key = localStorage.key(i);
-                    if (!key || !key.startsWith('fixit-')) continue;
+                    if (!key) continue;
+                    // Keep auth tokens, device ID, and theme
                     if (key === 'fixit-access-token' || key === 'fixit-refresh-token') continue;
                     if (key === 'fixit-device-id') continue;
                     if (key.startsWith('fixit-theme')) continue;
