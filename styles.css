@@ -17902,8 +17902,24 @@
 .bnav-item:last-child  { margin-right: 4px; }
 
 /* Screen padding to avoid content hiding behind the nav */
+body.has-bottom-nav .app-container {
+    padding-bottom: calc(100px + env(safe-area-inset-bottom, 0px));
+}
+
 body.has-bottom-nav .screen.active {
-    padding-bottom: 96px;
+    padding-bottom: calc(100px + env(safe-area-inset-bottom, 0px));
+}
+
+/* Per-screen inner scroll containers — ensure last item is never hidden under nav */
+body.has-bottom-nav #screen-upload .s1-grid,
+body.has-bottom-nav #screen-results,
+body.has-bottom-nav #screen-breakdown .breakdown-content,
+body.has-bottom-nav #screen-simulator .simulator-content,
+body.has-bottom-nav #screen-workout .workout-content,
+body.has-bottom-nav #screen-nutrition,
+body.has-bottom-nav #screen-progress,
+body.has-bottom-nav #screen-wearable {
+    padding-bottom: calc(100px + env(safe-area-inset-bottom, 0px));
 }
 
 /* Lift coach FAB and panel above the bottom nav */
