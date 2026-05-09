@@ -15755,13 +15755,16 @@ Please try again with a different photo.`;
             let uploaded = 0;
             for (const s of unsynced) {
                 try {
+                    const syncReadings = Array.isArray(s.hr_readings)
+                        ? s.hr_readings.map(r => (typeof r === 'object' ? r.bpm : r)).filter(Boolean)
+                        : undefined;
                     await apiFetch('/wearable/session', {
                         method: 'POST',
                         body: JSON.stringify({
                             steps: s.steps || 0,
                             calories: s.calories || null,
                             hr_avg: s.hr_avg || null,
-                            hr_readings: s.hr_readings || undefined,
+                            hr_readings: syncReadings && syncReadings.length > 0 ? syncReadings : undefined,
                             active_secs: s.active_secs || s.activeSecs || 0,
                             session_date: s.date
                         })
@@ -16085,11 +16088,16 @@ Please try again with a different photo.`;
             const { steps, calories, hr, hrReadings, activeSecs } = wearableState;
             if (steps === 0 && !hr) return;
 
+            // hr_readings are stored as {time,bpm} objects internally; backend expects plain numbers
+            const hrReadingsNums = hrReadings.length > 0
+                ? hrReadings.map(r => (typeof r === 'object' ? r.bpm : r)).filter(Boolean)
+                : undefined;
+
             const sessionData = {
                 steps,
                 calories,
                 hr_avg: hr || null,
-                hr_readings: hrReadings.length > 0 ? hrReadings : undefined,
+                hr_readings: hrReadingsNums,
                 active_secs: activeSecs,
             };
 
@@ -16110,6 +16118,7 @@ Please try again with a different photo.`;
             const sessions = JSON.parse(localStorage.getItem(key) || '[]');
             sessions.unshift({
                 ...sessionData,
+                hr_readings: hrReadings.length > 0 ? hrReadings : undefined, // keep full objects in localStorage
                 date: new Date().toISOString().split('T')[0],
                 savedAt: Date.now(),
                 synced: saved
@@ -16120,12 +16129,13 @@ Please try again with a different photo.`;
             document.getElementById('wo-save-btn').style.display = 'none';
             const toast = document.getElementById('wo-saved-msg');
             toast.textContent = saved
-                ? 'Saved! Check the Wearables tab on your computer.'
+                ? 'Saved!'
                 : 'Saved locally — will sync next time you open this page logged in.';
             toast.style.display = 'block';
             setTimeout(() => { toast.style.display = 'none'; }, 5000);
 
             _woResetSession();
+            _loadWearableData();
         }
 
         function _woResetSession() {
