@@ -1249,19 +1249,18 @@
                     }
                 }
 
-                // 2. Clear all fixit localStorage keys for this user (keep auth tokens + theme)
-                const uid = state.user && state.user.id;
+                // 2. Clear all fixit localStorage keys for this device (keep auth tokens + theme)
+                // Keys are scoped by device ID via userKey(), NOT by user UUID.
+                const deviceId = _getDeviceId();
                 const keysToRemove = [];
                 for (let i = 0; i < localStorage.length; i++) {
                     const key = localStorage.key(i);
                     if (!key || !key.startsWith('fixit-')) continue;
                     if (key === 'fixit-access-token' || key === 'fixit-refresh-token') continue;
+                    if (key === 'fixit-device-id') continue;
                     if (key.startsWith('fixit-theme')) continue;
-                    if (uid) {
-                        if (key.endsWith('-' + uid)) keysToRemove.push(key);
-                    } else {
-                        keysToRemove.push(key);
-                    }
+                    // All userKey() entries end with '-{deviceId}'
+                    if (key.endsWith('-' + deviceId)) keysToRemove.push(key);
                 }
                 keysToRemove.forEach(key => localStorage.removeItem(key));
 
