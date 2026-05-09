@@ -134,7 +134,7 @@ router.get('/goal-weight', async (req, res, next) => {
 router.post('/weight-log', async (req, res, next) => {
   try {
     const { weight_kg, log_date } = req.body;
-    if (!weight_kg || weight_kg < 30 || weight_kg > 300) throw appError(ErrorCodes.VALIDATION_ERROR, 'weight_kg must be between 30 and 300');
+    if (!weight_kg || weight_kg <= 0 || weight_kg > 600) throw appError(ErrorCodes.VALIDATION_ERROR, 'weight_kg must be greater than 0');
     const dateVal = log_date || new Date().toISOString().split('T')[0];
 
     const result = await db.query(
@@ -213,7 +213,7 @@ router.post('/lifts', async (req, res, next) => {
   try {
     const { exercise_name, weight_kg, reps, e1rm, log_date } = req.body;
     if (!exercise_name || exercise_name.length > 100) throw appError(ErrorCodes.VALIDATION_ERROR, 'exercise_name required and must be ≤100 characters');
-    if (!weight_kg || weight_kg < 30 || weight_kg > 300) throw appError(ErrorCodes.VALIDATION_ERROR, 'weight_kg must be between 30 and 300');
+    if (!weight_kg || weight_kg <= 0 || weight_kg > 600) throw appError(ErrorCodes.VALIDATION_ERROR, 'weight_kg must be greater than 0');
     if (!reps || reps <= 0) throw appError(ErrorCodes.VALIDATION_ERROR, 'reps required');
     const dateVal = log_date || new Date().toISOString().split('T')[0];
 

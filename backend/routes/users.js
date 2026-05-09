@@ -147,6 +147,19 @@ router.get('/me/gamification', async (req, res, next) => {
   }
 });
 
+// POST /me/gamification/xp — award XP for client-side actions not tracked server-side
+router.post('/me/gamification/xp', async (req, res, next) => {
+  try {
+    const amount = parseInt(req.body.amount);
+    if (!amount || amount <= 0 || amount > 500) return res.json({ ok: true }); // ignore invalid
+    await db.query(
+      'UPDATE user_gamification SET total_xp = total_xp + $1 WHERE user_id = $2',
+      [amount, req.user.id]
+    );
+    res.json({ ok: true });
+  } catch (err) { next(err); }
+});
+
 // DELETE /me/data — wipe all user data but keep the account profile
 router.delete('/me/data', async (req, res, next) => {
   const uid = req.user.id;

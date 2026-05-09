@@ -204,25 +204,29 @@
             } catch (_) {}
 
             try {
-                // Hydration history
+                // Hydration history — take max of local vs server per day
                 const hydRes = await apiFetch('/tracking/hydration/history?days=30');
                 if (hydRes.ok) {
                     const rows = await hydRes.json();
                     rows.forEach(r => {
                         const k = userKey('fixit-water-' + r.date);
-                        if (!localStorage.getItem(k)) localStorage.setItem(k, String(r.glasses_drunk));
+                        const local = parseInt(localStorage.getItem(k) || '0');
+                        const server = parseInt(r.glasses_drunk || 0);
+                        localStorage.setItem(k, String(Math.max(local, server)));
                     });
                 }
             } catch (_) {}
 
             try {
-                // Goal weight
+                // Goal weight — server is source of truth; always overwrite local
                 const gwRes = await apiFetch('/tracking/goal-weight');
                 if (gwRes.ok) {
                     const row = await gwRes.json();
                     if (row && row.goal_kg) {
-                        const existing = loadGoalData();
-                        if (!existing) {
+                        const local = loadGoalData();
+                        const serverSetAt = new Date(row.set_at || 0).getTime();
+                        const localSetAt  = new Date((local && local.setAt) || 0).getTime();
+                        if (!local || serverSetAt >= localSetAt) {
                             localStorage.setItem(userKey('fixit-goal-weight'), JSON.stringify({
                                 goal: parseFloat(row.goal_kg),
                                 start: row.start_kg ? parseFloat(row.start_kg) : null,
@@ -305,6 +309,15 @@
                         });
                         merged.sort((a, b) => b.date.localeCompare(a.date));
                         localStorage.setItem(userKey(WORKOUT_LOG_KEY), JSON.stringify(merged));
+
+                        // Keep last-workout-day in sync so streak continues correctly on any device
+                        if (merged.length > 0) {
+                            const latestDate = (merged[0].date || '').split('T')[0];
+                            const localLast  = localStorage.getItem(userKey('fixit-last-workout-day')) || '';
+                            if (latestDate && latestDate > localLast) {
+                                localStorage.setItem(userKey('fixit-last-workout-day'), latestDate);
+                            }
+                        }
                     }
                 }
             } catch (_) {}
@@ -497,6 +510,33 @@
                         });
                         localStorage.setItem(userKey('fixit-achievements'), JSON.stringify(local));
                     }
+                }
+            } catch (_) {}
+
+            try {
+                // Weekly workout plan — restore latest saved plan on fresh devices
+                const plansRes = await apiFetch('/workouts/plans?limit=1');
+                if (plansRes.ok) {
+                    const data = await plansRes.json();
+                    const rows = data.data || data.rows || data || [];
+                    const latest = Array.isArray(rows) ? rows[0] : null;
+                    if (latest && latest.plan_data) {
+                        const local = localStorage.getItem(userKey('fixit-weekly-plan'));
+                        if (!local) {
+                            localStorage.setItem(userKey('fixit-weekly-plan'), JSON.stringify(latest.plan_data));
+                        }
+                    }
+                }
+            } catch (_) {}
+
+            try {
+                // Seed fixit-week-challenges-done from current progress so that renderChallenges()
+                // never awards XP that was already earned on another device
+                const challenges = getWeeklyChallenges();
+                const doneSoFar = challenges.filter(c => c.done).length;
+                const prevDone = parseInt(localStorage.getItem(userKey('fixit-week-challenges-done')) || '0');
+                if (doneSoFar > prevDone) {
+                    localStorage.setItem(userKey('fixit-week-challenges-done'), doneSoFar);
                 }
             } catch (_) {}
 
@@ -10910,6 +10950,11 @@ Please try again with a different photo.`;
         function awardXP(amount, source) {
             const current = parseInt(localStorage.getItem(userKey('fixit-total-xp')) || '0');
             localStorage.setItem(userKey('fixit-total-xp'), current + amount);
+            // Sync to backend for sources not already handled server-side
+            // (analysis and workout XP are awarded by the backend during those saves)
+            if (source !== 'analysis' && source !== 'workout') {
+                _apiSave('/users/me/gamification/xp', { amount });
+            }
         }
 
         function getLevel(xp) {
@@ -12109,7 +12154,7 @@ Please try again with a different photo.`;
 
         // ========== ONBOARDING FLOW ==========
         function showOnboardingIfNeeded() {
-            const seen = localStorage.getItem('fixit-onboarding-done');
+            const seen = localStorage.getItem(userKey('fixit-onboarding-done'));
             if (seen) return;
             const overlay = document.getElementById('onboarding-overlay');
             if (!overlay) return;
@@ -12131,7 +12176,7 @@ Please try again with a different photo.`;
 
             function dismiss() {
                 overlay.classList.remove('active');
-                localStorage.setItem('fixit-onboarding-done', '1');
+                localStorage.setItem(userKey('fixit-onboarding-done'), '1');
             }
 
             nextBtn.addEventListener('click', () => {
