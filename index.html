@@ -24,7 +24,7 @@
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="styles.css?v=100">
+    <link rel="stylesheet" href="styles.css?v=101">
     <link rel="manifest" href="manifest.json">
     <!-- Chart.js for Progress Charts -->
     <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
@@ -1915,9 +1915,12 @@
                             <h2>Today's Exercise Log</h2>
                             <span class="food-log-date" id="exercise-log-date"></span>
                         </div>
-                        <div class="food-log-cal-summary">
-                            <span class="food-log-cal-eaten" id="exercise-log-total-sets">0</span>
-                            <span class="food-log-cal-unit">sets</span>
+                        <div class="el-inline-stats">
+                            <span class="el-inline-stat"><span id="el-total-sets">0</span> sets</span>
+                            <span class="el-inline-sep">·</span>
+                            <span class="el-inline-stat"><span id="el-total-reps">0</span> reps</span>
+                            <span class="el-inline-sep">·</span>
+                            <span class="el-inline-stat"><span id="el-total-volume">0</span> kg</span>
                         </div>
                     </div>
                     <div class="food-log-quick-add" id="exercise-quick-add">
@@ -1934,11 +1937,6 @@
                     </div>
                     <div class="food-log-entries" id="exercise-log-entries">
                         <div class="food-log-empty">Log your first exercise above.</div>
-                    </div>
-                    <div class="food-log-totals" id="exercise-log-totals">
-                        <div class="food-log-total-pill protein"><span class="ftotal-val" id="el-total-sets">0</span><span class="ftotal-lbl">Sets</span></div>
-                        <div class="food-log-total-pill carbs"><span class="ftotal-val" id="el-total-reps">0</span><span class="ftotal-lbl">Reps</span></div>
-                        <div class="food-log-total-pill fats"><span class="ftotal-val" id="el-total-volume">0</span><span class="ftotal-lbl">Vol (kg)</span></div>
                     </div>
                 </div>
 

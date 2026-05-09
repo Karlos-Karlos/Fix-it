@@ -11594,11 +11594,6 @@ Please try again with a different photo.`;
                     </button>
                 </div>`;
             }).join('');
-
-            // Scroll card into view so the totals section is never hidden under the nav
-            setTimeout(() => {
-                document.getElementById('exercise-log-card')?.scrollIntoView({ behavior: 'smooth', block: 'end' });
-            }, 80);
         }
 
         function updateExerciseTotals(entries) {
@@ -11606,8 +11601,6 @@ Please try again with a different photo.`;
             const totalReps = entries.reduce((s, e) => s + (parseInt(e.sets) || 0) * (parseInt(e.reps) || 0), 0);
             const totalVol  = entries.reduce((s, e) => s + (parseInt(e.sets) || 0) * (parseInt(e.reps) || 0) * (parseFloat(e.weight) || 0), 0);
 
-            const hdrEl = document.getElementById('exercise-log-total-sets');
-            if (hdrEl) hdrEl.textContent = totalSets;
             const sEl = document.getElementById('el-total-sets');
             const rEl = document.getElementById('el-total-reps');
             const vEl = document.getElementById('el-total-volume');

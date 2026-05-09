@@ -15130,7 +15130,22 @@
 
 /* ========== DAILY FOOD LOG ========== */
 .food-log-card { display: flex; flex-direction: column; gap: 14px; }
-#exercise-log-card { scroll-margin-bottom: calc(110px + env(safe-area-inset-bottom, 0px)); }
+.el-inline-stats {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    flex-shrink: 0;
+}
+.el-inline-stat {
+    font-size: 0.72rem;
+    font-weight: 600;
+    color: var(--accent-primary);
+    white-space: nowrap;
+}
+.el-inline-sep {
+    font-size: 0.65rem;
+    color: var(--text-muted);
+}
 
 /* Header */
 .food-log-header {
