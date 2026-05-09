@@ -15130,6 +15130,7 @@
 
 /* ========== DAILY FOOD LOG ========== */
 .food-log-card { display: flex; flex-direction: column; gap: 14px; }
+#exercise-log-card { scroll-margin-bottom: calc(110px + env(safe-area-inset-bottom, 0px)); }
 
 /* Header */
 .food-log-header {
@@ -15376,7 +15377,7 @@
     display: flex;
     flex-direction: column;
     gap: 0;
-    max-height: 260px;
+    max-height: 180px;
     overflow-y: auto;
     border-radius: 10px;
     border: 1px solid var(--border-subtle);

@@ -11594,6 +11594,11 @@ Please try again with a different photo.`;
                     </button>
                 </div>`;
             }).join('');
+
+            // Scroll card into view so the totals section is never hidden under the nav
+            setTimeout(() => {
+                document.getElementById('exercise-log-card')?.scrollIntoView({ behavior: 'smooth', block: 'end' });
+            }, 80);
         }
 
         function updateExerciseTotals(entries) {
