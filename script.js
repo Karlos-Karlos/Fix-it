@@ -4261,6 +4261,25 @@ Please try again with a different photo.`;
             }
         }
 
+        // ========== SCROLL LOCK (iOS-safe) ==========
+        let _scrollLockY = 0;
+        function lockScroll() {
+            _scrollLockY = window.scrollY || window.pageYOffset;
+            document.body.style.position = 'fixed';
+            document.body.style.top = `-${_scrollLockY}px`;
+            document.body.style.left = '0';
+            document.body.style.right = '0';
+            document.body.style.overflow = 'hidden';
+        }
+        function unlockScroll() {
+            document.body.style.position = '';
+            document.body.style.top = '';
+            document.body.style.left = '';
+            document.body.style.right = '';
+            document.body.style.overflow = '';
+            window.scrollTo(0, _scrollLockY);
+        }
+
         // ========== WORKOUT PLAYER ==========
         let workoutPlayerState = {
             isPlaying: false,
@@ -4348,7 +4367,7 @@ Please try again with a different photo.`;
             setPhase('get-ready', 5);
 
             modal.classList.add('active');
-            document.body.style.overflow = 'hidden';
+            lockScroll();
         }
 
         function closeWorkoutPlayer() {
@@ -4356,7 +4375,7 @@ Please try again with a different photo.`;
             closeFormReplay();
             const modal = document.getElementById('workout-player-modal');
             modal.classList.remove('active');
-            document.body.style.overflow = '';
+            unlockScroll();
 
             // Stop timer
             if (workoutPlayerState.timerInterval) {
@@ -6070,7 +6089,7 @@ Please try again with a different photo.`;
                         updateWorkoutPlayerUI();
                         setPhase('get-ready', 5);
                         document.getElementById('workout-player-modal').classList.add('active');
-                        document.body.style.overflow = 'hidden';
+                        lockScroll();
                     }, 300);
                 }
             });
