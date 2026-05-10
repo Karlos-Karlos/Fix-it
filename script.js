@@ -1266,8 +1266,9 @@
                 state.savedAt = sessionData.savedAt || null;
                 state.landmarks = sessionData.landmarks || null;
                 state.coachPersona = sessionData.coachPersona || 'encouraging';
-                // Restore last screen (screens 3-9 are valid post-login screens)
-                if (sessionData.currentScreen >= 3 && sessionData.currentScreen <= 9) {
+                // Restore last screen (screens 3-8 only; screen 9 is the wearable overlay
+                // and should not be restored on login — user lands on Results instead)
+                if (sessionData.currentScreen >= 3 && sessionData.currentScreen <= 8) {
                     state.lastScreen = sessionData.currentScreen;
                 }
 
