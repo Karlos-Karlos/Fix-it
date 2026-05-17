@@ -83,7 +83,7 @@ const updateProfileSchema = z.object({
 const updatePreferencesSchema = z.object({
   theme: z.enum(['dark', 'light']).optional(),
   coach_persona: z.enum(['encouraging', 'drill_sergeant', 'scientific', 'casual', 'structured', 'educational', 'humorous']).optional(),
-  step_goal: z.number().int().min(500).max(100000).optional(),
+  step_goal: z.number().int().min(100).max(100000).optional(),
   weight_unit: z.enum(['kg', 'lbs']).optional(),
   height_unit: z.enum(['cm', 'ft']).optional(),
 });

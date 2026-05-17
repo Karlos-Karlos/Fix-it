@@ -16499,6 +16499,7 @@ Please try again with a different photo.`;
                     const raw = parseFloat(goalInput.value);
                     if (!raw || raw <= 0) return;
                     const steps = _goalType === 'km' ? Math.round(raw / 0.00076) : Math.round(raw);
+                    if (steps < 100) { showToast('Goal must be at least 100 steps', 'error'); return; }
                     localStorage.setItem(userKey('fixit-step-goal'), steps);
                     _apiSave('/users/me/preferences', { step_goal: steps }, 'PUT');
                     _updateGoalDisplay();
