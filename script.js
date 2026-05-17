@@ -11128,8 +11128,7 @@ Please try again with a different photo.`;
             const existing = document.getElementById('achievement-history-modal');
             if (existing) existing.remove();
 
-            // Build sorted list of unlocked achievements (most recent first)
-            const unlockedList = achievements
+            const allUnlocked = achievements
                 .filter(a => unlocked.includes(a.id))
                 .map(a => ({ ...a, date: dates[a.id] || null }))
                 .sort((a, b) => {
@@ -11148,24 +11147,69 @@ Please try again with a different photo.`;
                         <span>Achievement History</span>
                         <button class="achievement-history-close" id="ach-hist-close">&times;</button>
                     </div>
-                    <div class="achievement-history-list">
-                        ${unlockedList.length === 0
-                            ? '<p class="achievement-history-empty">No achievements unlocked yet.</p>'
-                            : unlockedList.map(a => `
-                                <div class="achievement-history-item">
-                                    <span class="ach-hist-icon">${a.icon}</span>
-                                    <div class="ach-hist-info">
-                                        <div class="ach-hist-title">${escapeHtml(a.title)}</div>
-                                        <div class="ach-hist-cond">${escapeHtml(a.condition)}</div>
-                                    </div>
-                                    <div class="ach-hist-date">${a.date ? escapeHtml(_fmtAchievementDate(a.date)) : '—'}</div>
-                                </div>`).join('')
-                        }
+                    <div class="ach-hist-tabs">
+                        <button class="ach-hist-tab ach-hist-tab-active" data-period="daily">Daily</button>
+                        <button class="ach-hist-tab" data-period="weekly">Weekly</button>
+                        <button class="ach-hist-tab" data-period="monthly">Monthly</button>
+                        <button class="ach-hist-tab" data-period="all">All</button>
                     </div>
+                    <div class="achievement-history-list" id="ach-hist-list"></div>
                 </div>`;
 
             document.body.appendChild(modal);
             requestAnimationFrame(() => modal.classList.add('active'));
+
+            function _filterByPeriod(period) {
+                const now = new Date();
+                const todayStr = now.toISOString().split('T')[0];
+                const mon = new Date(now);
+                const dow = now.getDay() === 0 ? 6 : now.getDay() - 1;
+                mon.setDate(now.getDate() - dow);
+                const monStr = mon.toISOString().split('T')[0];
+                const monthStr = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
+
+                return allUnlocked.filter(a => {
+                    if (!a.date) return period === 'all';
+                    const d = a.date.split('T')[0];
+                    if (period === 'daily')   return d === todayStr;
+                    if (period === 'weekly')  return d >= monStr;
+                    if (period === 'monthly') return d.startsWith(monthStr);
+                    return true;
+                });
+            }
+
+            function _renderHistoryList(period) {
+                const list = document.getElementById('ach-hist-list');
+                if (!list) return;
+                const items = _filterByPeriod(period);
+                const emptyMessages = {
+                    daily:   'No achievements unlocked today.',
+                    weekly:  'No achievements unlocked this week.',
+                    monthly: 'No achievements unlocked this month.',
+                    all:     'No achievements unlocked yet.',
+                };
+                list.innerHTML = items.length === 0
+                    ? `<p class="achievement-history-empty">${emptyMessages[period]}</p>`
+                    : items.map(a => `
+                        <div class="achievement-history-item">
+                            <span class="ach-hist-icon">${a.icon}</span>
+                            <div class="ach-hist-info">
+                                <div class="ach-hist-title">${escapeHtml(a.title)}</div>
+                                <div class="ach-hist-cond">${escapeHtml(a.condition)}</div>
+                            </div>
+                            <div class="ach-hist-date">${a.date ? escapeHtml(_fmtAchievementDate(a.date)) : '—'}</div>
+                        </div>`).join('');
+            }
+
+            _renderHistoryList('daily');
+
+            modal.querySelectorAll('.ach-hist-tab').forEach(tab => {
+                tab.addEventListener('click', () => {
+                    modal.querySelectorAll('.ach-hist-tab').forEach(t => t.classList.remove('ach-hist-tab-active'));
+                    tab.classList.add('ach-hist-tab-active');
+                    _renderHistoryList(tab.dataset.period);
+                });
+            });
 
             const close = () => { modal.classList.remove('active'); setTimeout(() => modal.remove(), 300); };
             document.getElementById('ach-hist-close').addEventListener('click', close);

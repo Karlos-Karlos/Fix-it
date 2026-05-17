@@ -10365,6 +10365,31 @@
         }
         .achievement-history-overlay.active .achievement-history-panel { transform: scale(1) translateY(0); }
 
+        .ach-hist-tabs {
+            display: flex;
+            gap: 6px;
+            padding: 10px 16px 0;
+            flex-shrink: 0;
+        }
+        .ach-hist-tab {
+            flex: 1;
+            padding: 7px 4px;
+            font-size: 12px;
+            font-weight: 600;
+            border: 1px solid var(--border-color);
+            border-radius: 20px;
+            background: none;
+            color: var(--text-muted);
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+        .ach-hist-tab:hover { color: var(--text-primary); }
+        .ach-hist-tab.ach-hist-tab-active {
+            background: rgba(var(--accent-primary-rgb), 0.15);
+            border-color: rgba(var(--accent-primary-rgb), 0.5);
+            color: var(--accent-primary);
+        }
+
         .achievement-history-header {
             display: flex;
             align-items: center;
