@@ -3903,9 +3903,9 @@
                     <div class="wr-step-chart-head">
                         <h3 class="wr-sessions-title">Step History</h3>
                         <div class="wr-period-btns">
-                            <button class="wr-period-btn wr-period-active" data-days="7">7D</button>
-                            <button class="wr-period-btn" data-days="14">14D</button>
-                            <button class="wr-period-btn" data-days="30">30D</button>
+                            <button class="wr-period-btn wr-period-active" data-period="daily">Daily</button>
+                            <button class="wr-period-btn" data-period="weekly">Weekly</button>
+                            <button class="wr-period-btn" data-period="monthly">Monthly</button>
                         </div>
                     </div>
                     <div class="wr-step-chart-wrap">
@@ -3925,10 +3925,9 @@
                 <!-- Sessions -->
                 <div class="wr-sessions">
                     <div class="wr-sessions-head">
-                        <h3 class="wr-sessions-title">Recent Sessions</h3>
-                        <span class="wr-sessions-sub">Last 14 recorded</span>
+                        <h3 class="wr-sessions-title" id="wr-sessions-title">Daily Sessions</h3>
                     </div>
-                    <div class="wr-sessions-cols-hdr">
+                    <div class="wr-sessions-cols-hdr" id="wr-sessions-cols-hdr">
                         <span>Date</span><span>Steps</span><span>Distance</span><span>Calories</span><span>Active</span><span>Heart Rate</span>
                     </div>
                     <div id="wearable-sessions-list" class="wr-sessions-body">

@@ -16532,6 +16532,27 @@ Please try again with a different photo.`;
                 const refreshBtn = document.getElementById('wearable-refresh-btn');
                 if (refreshBtn) refreshBtn.addEventListener('click', _loadWearableData);
 
+                // ── Period tabs (Daily / Weekly / Monthly) ──────────────────────
+                const _periodHeaders = {
+                    daily:   { title: 'Daily Sessions',  cols: ['Date','Steps','Distance','Calories','Active','Heart Rate'] },
+                    weekly:  { title: 'Weekly Summary',  cols: ['Week','Total Steps','Distance','Active Days','Goal Days','Best Day'] },
+                    monthly: { title: 'Monthly Summary', cols: ['Month','Total Steps','Distance','Active Days','Goal Days','Daily Avg'] },
+                };
+                document.querySelectorAll('.wr-period-btn').forEach(btn => {
+                    btn.addEventListener('click', () => {
+                        document.querySelectorAll('.wr-period-btn').forEach(b => b.classList.remove('wr-period-active'));
+                        btn.classList.add('wr-period-active');
+                        _wrPeriod = btn.dataset.period || 'daily';
+                        const h = _periodHeaders[_wrPeriod];
+                        const titleEl = document.getElementById('wr-sessions-title');
+                        const colsEl  = document.getElementById('wr-sessions-cols-hdr');
+                        if (titleEl) titleEl.textContent = h.title;
+                        if (colsEl)  colsEl.innerHTML = h.cols.map(c => `<span>${c}</span>`).join('');
+                        _renderWearableStepChart(_wrAllSessions, _wrPeriod);
+                        _renderWearableSessionsList(_wrAllSessions, _wrPeriod);
+                    });
+                });
+
                 // â”€â”€ Daily goal editor â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
                 const editBtn    = document.getElementById('wr-goal-edit-btn');
                 const editor     = document.getElementById('wr-goal-editor');
@@ -16827,55 +16848,84 @@ Please try again with a different photo.`;
 
         let _wrStepChartInstance = null;
         let _wrAllSessions = [];
-        let _wrChartDays = 7;
+        let _wrChartDays = 7; // kept for legacy callers
+        let _wrPeriod = 'daily';
 
-        function _renderWearableStepChart(sessions, days) {
+        function _buildDayMap(sessions) {
+            const m = {};
+            (sessions || []).forEach(s => {
+                const d = (s.date || s.session_date || '').toString().split('T')[0];
+                if (!d) return;
+                if (!m[d]) m[d] = { steps: 0, calories: 0, activeSecs: 0 };
+                m[d].steps     += Number(s.steps    || 0);
+                m[d].calories  += Number(s.calories || 0);
+                m[d].activeSecs += Number(s.activeSecs || s.active_secs || 0);
+                if (s.hr || s.hr_avg) m[d].hr = s.hr || s.hr_avg;
+            });
+            return m;
+        }
+
+        function _renderWearableStepChart(sessions, period) {
             _wrAllSessions = sessions || [];
-            _wrChartDays = days || 7;
+            _wrPeriod = period || 'daily';
 
             const canvas = document.getElementById('wr-steps-chart');
             if (!canvas) return;
 
             const GOAL = parseInt(localStorage.getItem(userKey('fixit-step-goal'))) || 10000;
             const today = new Date();
+            const byDate = _buildDayMap(_wrAllSessions);
 
-            // Build a map of date → aggregated totals (sum across multiple sessions per day)
-            const byDate = {};
-            _wrAllSessions.forEach(s => {
-                const d = (s.date || s.session_date || '').toString().split('T')[0];
-                if (!d) return;
-                if (!byDate[d]) byDate[d] = { steps: 0, calories: 0, activeSecs: 0 };
-                byDate[d].steps     += Number(s.steps    || 0);
-                byDate[d].calories  += Number(s.calories || 0);
-                byDate[d].activeSecs += Number(s.activeSecs || s.active_secs || 0);
-                if (s.hr || s.hr_avg) byDate[d].hr = s.hr || s.hr_avg;
-            });
+            const labels = [], stepsData = [], colors = [], tooltipKeys = [];
 
-            // Build last N days oldest → newest
-            const labels = [], stepsData = [], colors = [];
-            for (let i = _wrChartDays - 1; i >= 0; i--) {
-                const d = new Date(today);
-                d.setDate(today.getDate() - i);
-                const key = d.toISOString().split('T')[0];
-                const label = _wrChartDays <= 7
-                    ? d.toLocaleDateString('en-US', { weekday: 'short' })
-                    : d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
-                labels.push(label);
-                const s = byDate[key];
-                const steps = s ? Number(s.steps || 0) : 0;
-                stepsData.push(steps);
-                colors.push(steps >= GOAL ? 'rgba(70,184,70,0.85)' : steps > 0 ? 'rgba(77,166,255,0.75)' : 'rgba(255,255,255,0.06)');
+            if (_wrPeriod === 'daily') {
+                // Last 7 days
+                for (let i = 6; i >= 0; i--) {
+                    const d = new Date(today); d.setDate(today.getDate() - i);
+                    const key = d.toISOString().split('T')[0];
+                    labels.push(d.toLocaleDateString('en-US', { weekday: 'short' }));
+                    const steps = byDate[key]?.steps || 0;
+                    stepsData.push(steps);
+                    colors.push(steps >= GOAL ? 'rgba(70,184,70,0.85)' : steps > 0 ? 'rgba(77,166,255,0.75)' : 'rgba(255,255,255,0.06)');
+                    tooltipKeys.push(key);
+                }
+            } else if (_wrPeriod === 'weekly') {
+                // Last 8 weeks — group Mon→Sun
+                for (let w = 7; w >= 0; w--) {
+                    const mon = new Date(today);
+                    const dow = today.getDay() === 0 ? 6 : today.getDay() - 1;
+                    mon.setDate(today.getDate() - dow - w * 7);
+                    const sun = new Date(mon); sun.setDate(mon.getDate() + 6);
+                    let total = 0;
+                    for (let i = 0; i < 7; i++) {
+                        const d = new Date(mon); d.setDate(mon.getDate() + i);
+                        total += byDate[d.toISOString().split('T')[0]]?.steps || 0;
+                    }
+                    const weekGoal = GOAL * 7;
+                    labels.push(mon.toLocaleDateString('en-US', { month: 'short', day: 'numeric' }));
+                    stepsData.push(total);
+                    colors.push(total >= weekGoal ? 'rgba(70,184,70,0.85)' : total > 0 ? 'rgba(77,166,255,0.75)' : 'rgba(255,255,255,0.06)');
+                    tooltipKeys.push(`${mon.toISOString().split('T')[0]}|${sun.toISOString().split('T')[0]}`);
+                }
+            } else {
+                // Monthly — last 6 months
+                for (let m = 5; m >= 0; m--) {
+                    const d = new Date(today.getFullYear(), today.getMonth() - m, 1);
+                    const ym = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+                    const total = Object.entries(byDate)
+                        .filter(([k]) => k.startsWith(ym))
+                        .reduce((sum, [, v]) => sum + v.steps, 0);
+                    labels.push(d.toLocaleDateString('en-US', { month: 'short', year: '2-digit' }));
+                    stepsData.push(total);
+                    const daysInMonth = new Date(d.getFullYear(), d.getMonth() + 1, 0).getDate();
+                    const monthGoal = GOAL * daysInMonth;
+                    colors.push(total >= monthGoal ? 'rgba(70,184,70,0.85)' : total > 0 ? 'rgba(77,166,255,0.75)' : 'rgba(255,255,255,0.06)');
+                    tooltipKeys.push(ym);
+                }
             }
 
             if (_wrStepChartInstance) { _wrStepChartInstance.destroy(); _wrStepChartInstance = null; }
-
-            // Store date keys for click handler
-            const dateKeys = [];
-            for (let i = _wrChartDays - 1; i >= 0; i--) {
-                const d = new Date(today);
-                d.setDate(today.getDate() - i);
-                dateKeys.push(d.toISOString().split('T')[0]);
-            }
+            document.getElementById('wr-step-detail').style.display = 'none';
 
             _wrStepChartInstance = new Chart(canvas, {
                 type: 'bar',
@@ -16894,11 +16944,10 @@ Please try again with a different photo.`;
                     responsive: true,
                     maintainAspectRatio: false,
                     onClick: (evt, elements) => {
-                        if (!elements.length) return;
+                        if (!elements.length || _wrPeriod !== 'daily') return;
                         const idx = elements[0].index;
-                        const key = dateKeys[idx];
-                        const s = byDate[key];
-                        _showWrDayDetail(key, s || null);
+                        const key = tooltipKeys[idx];
+                        _showWrDayDetail(key, byDate[key] || null);
                     },
                     plugins: {
                         legend: { display: false },
@@ -16912,42 +16961,119 @@ Please try again with a different photo.`;
                                 label: ctx => {
                                     const v = ctx.parsed.y;
                                     if (!v) return 'No data';
+                                    if (_wrPeriod === 'weekly') {
+                                        const pct = Math.round((v / (GOAL * 7)) * 100);
+                                        return `${v.toLocaleString()} steps (${pct}% of weekly goal)`;
+                                    }
+                                    if (_wrPeriod === 'monthly') {
+                                        return `${v.toLocaleString()} steps total`;
+                                    }
                                     const pct = Math.round((v / GOAL) * 100);
                                     return `${v.toLocaleString()} steps (${pct}% of goal)`;
                                 }
                             }
-                        },
-                        annotation: undefined
+                        }
                     },
                     scales: {
-                        x: {
-                            ticks: { color: '#666', font: { size: 10 } },
-                            grid: { display: false }
-                        },
+                        x: { ticks: { color: '#666', font: { size: 10 } }, grid: { display: false } },
                         y: {
-                            ticks: {
-                                color: '#666',
-                                font: { size: 10 },
-                                callback: v => v >= 1000 ? (v / 1000).toFixed(0) + 'k' : v
-                            },
+                            ticks: { color: '#666', font: { size: 10 }, callback: v => v >= 1000 ? (v / 1000).toFixed(0) + 'k' : v },
                             grid: { color: 'rgba(255,255,255,0.04)' },
                             beginAtZero: true,
                         }
                     }
                 }
             });
+        }
 
-            // Period button wiring (only once)
-            if (!canvas._wrPeriodWired) {
-                canvas._wrPeriodWired = true;
-                document.querySelectorAll('.wr-period-btn').forEach(btn => {
-                    btn.addEventListener('click', () => {
-                        document.querySelectorAll('.wr-period-btn').forEach(b => b.classList.remove('wr-period-active'));
-                        btn.classList.add('wr-period-active');
-                        _renderWearableStepChart(_wrAllSessions, parseInt(btn.dataset.days));
-                        document.getElementById('wr-step-detail').style.display = 'none';
-                    });
+        function _renderWearableSessionsList(sessions, period) {
+            const list = document.getElementById('wearable-sessions-list');
+            if (!list) return;
+            if (!sessions || sessions.length === 0) {
+                list.innerHTML = '<div class="wr-empty">No sessions yet — start tracking on your phone</div>';
+                return;
+            }
+
+            const GOAL = parseInt(localStorage.getItem(userKey('fixit-step-goal'))) || 10000;
+            const byDate = _buildDayMap(sessions);
+
+            if (period === 'daily') {
+                // Individual sessions, most recent first
+                list.innerHTML = sessions.slice(0, 20).map(s => {
+                    const rawDate = (s.date || s.session_date || '').toString().split('T')[0];
+                    const d = new Date(rawDate + 'T00:00:00');
+                    const dateStr = !isNaN(d) ? d.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' }) : rawDate;
+                    const steps = Number(s.steps || 0);
+                    const dist = steps ? `${(steps * 0.00076).toFixed(2)} km` : '—';
+                    const hr = (s.hr_avg || s.hr) ? `${s.hr_avg || s.hr} bpm` : '—';
+                    const cal = s.calories ? `${Math.round(s.calories)} kcal` : '—';
+                    const activeSecs = s.active_secs || s.activeSecs;
+                    const active = activeSecs ? `${Math.round(activeSecs / 60)} min` : '—';
+                    return `<div class="wr-session-row">
+                        <div class="wr-srow-date">${dateStr}</div>
+                        <div class="wr-srow-steps">${steps ? steps.toLocaleString() : '—'}</div>
+                        <div class="wr-srow-dist">${dist}</div>
+                        <div class="wr-srow-chip">${cal}</div>
+                        <div class="wr-srow-chip">${active}</div>
+                        <div class="wr-srow-chip wr-srow-hr">${hr}</div>
+                    </div>`;
+                }).join('');
+
+            } else if (period === 'weekly') {
+                const today = new Date();
+                const dow = today.getDay() === 0 ? 6 : today.getDay() - 1;
+                const rows = [];
+                for (let w = 0; w < 12; w++) {
+                    const mon = new Date(today); mon.setDate(today.getDate() - dow - w * 7);
+                    const sun = new Date(mon); sun.setDate(mon.getDate() + 6);
+                    let total = 0, daysActive = 0, daysGoal = 0, bestDay = 0;
+                    for (let i = 0; i < 7; i++) {
+                        const d = new Date(mon); d.setDate(mon.getDate() + i);
+                        const steps = byDate[d.toISOString().split('T')[0]]?.steps || 0;
+                        total += steps;
+                        if (steps > 0) daysActive++;
+                        if (steps >= GOAL) daysGoal++;
+                        if (steps > bestDay) bestDay = steps;
+                    }
+                    if (total === 0 && w > 0) continue;
+                    const monStr = mon.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+                    const sunStr = sun.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+                    rows.push(`<div class="wr-session-row wr-group-row">
+                        <div class="wr-srow-date">${monStr} – ${sunStr}</div>
+                        <div class="wr-srow-steps">${total ? total.toLocaleString() : '—'}</div>
+                        <div class="wr-srow-dist">${total ? (total * 0.00076).toFixed(1) + ' km' : '—'}</div>
+                        <div class="wr-srow-chip">${daysActive} active days</div>
+                        <div class="wr-srow-chip">${daysGoal}× goal hit</div>
+                        <div class="wr-srow-chip wr-srow-hr">${bestDay ? 'Best: ' + bestDay.toLocaleString() : '—'}</div>
+                    </div>`);
+                }
+                list.innerHTML = rows.length ? rows.join('') : '<div class="wr-empty">No weekly data yet</div>';
+
+            } else {
+                // Monthly
+                const months = {};
+                Object.entries(byDate).forEach(([dateKey, data]) => {
+                    const ym = dateKey.slice(0, 7);
+                    if (!months[ym]) months[ym] = { total: 0, daysActive: 0, daysGoal: 0 };
+                    months[ym].total += data.steps;
+                    if (data.steps > 0) months[ym].daysActive++;
+                    if (data.steps >= GOAL) months[ym].daysGoal++;
                 });
+                const sorted = Object.entries(months).sort(([a], [b]) => b.localeCompare(a)).slice(0, 12);
+                if (!sorted.length) { list.innerHTML = '<div class="wr-empty">No monthly data yet</div>'; return; }
+                list.innerHTML = sorted.map(([ym, data]) => {
+                    const [y, m] = ym.split('-');
+                    const label = new Date(+y, +m - 1, 1).toLocaleDateString('en-US', { month: 'long', year: 'numeric' });
+                    const avg = data.daysActive ? Math.round(data.total / data.daysActive) : 0;
+                    return `<div class="wr-session-row wr-group-row">
+                        <div class="wr-srow-date">${label}</div>
+                        <div class="wr-srow-steps">${data.total ? data.total.toLocaleString() : '—'}</div>
+                        <div class="wr-srow-dist">${data.total ? (data.total * 0.00076).toFixed(1) + ' km' : '—'}</div>
+                        <div class="wr-srow-chip">${data.daysActive} active days</div>
+                        <div class="wr-srow-chip">${data.daysGoal}× goal hit</div>
+                        <div class="wr-srow-chip wr-srow-hr">${avg ? 'Avg: ' + avg.toLocaleString() : '—'}</div>
+                    </div>`;
+                }).join('');
             }
         }
 
@@ -16975,40 +17101,9 @@ Please try again with a different photo.`;
         }
 
         function _renderWearableSessions(sessions) {
-            // Insights: weekly summary, streak, personal best
             _renderWearableInsights(sessions);
-            // Always render the step chart (even with no sessions)
-            _renderWearableStepChart(sessions, _wrChartDays);
-
-            const list = document.getElementById('wearable-sessions-list');
-            if (!list) return;
-
-            if (!sessions || sessions.length === 0) {
-                list.innerHTML = '<div class="wr-empty">No sessions yet — start tracking on your phone</div>';
-                return;
-            }
-
-            list.innerHTML = sessions.map(s => {
-                const rawDate = (s.date || s.session_date || '').toString().split('T')[0];
-                const d = new Date(rawDate + 'T00:00:00');
-                const dateStr = !isNaN(d) ? d.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' }) : rawDate;
-                const stepsNum = s.steps != null ? Number(s.steps) : 0;
-                const steps = stepsNum ? stepsNum.toLocaleString() : '—';
-                const dist = stepsNum ? `${(stepsNum * 0.00076).toFixed(2)} km` : '—';
-                const hr = (s.hr_avg || s.hr) ? `${s.hr_avg || s.hr} bpm` : '—';
-                const cal = s.calories ? `${Math.round(s.calories)} kcal` : '—';
-                const activeSecs = s.active_secs || s.activeSecs;
-                const active = activeSecs ? `${Math.round(activeSecs / 60)} min` : '—';
-
-                return `<div class="wr-session-row">
-                    <div class="wr-srow-date">${dateStr}</div>
-                    <div class="wr-srow-steps">${steps}</div>
-                    <div class="wr-srow-dist">${dist}</div>
-                    <div class="wr-srow-chip">${cal}</div>
-                    <div class="wr-srow-chip">${active}</div>
-                    <div class="wr-srow-chip wr-srow-hr">${hr}</div>
-                </div>`;
-            }).join('');
+            _renderWearableStepChart(sessions, _wrPeriod);
+            _renderWearableSessionsList(sessions, _wrPeriod);
         }
 
         // Auto-activate wearable overlay on mobile when ?wearable=1
