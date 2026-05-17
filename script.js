@@ -16637,9 +16637,14 @@ Please try again with a different photo.`;
 
                         const pill = document.getElementById('wr-overflow-pill');
                         if (pill) {
-                            const pillText = document.getElementById('wr-pill-text');
-                            if (pillText) pillText.textContent = `+${Math.round(overflowPct * 100)}%`;
-                            pill.style.display = '';
+                            const overflowRounded = Math.round(overflowPct * 100);
+                            if (overflowRounded > 0) {
+                                const pillText = document.getElementById('wr-pill-text');
+                                if (pillText) pillText.textContent = `+${overflowRounded}%`;
+                                pill.style.display = '';
+                            } else {
+                                pill.style.display = 'none';
+                            }
                         }
                     }
                 } else {
