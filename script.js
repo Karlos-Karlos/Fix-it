@@ -430,8 +430,14 @@
                 if (rows.length) {
                     let local;
                     try { local = JSON.parse(localStorage.getItem(userKey('fixit-achievements')) || '[]'); } catch { local = []; }
-                    rows.forEach(r => { if (!local.includes(r.achievement_id)) local.push(r.achievement_id); });
+                    let dates;
+                    try { dates = JSON.parse(localStorage.getItem(userKey('fixit-achievement-dates')) || '{}'); } catch { dates = {}; }
+                    rows.forEach(r => {
+                        if (!local.includes(r.achievement_id)) local.push(r.achievement_id);
+                        if (r.unlocked_at && !dates[r.achievement_id]) dates[r.achievement_id] = r.unlocked_at;
+                    });
                     localStorage.setItem(userKey('fixit-achievements'), JSON.stringify(local));
+                    localStorage.setItem(userKey('fixit-achievement-dates'), JSON.stringify(dates));
                 }
             } catch (_) {}
 
@@ -10962,10 +10968,13 @@ Please try again with a different photo.`;
         function checkAchievements() {
             let unlocked;
             try { unlocked = JSON.parse(localStorage.getItem(userKey('fixit-achievements')) || '[]'); } catch { unlocked = []; }
+            let dates;
+            try { dates = JSON.parse(localStorage.getItem(userKey('fixit-achievement-dates')) || '{}'); } catch { dates = {}; }
             let newUnlocks = false;
             getAchievements().forEach(a => {
                 if (!unlocked.includes(a.id) && a.check()) {
                     unlocked.push(a.id);
+                    if (!dates[a.id]) dates[a.id] = new Date().toISOString();
                     awardXP(25, 'achievement');
                     _apiSave('/gamification/unlock', { achievement_id: a.id });
                     newUnlocks = true;
@@ -10973,6 +10982,7 @@ Please try again with a different photo.`;
             });
             if (newUnlocks) {
                 localStorage.setItem(userKey('fixit-achievements'), JSON.stringify(unlocked));
+                localStorage.setItem(userKey('fixit-achievement-dates'), JSON.stringify(dates));
             }
         }
 
@@ -11069,6 +11079,13 @@ Please try again with a different photo.`;
             }
         }
 
+        function _fmtAchievementDate(iso) {
+            if (!iso) return '';
+            try {
+                return new Date(iso).toLocaleDateString(undefined, { day: 'numeric', month: 'short', year: 'numeric' });
+            } catch { return ''; }
+        }
+
         function renderBadges() {
             const container = document.getElementById('progress-badges');
             if (!container) return;
@@ -11076,21 +11093,83 @@ Please try again with a different photo.`;
 
             let unlocked;
             try { unlocked = JSON.parse(localStorage.getItem(userKey('fixit-achievements')) || '[]'); } catch { unlocked = []; }
+            let dates;
+            try { dates = JSON.parse(localStorage.getItem(userKey('fixit-achievement-dates')) || '{}'); } catch { dates = {}; }
 
             const achievements = getAchievements();
             document.getElementById('progress-badge-counter').textContent = `${unlocked.length} / ${achievements.length}`;
 
+            // Add history button to header if not already there
+            const header = document.querySelector('.bento-achievements .bento-label');
+            if (header && !header.querySelector('.badge-history-btn')) {
+                const btn = document.createElement('button');
+                btn.className = 'badge-history-btn';
+                btn.textContent = 'History';
+                btn.addEventListener('click', () => _showAchievementHistory(unlocked, dates, achievements));
+                header.appendChild(btn);
+            }
+
             achievements.forEach(a => {
                 const isUnlocked = unlocked.includes(a.id);
+                const dateStr = isUnlocked ? _fmtAchievementDate(dates[a.id]) : '';
                 const div = document.createElement('div');
                 div.className = `badge-item ${isUnlocked ? 'unlocked' : 'locked'}`;
                 div.innerHTML = `
                     <div class="badge-icon">${a.icon}</div>
                     <div class="badge-title">${escapeHtml(a.title)}</div>
                     <div class="badge-condition">${escapeHtml(a.condition)}</div>
+                    ${dateStr ? `<div class="badge-date">${escapeHtml(dateStr)}</div>` : ''}
                 `;
                 container.appendChild(div);
             });
+        }
+
+        function _showAchievementHistory(unlocked, dates, achievements) {
+            const existing = document.getElementById('achievement-history-modal');
+            if (existing) existing.remove();
+
+            // Build sorted list of unlocked achievements (most recent first)
+            const unlockedList = achievements
+                .filter(a => unlocked.includes(a.id))
+                .map(a => ({ ...a, date: dates[a.id] || null }))
+                .sort((a, b) => {
+                    if (!a.date && !b.date) return 0;
+                    if (!a.date) return 1;
+                    if (!b.date) return -1;
+                    return new Date(b.date) - new Date(a.date);
+                });
+
+            const modal = document.createElement('div');
+            modal.id = 'achievement-history-modal';
+            modal.className = 'achievement-history-overlay';
+            modal.innerHTML = `
+                <div class="achievement-history-panel">
+                    <div class="achievement-history-header">
+                        <span>Achievement History</span>
+                        <button class="achievement-history-close" id="ach-hist-close">&times;</button>
+                    </div>
+                    <div class="achievement-history-list">
+                        ${unlockedList.length === 0
+                            ? '<p class="achievement-history-empty">No achievements unlocked yet.</p>'
+                            : unlockedList.map(a => `
+                                <div class="achievement-history-item">
+                                    <span class="ach-hist-icon">${a.icon}</span>
+                                    <div class="ach-hist-info">
+                                        <div class="ach-hist-title">${escapeHtml(a.title)}</div>
+                                        <div class="ach-hist-cond">${escapeHtml(a.condition)}</div>
+                                    </div>
+                                    <div class="ach-hist-date">${a.date ? escapeHtml(_fmtAchievementDate(a.date)) : '—'}</div>
+                                </div>`).join('')
+                        }
+                    </div>
+                </div>`;
+
+            document.body.appendChild(modal);
+            requestAnimationFrame(() => modal.classList.add('active'));
+
+            const close = () => { modal.classList.remove('active'); setTimeout(() => modal.remove(), 300); };
+            document.getElementById('ach-hist-close').addEventListener('click', close);
+            modal.addEventListener('click', e => { if (e.target === modal) close(); });
         }
 
         function renderChallenges() {

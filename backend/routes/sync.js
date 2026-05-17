@@ -105,7 +105,7 @@ router.get('/all', async (req, res, next) => {
       ),
       // Achievements
       db.query(
-        `SELECT ua.achievement_id, a.title, a.icon
+        `SELECT ua.achievement_id, ua.unlocked_at, a.title, a.icon
          FROM user_achievements ua
          JOIN achievements a ON a.id = ua.achievement_id
          WHERE ua.user_id = $1
