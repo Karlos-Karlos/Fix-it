@@ -10983,7 +10983,65 @@ Please try again with a different photo.`;
             if (newUnlocks) {
                 localStorage.setItem(userKey('fixit-achievements'), JSON.stringify(unlocked));
                 localStorage.setItem(userKey('fixit-achievement-dates'), JSON.stringify(dates));
+
+                // Completionist bonus — fires once when every achievement is unlocked
+                const allAchievements = getAchievements();
+                const isComplete = unlocked.length >= allAchievements.length;
+                const alreadyCelebrated = localStorage.getItem(userKey('fixit-completionist')) === 'true';
+                if (isComplete && !alreadyCelebrated) {
+                    localStorage.setItem(userKey('fixit-completionist'), 'true');
+                    awardXP(100, 'completionist');
+                    setTimeout(() => {
+                        _launchConfetti();
+                        showToast('🏆 All achievements unlocked! You\'re a legend! +100 XP', 'success', 6000);
+                    }, 400);
+                }
             }
+        }
+
+        function _launchConfetti() {
+            const existing = document.getElementById('confetti-canvas');
+            if (existing) existing.remove();
+            const canvas = document.createElement('canvas');
+            canvas.id = 'confetti-canvas';
+            canvas.style.cssText = 'position:fixed;inset:0;width:100%;height:100%;z-index:99998;pointer-events:none;';
+            document.body.appendChild(canvas);
+            const ctx = canvas.getContext('2d');
+            canvas.width = window.innerWidth;
+            canvas.height = window.innerHeight;
+
+            const colors = ['#c9a962','#b87351','#7d9a78','#4da6ff','#ff6b6b','#ffd700','#a8e6cf','#ffffff'];
+            const pieces = Array.from({ length: 150 }, () => ({
+                x: Math.random() * canvas.width,
+                y: Math.random() * canvas.height - canvas.height * 1.2,
+                w: Math.random() * 10 + 5,
+                h: Math.random() * 6 + 3,
+                color: colors[Math.floor(Math.random() * colors.length)],
+                rot: Math.random() * Math.PI * 2,
+                vx: (Math.random() - 0.5) * 4,
+                vy: Math.random() * 4 + 3,
+                vrot: (Math.random() - 0.5) * 0.15,
+            }));
+
+            const start = Date.now();
+            const duration = 4000;
+            function animate() {
+                const elapsed = Date.now() - start;
+                ctx.clearRect(0, 0, canvas.width, canvas.height);
+                pieces.forEach(p => {
+                    p.x += p.vx; p.y += p.vy; p.rot += p.vrot; p.vy += 0.06;
+                    ctx.save();
+                    ctx.translate(p.x + p.w / 2, p.y + p.h / 2);
+                    ctx.rotate(p.rot);
+                    ctx.fillStyle = p.color;
+                    ctx.globalAlpha = Math.max(0, 1 - elapsed / duration);
+                    ctx.fillRect(-p.w / 2, -p.h / 2, p.w, p.h);
+                    ctx.restore();
+                });
+                if (elapsed < duration) requestAnimationFrame(animate);
+                else canvas.remove();
+            }
+            animate();
         }
 
         function getWeekNumber() {
@@ -11097,9 +11155,29 @@ Please try again with a different photo.`;
             try { dates = JSON.parse(localStorage.getItem(userKey('fixit-achievement-dates')) || '{}'); } catch { dates = {}; }
 
             const achievements = getAchievements();
-            document.getElementById('progress-badge-counter').textContent = `${unlocked.length} / ${achievements.length}`;
+            const isComplete = unlocked.length >= achievements.length && achievements.length > 0;
+            const counter = document.getElementById('progress-badge-counter');
+            if (counter) {
+                counter.textContent = isComplete ? '✓ Complete' : `${unlocked.length} / ${achievements.length}`;
+                counter.className = isComplete ? 'badge-counter badge-counter-complete' : 'badge-counter';
+            }
 
-            // Add history button to header if not already there
+            // Completionist banner
+            const bento = document.querySelector('.bento-achievements');
+            if (bento) {
+                let banner = document.getElementById('completionist-banner');
+                if (isComplete && !banner) {
+                    banner = document.createElement('div');
+                    banner.id = 'completionist-banner';
+                    banner.className = 'completionist-banner';
+                    banner.innerHTML = '🏆 Completionist &mdash; All achievements unlocked!';
+                    bento.insertBefore(banner, bento.querySelector('.badges-grid'));
+                } else if (!isComplete && banner) {
+                    banner.remove();
+                }
+            }
+
+            // History button in header
             const header = document.querySelector('.bento-achievements .bento-label');
             if (header && !header.querySelector('.badge-history-btn')) {
                 const btn = document.createElement('button');
