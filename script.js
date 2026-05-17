@@ -708,6 +708,9 @@
             try { renderSleepTracker(); } catch(e) {};
             // Sync tracking history from server (fire-and-forget, non-blocking)
             syncTrackingDataFromServer();
+            // Pre-load achievement metadata so checkAchievements() always uses DB data
+            loadAchievementsMeta();
+            loadChallengePool();
             // Show user menu and populate it
             document.getElementById('user-menu-wrapper').style.display = 'flex';
             updateUserMenu();
