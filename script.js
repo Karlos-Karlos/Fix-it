@@ -11193,6 +11193,7 @@ Please try again with a different photo.`;
                 const div = document.createElement('div');
                 div.className = `badge-item ${isUnlocked ? 'unlocked' : 'locked'}`;
                 div.innerHTML = `
+                    ${isUnlocked ? `<div class="badge-check"><svg viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="2 6 5 9 10 3"/></svg></div>` : ''}
                     <div class="badge-icon">${a.icon}</div>
                     <div class="badge-title">${escapeHtml(a.title)}</div>
                     <div class="badge-condition">${escapeHtml(a.condition)}</div>
