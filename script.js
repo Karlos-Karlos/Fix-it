@@ -723,9 +723,6 @@
 
             // ALWAYS check the server first — the server is the single source of truth
             // for whether this account has any scans. Local session state (state.analysisResult
-            // from localStorage) must NOT be trusted blindly: if the user cleared data on
-            // another device, the backend deleted all scans but the local session on this
-            // device still has the old analysisResult, causing it to show Results incorrectly.
             let serverScans = [];
             let scanFetchFailed = false;
             if (state.accessToken) {
@@ -10830,6 +10827,10 @@ Please try again with a different photo.`;
             'streak-30':     () => parseInt(localStorage.getItem(userKey('fixit-best-streak')) || '0') >= 30,
             'first-compare': () => localStorage.getItem(userKey('fixit-first-compare')) === 'true',
             'scan-5':        () => parseInt(localStorage.getItem(userKey('fixit-total-analyses')) || '0') >= 5,
+            'first-steps':   () => { try { return JSON.parse(localStorage.getItem(userKey('fixit-wearable-sessions')) || '[]').some(s => (s.steps || 0) > 0); } catch { return false; } },
+            'steps-5k':      () => { try { const b = {}; JSON.parse(localStorage.getItem(userKey('fixit-wearable-sessions')) || '[]').forEach(s => { b[s.date] = (b[s.date] || 0) + (s.steps || 0); }); return Object.values(b).some(t => t >= 5000); } catch { return false; } },
+            'steps-goal':    () => { try { const g = parseInt(localStorage.getItem(userKey('fixit-step-goal'))) || 10000; const b = {}; JSON.parse(localStorage.getItem(userKey('fixit-wearable-sessions')) || '[]').forEach(s => { b[s.date] = (b[s.date] || 0) + (s.steps || 0); }); return Object.values(b).some(t => t >= g); } catch { return false; } },
+            'steps-goal-7':  () => { try { const g = parseInt(localStorage.getItem(userKey('fixit-step-goal'))) || 10000; const b = {}; JSON.parse(localStorage.getItem(userKey('fixit-wearable-sessions')) || '[]').forEach(s => { b[s.date] = (b[s.date] || 0) + (s.steps || 0); }); return Object.values(b).filter(t => t >= g).length >= 7; } catch { return false; } },
         };
 
         // Fallback metadata in case API is unavailable
@@ -10848,6 +10849,10 @@ Please try again with a different photo.`;
             { id: 'streak-30',     title: 'Dedicated',         icon: '🏆', description: '30-day streak' },
             { id: 'first-compare', title: 'Time Traveler',     icon: '⏳', description: 'Compare 2 scans' },
             { id: 'scan-5',        title: 'Dedicated Tracker', icon: '📊', description: '5 analysis scans saved' },
+            { id: 'first-steps',   title: 'First Steps',       icon: '👟', description: 'Save your first step session' },
+            { id: 'steps-5k',      title: 'Active Mover',      icon: '🚶', description: '5,000 steps in a day' },
+            { id: 'steps-goal',    title: 'Goal Crusher',      icon: '🎯', description: 'Reach your daily step goal' },
+            { id: 'steps-goal-7',  title: 'Step Champion',     icon: '🏅', description: 'Hit step goal 7 different days' },
         ];
 
         let _achievementsMeta = null; // null = not yet loaded
@@ -16317,6 +16322,10 @@ Please try again with a different photo.`;
             });
             if (sessions.length > 50) sessions.pop();
             localStorage.setItem(key, JSON.stringify(sessions));
+
+            // Award XP and check step achievements
+            awardXP(10, 'steps');
+            checkAchievements();
 
             document.getElementById('wo-save-btn').style.display = 'none';
             const toast = document.getElementById('wo-saved-msg');
