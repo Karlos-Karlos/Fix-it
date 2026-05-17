@@ -58,6 +58,21 @@ router.get('/user-challenges', auth, async (req, res, next) => {
   }
 });
 
+// POST /unlock (authed) — record a newly unlocked achievement
+router.post('/unlock', auth, async (req, res, next) => {
+  try {
+    const { achievement_id } = req.body;
+    if (!achievement_id) return res.status(400).json({ error: 'achievement_id required' });
+    await db.query(
+      `INSERT INTO user_achievements (user_id, achievement_id) VALUES ($1, $2) ON CONFLICT DO NOTHING`,
+      [req.user.id, achievement_id]
+    );
+    res.json({ ok: true });
+  } catch (err) {
+    next(err);
+  }
+});
+
 // POST /refresh-challenges (authed)
 router.post('/refresh-challenges', auth, async (req, res, next) => {
   try {

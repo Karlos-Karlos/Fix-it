@@ -279,6 +279,14 @@ async function runMigrations() {
     'ALTER TABLE user_preferences ADD COLUMN IF NOT EXISTS step_goal INTEGER NOT NULL DEFAULT 10000',
     "ALTER TABLE user_preferences ADD COLUMN IF NOT EXISTS weight_unit VARCHAR(5) NOT NULL DEFAULT 'kg'",
     "ALTER TABLE user_preferences ADD COLUMN IF NOT EXISTS height_unit VARCHAR(5) NOT NULL DEFAULT 'cm'",
+
+    // Step-based achievements
+    `INSERT INTO achievements (id, title, icon, description, category, xp_reward, sort_order) VALUES
+     ('first-steps',  'First Steps',   '👟', 'Save your first step session',       'activity', 25, 15),
+     ('steps-5k',     'Active Mover',  '🚶', '5,000 steps in a day',               'activity', 25, 16),
+     ('steps-goal',   'Goal Crusher',  '🎯', 'Reach your daily step goal',          'activity', 25, 17),
+     ('steps-goal-7', 'Step Champion', '🏅', 'Hit step goal 7 different days',      'activity', 25, 18)
+     ON CONFLICT DO NOTHING`,
   ];
 
   for (const sql of migrations) {

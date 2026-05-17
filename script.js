@@ -10964,6 +10964,7 @@ Please try again with a different photo.`;
                 if (!unlocked.includes(a.id) && a.check()) {
                     unlocked.push(a.id);
                     awardXP(25, 'achievement');
+                    _apiSave('/gamification/unlock', { achievement_id: a.id });
                     newUnlocks = true;
                 }
             });
