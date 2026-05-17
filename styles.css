@@ -10266,13 +10266,14 @@
         }
 
         .badge-item.unlocked {
-            border-color: rgba(var(--accent-primary-rgb), 0.35);
-            box-shadow: 0 2px 16px rgba(var(--accent-primary-rgb), 0.1);
+            border-color: rgba(70, 184, 70, 0.7);
+            box-shadow: 0 2px 12px rgba(70, 184, 70, 0.2);
         }
 
         .badge-item.unlocked:hover {
             transform: translateY(-3px) scale(1.03);
-            box-shadow: 0 8px 24px rgba(var(--accent-primary-rgb), 0.18);
+            border-color: rgba(70, 184, 70, 0.95);
+            box-shadow: 0 8px 24px rgba(70, 184, 70, 0.3);
         }
 
         .badge-icon {
