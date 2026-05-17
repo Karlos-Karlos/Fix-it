@@ -227,7 +227,10 @@
                         state.coachPersona = prefs.coach_persona;
                         localStorage.setItem(userKey('fixit-coach-persona'), prefs.coach_persona);
                     }
-                    if (prefs.step_goal) localStorage.setItem(userKey('fixit-step-goal'), String(prefs.step_goal));
+                    if (prefs.step_goal) {
+                        localStorage.setItem(userKey('fixit-step-goal'), String(prefs.step_goal));
+                        if (typeof _loadWearableData === 'function') _loadWearableData();
+                    }
                     if (prefs.weight_unit || prefs.height_unit) {
                         const p = JSON.parse(localStorage.getItem(userKey('fixit-preferences')) || '{}');
                         if (prefs.weight_unit) p['pref-weight-unit'] = prefs.weight_unit;
