@@ -7774,11 +7774,11 @@
             }
 
             .logo-img {
-                height: 32px;
+                height: 44px;
             }
 
             .logo-text {
-                font-size: 1rem;
+                display: none;
             }
 
 
