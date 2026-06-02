@@ -7989,7 +7989,7 @@
 
             /* Header */
             .header {
-                padding: 16px 24px;
+                padding: 16px 0;
             }
 
             .nav-steps {
@@ -8096,7 +8096,7 @@
 
             /* Header */
             .header {
-                padding: 20px 40px;
+                padding: 20px 0;
             }
 
             /* Screen titles */
@@ -8298,7 +8298,7 @@
         /* === LANDSCAPE MOBILE === */
         @media (max-height: 500px) and (orientation: landscape) {
             .header {
-                padding: 8px 16px;
+                padding: 8px 0;
             }
 
             .screen h1 {
