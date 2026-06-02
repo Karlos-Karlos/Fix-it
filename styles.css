@@ -508,6 +508,7 @@
         /* Hero Header */
         .s1-hero {
             text-align: center;
+            margin-top: 24px;
             margin-bottom: 40px;
             animation: s1FadeUp 0.7s ease both;
         }
