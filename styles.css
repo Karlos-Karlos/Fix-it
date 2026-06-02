@@ -365,25 +365,25 @@
         .app-container {
             position: relative;
             min-height: 100vh;
-            padding: 20px;
-            padding-bottom: 40px;
+            padding: 124px 20px 40px;
             overflow-x: hidden;
         }
 
         /* Header */
         .header {
-            position: sticky;
+            position: fixed;
             top: 0;
+            left: 0;
+            right: 0;
             z-index: 300;
             background: var(--bg-primary);
             backdrop-filter: blur(12px);
             -webkit-backdrop-filter: blur(12px);
+            border-bottom: 1px solid var(--border-subtle);
             display: flex;
             justify-content: space-between;
             align-items: center;
-            padding: 20px 0 40px;
-            max-width: 1200px;
-            margin: 0 auto;
+            padding: 20px 20px 40px;
         }
 
         .logo {
@@ -7723,11 +7723,11 @@
         /* === SMALL LAPTOP STYLES (1024px - 1366px) === */
         @media (min-width: 1024px) and (max-width: 1366px) {
             .app-container {
-                padding: 15px;
+                padding: 104px 15px 15px;
             }
 
             .header {
-                padding: 15px 0 25px;
+                padding: 15px 15px 25px;
             }
 
             .upload-section {
@@ -7771,7 +7771,7 @@
 
             /* Header */
             .header {
-                padding: 12px 0;
+                padding: 12px 16px;
                 flex-wrap: nowrap;
                 gap: 10px;
             }
@@ -7990,12 +7990,12 @@
             }
 
             .app-container {
-                padding: 0 24px;
+                padding: 96px 24px 0;
             }
 
             /* Header */
             .header {
-                padding: 16px 0;
+                padding: 16px 24px;
             }
 
             .nav-steps {
@@ -8097,12 +8097,12 @@
             .app-container {
                 max-width: 1400px;
                 margin: 0 auto;
-                padding: 0 40px;
+                padding: 104px 40px 0;
             }
 
-            /* Header */
+            /* Fixed header: padding mirrors app-container so logo aligns with content at all widths */
             .header {
-                padding: 20px 0;
+                padding: 20px max(40px, calc((100vw - 1400px) / 2 + 40px));
             }
 
             /* Screen titles */
@@ -8213,11 +8213,11 @@
         /* === SHORT LAPTOP SCREENS (height 600-800px) === */
         @media (max-height: 800px) and (min-width: 1024px) {
             .app-container {
-                padding: 10px 20px;
+                padding: 94px max(20px, calc((100vw - 1400px) / 2 + 40px)) 10px;
             }
 
             .header {
-                padding: 10px 0 20px;
+                padding: 10px max(20px, calc((100vw - 1400px) / 2 + 40px)) 20px;
             }
 
             h1 {
@@ -8265,11 +8265,11 @@
         /* === VERY SHORT SCREENS (height < 700px) === */
         @media (max-height: 700px) and (min-width: 768px) {
             .app-container {
-                padding: 8px 15px;
+                padding: 88px max(15px, calc((100vw - 1400px) / 2 + 40px)) 8px;
             }
 
             .header {
-                padding: 8px 0 15px;
+                padding: 8px max(15px, calc((100vw - 1400px) / 2 + 40px)) 15px;
             }
 
             h1 {
@@ -8303,9 +8303,8 @@
 
         /* === LANDSCAPE MOBILE === */
         @media (max-height: 500px) and (orientation: landscape) {
-            .header {
-                padding: 8px 0;
-            }
+            .app-container { padding-top: 80px; }
+            .header { padding: 8px 16px; }
 
             .screen h1 {
                 font-size: 1.3rem;
@@ -17741,8 +17740,11 @@
 
 /* Safe area padding for notched phones in standalone mode */
 @media (display-mode: standalone) {
+    .header {
+        padding-top: env(safe-area-inset-top, 0px);
+    }
     .app-container {
-        padding-top: env(safe-area-inset-top);
+        padding-top: calc(env(safe-area-inset-top, 0px) + 90px);
     }
     .nav-bottom {
         padding-bottom: env(safe-area-inset-bottom);
@@ -17769,19 +17771,22 @@
     .app-container {
         padding-left: 25px;
         padding-right: 25px;
+        padding-top: 90px;
         /* Extra bottom so content never hides behind fixed PWA banner / browser chrome */
         padding-bottom: calc(120px + env(safe-area-inset-bottom));
     }
 
-    /* ── Sticky header: single row flex matching desktop layout ── */
+    /* ── Fixed header: single row flex matching desktop layout ── */
     .header {
-        position: sticky;
+        position: fixed;
         top: 0;
+        left: 0;
+        right: 0;
         z-index: 300;
         background: var(--bg-primary);
         backdrop-filter: blur(12px);
         -webkit-backdrop-filter: blur(12px);
-        padding: 10px 0;
+        padding: 10px 25px;
         border-bottom: 1px solid var(--border-subtle);
         display: flex;
         align-items: center;
