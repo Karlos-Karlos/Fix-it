@@ -387,17 +387,19 @@
         }
 
         .logo-img {
-            height: 40px;
+            height: 64px;
             width: auto;
             object-fit: contain;
+            filter: drop-shadow(0 0 10px rgba(201, 169, 98, 0.35));
+            transition: filter 0.3s ease;
+        }
+
+        .logo-img:hover {
+            filter: drop-shadow(0 0 16px rgba(201, 169, 98, 0.55));
         }
 
         .logo-text {
-            font-family: 'Plus Jakarta Sans', sans-serif;
-            font-weight: 800;
-            font-size: 1.5rem;
-            letter-spacing: -0.02em;
-            color: var(--text-primary);
+            display: none;
         }
 
         .nav-steps {
@@ -17650,11 +17652,16 @@
     to   { transform: translateY(0);   opacity: 1; }
 }
 .pwa-banner-logo {
-    width: 40px; height: 40px; flex-shrink: 0;
-    background: rgba(77,166,255,0.1);
-    border: 1px solid rgba(77,166,255,0.25);
+    width: 48px; height: 48px; flex-shrink: 0;
+    background: transparent;
+    border: none;
     border-radius: 10px;
     display: flex; align-items: center; justify-content: center;
+}
+.pwa-banner-logo img {
+    width: 48px; height: 48px;
+    object-fit: contain;
+    filter: drop-shadow(0 0 6px rgba(201,169,98,0.3));
 }
 .pwa-banner-text {
     flex: 1;
@@ -17785,8 +17792,8 @@
     .nav-steps    { grid-area: nav; justify-content: center; gap: 5px; padding-bottom: 4px; }
     .user-menu-wrapper { grid-area: usermenu; }
 
-    .logo-img { height: 28px; }
-    .logo-text { font-size: 1rem; }
+    .logo-img { height: 44px; }
+    .logo-text { display: none; }
     .nav-step { width: 22px; height: 22px; font-size: 0.55rem; }
     .nav-step.active { width: 22px; }
 
