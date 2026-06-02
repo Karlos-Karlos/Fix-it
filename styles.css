@@ -390,12 +390,11 @@
             height: 64px;
             width: auto;
             object-fit: contain;
-            filter: drop-shadow(0 0 10px rgba(201, 169, 98, 0.35));
-            transition: filter 0.3s ease;
+            border-radius: 10px;
         }
 
         .logo-img:hover {
-            filter: drop-shadow(0 0 16px rgba(201, 169, 98, 0.55));
+            opacity: 0.88;
         }
 
         .logo-text {
