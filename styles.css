@@ -7791,7 +7791,7 @@
 
             .nav-step {
                 width: 24px;
-                height: 24px;
+                height: 4px;
             }
 
             /* Screen titles */
@@ -8187,8 +8187,8 @@
         @media (hover: none) and (pointer: coarse) {
 
             .nav-step {
-                min-width: 32px;
-                min-height: 32px;
+                min-width: 20px;
+                min-height: 4px;
             }
 
             .input-select,
@@ -17791,8 +17791,8 @@
 
     .logo-img { height: 64px; }
     .logo-text { display: none; }
-    .nav-step { width: 22px; height: 22px; font-size: 0.55rem; }
-    .nav-step.active { width: 22px; }
+    .nav-step { width: 22px; height: 4px; }
+    .nav-step.active { width: 34px; }
 
     /* ── Offset screen content below sticky header ── */
     .screen.active { padding-top: 16px; }
