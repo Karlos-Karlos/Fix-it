@@ -2753,6 +2753,7 @@
             border: 1px solid var(--border-medium);
             border-radius: 50%;
             font-family: 'Plus Jakarta Sans', sans-serif;
+            margin-top: 24px;
             margin-bottom: 20px;
             box-shadow: 0 2px 8px var(--shadow-color);
         }
