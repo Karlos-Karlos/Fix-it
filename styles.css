@@ -17767,27 +17767,21 @@
         padding-bottom: calc(120px + env(safe-area-inset-bottom));
     }
 
-    /* ── Sticky header: CSS Grid so logo/user-menu/nav stay in correct positions ── */
+    /* ── Sticky header: single row flex matching desktop layout ── */
     .header {
         position: sticky;
         top: 0;
         z-index: 150;
         background: var(--bg-primary);
-        padding: 10px 0 6px;
+        padding: 10px 0;
         border-bottom: 1px solid var(--border-subtle);
-        box-sizing: border-box;
-        /* Grid: logo top-left, avatar top-right, nav full-width below */
-        display: grid;
-        grid-template-areas: "logo usermenu" "nav nav";
-        grid-template-columns: 1fr auto;
-        grid-template-rows: auto auto;
+        display: flex;
         align-items: center;
-        gap: 6px 8px;
+        justify-content: space-between;
+        gap: 8px;
     }
 
-    .logo         { grid-area: logo; gap: 8px; }
-    .nav-steps    { grid-area: nav; justify-content: center; gap: 5px; padding-bottom: 4px; }
-    .user-menu-wrapper { grid-area: usermenu; }
+    .nav-steps    { flex: 1; justify-content: center; gap: 5px; }
 
     .logo-img { height: 64px; }
     .logo-text { display: none; }
