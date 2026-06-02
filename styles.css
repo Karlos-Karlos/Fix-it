@@ -7774,7 +7774,7 @@
             }
 
             .logo-img {
-                height: 60px;
+                height: 64px;
             }
 
             .logo-text {
@@ -17771,11 +17771,9 @@
         position: sticky;
         top: 0;
         z-index: 150;
-        background: rgba(20,18,17,0.96);
-        backdrop-filter: blur(14px);
-        -webkit-backdrop-filter: blur(14px);
+        background: var(--bg-primary);
         padding: 10px 0 6px;
-        border-bottom: 1px solid rgba(255,255,255,0.06);
+        border-bottom: 1px solid var(--border-subtle);
         box-sizing: border-box;
         /* Grid: logo top-left, avatar top-right, nav full-width below */
         display: grid;
@@ -17790,7 +17788,7 @@
     .nav-steps    { grid-area: nav; justify-content: center; gap: 5px; padding-bottom: 4px; }
     .user-menu-wrapper { grid-area: usermenu; }
 
-    .logo-img { height: 60px; }
+    .logo-img { height: 64px; }
     .logo-text { display: none; }
     .nav-step { width: 22px; height: 22px; font-size: 0.55rem; }
     .nav-step.active { width: 22px; }
