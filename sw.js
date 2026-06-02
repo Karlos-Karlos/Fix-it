@@ -1,4 +1,4 @@
-const CACHE = 'fixit-pwa-v5';
+const CACHE = 'fixit-pwa-v6';
 const PRECACHE = ['./index.html', './manifest.json'];
 
 // API path prefixes — never intercept these
@@ -29,6 +29,16 @@ self.addEventListener('fetch', e => {
     // Never intercept backend API calls
     if (API_PREFIXES.some(p => url.pathname.startsWith(p))) return;
 
+    // Navigation requests (page loads): serve cached index.html if available, else go to network.
+    // Never call respondWith(null) — if both fail, let the Promise reject so Safari shows
+    // a normal network error instead of "Returned response is null".
+    if (req.mode === 'navigate') {
+        e.respondWith(
+            caches.match('./index.html').then(cached => cached || fetch(req))
+        );
+        return;
+    }
+
     // script.js has a ?_=timestamp cache-buster: network first, any-version fallback
     if (url.pathname.endsWith('/script.js') || url.pathname === '/script.js') {
         e.respondWith(
@@ -44,22 +54,16 @@ self.addEventListener('fetch', e => {
         return;
     }
 
-    // Everything else: serve from cache immediately, refresh in background (stale-while-revalidate)
+    // All other assets: cache-first, update in background, 503 on total failure
     e.respondWith(
         caches.match(req).then(cached => {
-            const fetchPromise = fetch(req)
+            const net = fetch(req)
                 .then(res => {
                     try { caches.open(CACHE).then(c => c.put(req, res.clone())); } catch (_) {}
                     return res;
                 })
-                .catch(() => {
-                    if (req.mode === 'navigate') {
-                        return caches.match('./index.html')
-                            .then(r => r || new Response('Offline', { status: 503, headers: { 'Content-Type': 'text/plain' } }));
-                    }
-                    return new Response('', { status: 503 });
-                });
-            return cached || fetchPromise;
+                .catch(() => new Response('', { status: 503 }));
+            return cached || net;
         })
     );
 });
