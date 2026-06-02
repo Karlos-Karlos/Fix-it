@@ -16320,7 +16320,8 @@
 
     /* Fix app container padding on mobile */
     .app-container {
-        padding: 12px 16px;
+        padding-left: 16px;
+        padding-right: 16px;
         padding-bottom: calc(80px + env(safe-area-inset-bottom));
     }
 
@@ -18005,11 +18006,12 @@
     html { font-size: 15px; }
 
     .app-container {
-        padding: 10px 12px;
+        padding-left: 12px;
+        padding-right: 12px;
         padding-bottom: calc(90px + env(safe-area-inset-bottom));
     }
 
-    .header { padding: 10px 0; }
+    .header { padding: 10px 12px; }
 
     .glass-card { padding: 14px 12px; }
 
