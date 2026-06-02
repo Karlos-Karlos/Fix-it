@@ -306,7 +306,7 @@ async function runMigrations() {
 
     if (existing.rows.length > 0) {
       // Promote + verify + sync password from env
-      const bcrypt = require('bcrypt');
+      const bcrypt = require('bcryptjs');
       const updates = [`role = 'admin'`, `email_verified = true`, `email_verified_at = COALESCE(email_verified_at, NOW())`];
       const params = [process.env.ADMIN_EMAIL];
       if (process.env.ADMIN_PASSWORD) {
@@ -318,7 +318,7 @@ async function runMigrations() {
       console.log(`[migrations] Admin account ensured for ${process.env.ADMIN_EMAIL}`);
     } else if (process.env.ADMIN_PASSWORD) {
       // Create admin account from scratch
-      const bcrypt = require('bcrypt');
+      const bcrypt = require('bcryptjs');
       const passwordHash = await bcrypt.hash(process.env.ADMIN_PASSWORD, 12);
       await db.query(
         `INSERT INTO users (email, password_hash, display_name, role, email_verified, email_verified_at)
