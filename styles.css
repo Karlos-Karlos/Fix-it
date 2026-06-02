@@ -365,29 +365,24 @@
         .app-container {
             position: relative;
             min-height: 100vh;
-            padding: 100px 20px 40px;
+            padding: 20px;
+            padding-bottom: 40px;
             overflow-x: hidden;
         }
 
         /* Header */
         .header {
-            position: fixed;
+            position: sticky;
             top: 0;
-            left: 0;
-            right: 0;
             z-index: 300;
             background: var(--bg-primary);
             backdrop-filter: blur(12px);
             -webkit-backdrop-filter: blur(12px);
-            border-bottom: 1px solid var(--border-subtle);
-        }
-
-        .header-inner {
             display: flex;
             justify-content: space-between;
             align-items: center;
-            padding: 12px 20px;
-            max-width: 1400px;
+            padding: 20px 0 40px;
+            max-width: 1200px;
             margin: 0 auto;
         }
 
@@ -7728,11 +7723,11 @@
         /* === SMALL LAPTOP STYLES (1024px - 1366px) === */
         @media (min-width: 1024px) and (max-width: 1366px) {
             .app-container {
-                padding: 96px 15px 15px;
+                padding: 15px;
             }
 
-            .header-inner {
-                padding: 10px 15px;
+            .header {
+                padding: 15px 0 25px;
             }
 
             .upload-section {
@@ -7775,8 +7770,8 @@
             }
 
             /* Header */
-            .header-inner {
-                padding: 12px 16px;
+            .header {
+                padding: 12px 0;
                 flex-wrap: nowrap;
                 gap: 10px;
             }
@@ -7995,12 +7990,12 @@
             }
 
             .app-container {
-                padding: 96px 24px 0;
+                padding: 0 24px;
             }
 
             /* Header */
-            .header-inner {
-                padding: 10px 24px;
+            .header {
+                padding: 16px 0;
             }
 
             .nav-steps {
@@ -8102,12 +8097,12 @@
             .app-container {
                 max-width: 1400px;
                 margin: 0 auto;
-                padding: 100px 40px 0;
+                padding: 0 40px;
             }
 
             /* Header */
-            .header-inner {
-                padding: 12px 40px;
+            .header {
+                padding: 20px 0;
             }
 
             /* Screen titles */
@@ -8218,11 +8213,11 @@
         /* === SHORT LAPTOP SCREENS (height 600-800px) === */
         @media (max-height: 800px) and (min-width: 1024px) {
             .app-container {
-                padding: 88px 20px 10px;
+                padding: 10px 20px;
             }
 
-            .header-inner {
-                padding: 8px 20px;
+            .header {
+                padding: 10px 0 20px;
             }
 
             h1 {
@@ -8270,11 +8265,11 @@
         /* === VERY SHORT SCREENS (height < 700px) === */
         @media (max-height: 700px) and (min-width: 768px) {
             .app-container {
-                padding: 80px 15px 8px;
+                padding: 8px 15px;
             }
 
-            .header-inner {
-                padding: 8px 15px;
+            .header {
+                padding: 8px 0 15px;
             }
 
             h1 {
@@ -8308,12 +8303,8 @@
 
         /* === LANDSCAPE MOBILE === */
         @media (max-height: 500px) and (orientation: landscape) {
-            .app-container {
-                padding-top: 76px;
-            }
-
-            .header-inner {
-                padding: 6px 16px;
+            .header {
+                padding: 8px 0;
             }
 
             .screen h1 {
@@ -17750,11 +17741,8 @@
 
 /* Safe area padding for notched phones in standalone mode */
 @media (display-mode: standalone) {
-    .header {
-        padding-top: env(safe-area-inset-top, 0px);
-    }
     .app-container {
-        padding-top: calc(env(safe-area-inset-top, 0px) + 100px);
+        padding-top: env(safe-area-inset-top);
     }
     .nav-bottom {
         padding-bottom: env(safe-area-inset-bottom);
@@ -17781,30 +17769,24 @@
     .app-container {
         padding-left: 25px;
         padding-right: 25px;
-        padding-top: 90px;
         /* Extra bottom so content never hides behind fixed PWA banner / browser chrome */
         padding-bottom: calc(120px + env(safe-area-inset-bottom));
     }
 
-    /* ── Fixed header: single row flex matching desktop layout ── */
+    /* ── Sticky header: single row flex matching desktop layout ── */
     .header {
-        position: fixed;
+        position: sticky;
         top: 0;
-        left: 0;
-        right: 0;
         z-index: 300;
         background: var(--bg-primary);
         backdrop-filter: blur(12px);
         -webkit-backdrop-filter: blur(12px);
+        padding: 10px 0;
         border-bottom: 1px solid var(--border-subtle);
-    }
-
-    .header-inner {
         display: flex;
         align-items: center;
         justify-content: space-between;
         gap: 8px;
-        padding: 10px 25px;
     }
 
     .nav-steps    { flex: 1; justify-content: center; gap: 5px; }
@@ -17814,7 +17796,8 @@
     .nav-step { width: 22px; height: 4px; }
     .nav-step.active { width: 34px; }
 
-    /* content offset now handled by app-container padding-top */
+    /* ── Offset screen content below sticky header ── */
+    .screen.active { padding-top: 16px; }
 
     /* ── Gauge stats: stack label above value so long text doesn't collide ── */
     .gauge-stat {
