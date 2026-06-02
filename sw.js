@@ -1,4 +1,4 @@
-const CACHE = 'fixit-pwa-v4';
+const CACHE = 'fixit-pwa-v5';
 const PRECACHE = ['./index.html', './manifest.json'];
 
 // API path prefixes — never intercept these
@@ -37,7 +37,9 @@ self.addEventListener('fetch', e => {
                     caches.open(CACHE).then(c => c.put(req, res.clone()));
                     return res;
                 })
-                .catch(() => caches.match(req, { ignoreSearch: true }))
+                .catch(() => caches.match(req, { ignoreSearch: true })
+                    .then(r => r || new Response('', { status: 503 }))
+                )
         );
         return;
     }
@@ -50,7 +52,13 @@ self.addEventListener('fetch', e => {
                     try { caches.open(CACHE).then(c => c.put(req, res.clone())); } catch (_) {}
                     return res;
                 })
-                .catch(() => null);
+                .catch(() => {
+                    if (req.mode === 'navigate') {
+                        return caches.match('./index.html')
+                            .then(r => r || new Response('Offline', { status: 503, headers: { 'Content-Type': 'text/plain' } }));
+                    }
+                    return new Response('', { status: 503 });
+                });
             return cached || fetchPromise;
         })
     );
