@@ -7764,7 +7764,7 @@
 
             /* Header */
             .header {
-                padding: 12px 16px;
+                padding: 12px 0;
                 flex-wrap: nowrap;
                 gap: 10px;
             }
@@ -7774,7 +7774,7 @@
             }
 
             .logo-img {
-                height: 44px;
+                height: 60px;
             }
 
             .logo-text {
@@ -17776,7 +17776,7 @@
         -webkit-backdrop-filter: blur(14px);
         margin: 0;
         width: 100%;
-        padding: 10px 14px 6px;
+        padding: 10px 0 6px;
         border-bottom: 1px solid rgba(255,255,255,0.06);
         box-sizing: border-box;
         /* Grid: logo top-left, avatar top-right, nav full-width below */
@@ -17792,7 +17792,7 @@
     .nav-steps    { grid-area: nav; justify-content: center; gap: 5px; padding-bottom: 4px; }
     .user-menu-wrapper { grid-area: usermenu; }
 
-    .logo-img { height: 44px; }
+    .logo-img { height: 60px; }
     .logo-text { display: none; }
     .nav-step { width: 22px; height: 22px; font-size: 0.55rem; }
     .nav-step.active { width: 22px; }
