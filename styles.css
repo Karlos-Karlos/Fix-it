@@ -7764,7 +7764,7 @@
 
             /* Header */
             .header {
-                padding: 12px 25px;
+                padding: 12px 0;
                 flex-wrap: nowrap;
                 gap: 10px;
             }
@@ -17774,7 +17774,7 @@
         background: rgba(20,18,17,0.96);
         backdrop-filter: blur(14px);
         -webkit-backdrop-filter: blur(14px);
-        padding: 10px 25px 6px;
+        padding: 10px 0 6px;
         border-bottom: 1px solid rgba(255,255,255,0.06);
         box-sizing: border-box;
         /* Grid: logo top-left, avatar top-right, nav full-width below */
@@ -18003,7 +18003,7 @@
         padding-bottom: calc(90px + env(safe-area-inset-bottom));
     }
 
-    .header { padding: 10px 12px; }
+    .header { padding: 10px 0; }
 
     .glass-card { padding: 14px 12px; }
 
