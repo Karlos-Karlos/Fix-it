@@ -8409,7 +8409,7 @@ Please try again with a different photo.`;
             { intent: 'explain_themes', phrases: [
                 'themes', 'theme picker', 'dark mode', 'light mode',
                 'color theme', 'change theme', 'app theme', 'charcoal theme',
-                'ivory theme', 'midnight theme', 'ocean theme', 'lavender theme',
+                'ivory theme', 'bloom theme', 'ocean theme', 'lavender theme',
                 'appearance', 'color scheme', 'switch theme', 'visual theme'
             ]},
             { intent: 'explain_body_silhouette', phrases: [
@@ -9045,8 +9045,8 @@ Please try again with a different photo.`;
                     `Exercise filters help you customize your workout perfectly! Filter by All, Home (bodyweight only), Gym (equipment exercises), or Weak Areas (exercises that target your specific detected weaknesses). The Experience Level selector (Beginner, Intermediate, Advanced) adjusts difficulty so every workout is challenging but achievable. You're in control!`
                 ],
                 explain_themes: (ctx) => [
-                    `The Theme Picker in the header lets you personalize the entire look of the app! Choose from 5 beautiful themes: Cosmos (dark navy default), Daybreak (clean light mode), Midnight (dark blue), Ocean (refreshing teal), or Lavender (elegant purple). The whole color scheme changes instantly. Make the app feel like yours -- you deserve a space that inspires you!`,
-                    `Want to change things up? The Theme Picker gives you 5 gorgeous options: Charcoal (dark default), Daybreak (light), Midnight (dark blue), Ocean (teal), and Lavender (purple). One tap and the entire app transforms! It's a small thing, but training in an environment that feels right makes the whole experience better!`
+                    `The Theme Picker in the header lets you personalize the entire look of the app! Choose from 5 beautiful themes: Cosmos (dark navy default), Daybreak (clean light mode), Bloom (warm rose), Ocean (refreshing teal), or Lavender (elegant purple). The whole color scheme changes instantly. Make the app feel like yours -- you deserve a space that inspires you!`,
+                    `Want to change things up? The Theme Picker gives you 5 gorgeous options: Charcoal (dark default), Daybreak (light), Bloom (warm rose), Ocean (teal), and Lavender (purple). One tap and the entire app transforms! It's a small thing, but training in an environment that feels right makes the whole experience better!`
                 ],
                 explain_body_silhouette: (ctx) => [
                     `The Body Silhouette on the Results screen is a visual diagram of your physique! It's an SVG showing 4 labeled body zones -- Shoulders, Upper Body, Core, and Legs -- each with a status label like "Balanced," "Athletic," "Moderate Tone," or "Strong." It gives you an instant visual snapshot of where your strengths are. Such a great way to see your body's story at a glance!`,
@@ -9348,7 +9348,7 @@ Please try again with a different photo.`;
                     `Exercise Filters (Workout screen):\n- Filter categories:\n  - All: complete exercise library\n  - Home: no equipment required (bodyweight)\n  - Gym: equipment-based exercises\n  - Weak Areas: targets detected weaknesses (core, posture, etc.)\n- Experience Level selector:\n  - Beginner: foundational movements, lower intensity\n  - Intermediate: moderate complexity and load\n  - Advanced: high-intensity, complex movements\n- Application: filters and level combine to personalize exercise selection`,
                 ],
                 explain_themes: (ctx) => [
-                    `Theme System (header picker):\n- Available themes:\n  1. Charcoal: dark default theme\n  2. Ivory: light theme\n  3. Midnight: dark blue theme\n  4. Ocean: teal theme\n  5. Lavender: purple theme\n- Behavior: instant full-app color scheme change\n- Implementation: CSS custom property overrides\n- Persistence: theme preference stored in localStorage`,
+                    `Theme System (header picker):\n- Available themes:\n  1. Charcoal: dark default theme\n  2. Ivory: light theme\n  3. Bloom: warm rose light theme\n  4. Ocean: teal theme\n  5. Lavender: purple theme\n- Behavior: instant full-app color scheme change\n- Implementation: CSS custom property overrides\n- Persistence: theme preference stored in localStorage`,
                 ],
                 explain_body_silhouette: (ctx) => [
                     `Body Silhouette Visualization (Results screen):\n- Format: SVG body diagram\n- Zones displayed: Shoulders, Upper Body, Core, Legs (4 zones)\n- Per-zone labels: status descriptors (e.g., "Balanced", "Athletic", "Moderate Tone", "Strong")\n- Data source: body analysis metrics mapped to anatomical regions\n- Purpose: instant visual summary of physique assessment`,
@@ -9934,8 +9934,8 @@ Please try again with a different photo.`;
                     `Workout filters on the Workout screen! All = everything. Home = bodyweight only (for the "gym is too far" days). Gym = bring equipment. Weak Areas = the AI saw your weak spots and is now targeting them like a heat-seeking missile. The Experience Level selector goes from Beginner (we all start somewhere) to Intermediate (you know things) to Advanced (you probably correct other people's form). No judgment. Okay, maybe a little.`
                 ],
                 explain_themes: (ctx) => [
-                    `Theme picker: because your fitness journey deserves aesthetic consistency. Five options in the header: Charcoal (dark and brooding, like a fitness Batman), Ivory (light mode, for the brave), Midnight (dark blue, very "late night workout"), Ocean (teal, very "I do yoga"), and Lavender (purple, very "I'm fancy"). One click and the whole app changes color. It won't make you stronger, but you'll LOOK like you're using a premium app.`,
-                    `Five themes, zero impact on your actual fitness, 100% impact on vibes. Charcoal is the dark default (mysterious). Ivory is light mode (for psychopaths who exercise in the morning). Midnight is dark blue (nocturnal gym rats). Ocean is teal (you probably also have a meditation app). Lavender is purple (royalty energy). Pick one. Change it weekly. Live your best chromatic life.`
+                    `Theme picker: because your fitness journey deserves aesthetic consistency. Five options in the header: Charcoal (dark and brooding, like a fitness Batman), Ivory (light mode, for the brave), Bloom (warm rose, very "morning run energy"), Ocean (teal, very "I do yoga"), and Lavender (purple, very "I'm fancy"). One click and the whole app changes color. It won't make you stronger, but you'll LOOK like you're using a premium app.`,
+                    `Five themes, zero impact on your actual fitness, 100% impact on vibes. Charcoal is the dark default (mysterious). Ivory is light mode (for psychopaths who exercise in the morning). Bloom is warm rose light (morning run energy). Ocean is teal (you probably also have a meditation app). Lavender is purple (royalty energy). Pick one. Change it weekly. Live your best chromatic life.`
                 ],
                 explain_body_silhouette: (ctx) => [
                     `The Body Silhouette on Results is basically a paper doll version of you, but make it science. It's an SVG diagram showing 4 body zones -- Shoulders, Upper Body, Core, and Legs -- each with a status label. "Balanced," "Athletic," "Moderate Tone," "Strong"... it's like getting a report card, except the teacher is an AI and the subjects are body parts. At least you can't get detention for a weak core. Yet.`,

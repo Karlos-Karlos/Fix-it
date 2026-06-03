@@ -163,52 +163,56 @@
             --button-text: #FFFFFF;
         }
 
-        /* ========== MIDNIGHT (Aurora) ========== */
+        /* ========== BLOOM (Warm Rose Light) ========== */
         [data-theme="midnight"] {
-            --bg-primary: #080E1C;
-            --bg-secondary: #0D1528;
-            --bg-tertiary: #131E36;
-            --bg-card: #0F1B30;
-            --bg-card-hover: #162440;
+            /* Backgrounds - Warm blush white, soft & inviting */
+            --bg-primary: #FFF5F8;
+            --bg-secondary: #FDEEF3;
+            --bg-tertiary: #F8E3EC;
+            --bg-card: #FFFFFF;
+            --bg-card-hover: #FDF0F5;
 
-            /* Primary: Electric Periwinkle - aurora-inspired */
-            --accent-primary: #7B9EE8;
-            --accent-primary-dim: rgba(123, 158, 232, 0.25);
-            --accent-primary-subtle: rgba(123, 158, 232, 0.08);
-            --accent-primary-rgb: 123, 158, 232;
+            /* Primary: Vibrant Rose-Coral - energetic, warm, feminine */
+            --accent-primary: #E8506E;
+            --accent-primary-dim: rgba(232, 80, 110, 0.18);
+            --accent-primary-subtle: rgba(232, 80, 110, 0.07);
+            --accent-primary-rgb: 232, 80, 110;
 
-            /* Secondary: Aqua - cool complement */
-            --accent-secondary: #5CD4C8;
-            --accent-secondary-dim: rgba(92, 212, 200, 0.28);
-            --accent-secondary-rgb: 92, 212, 200;
+            /* Secondary: Warm Amber - golden energy */
+            --accent-secondary: #F09848;
+            --accent-secondary-dim: rgba(240, 152, 72, 0.22);
+            --accent-secondary-rgb: 240, 152, 72;
 
-            /* Tertiary: Soft Violet */
-            --accent-tertiary: #A890E8;
-            --accent-tertiary-rgb: 168, 144, 232;
+            /* Tertiary: Soft Mauve */
+            --accent-tertiary: #B870C8;
+            --accent-tertiary-rgb: 184, 112, 200;
 
-            /* Warm: Aurora Pink */
-            --accent-warm: #E898C8;
-            --accent-warm-rgb: 232, 152, 200;
+            /* Warm: Peach Blush */
+            --accent-warm: #F08878;
+            --accent-warm-rgb: 240, 136, 120;
 
-            --accent-success: #5CD4C8;
-            --accent-success-rgb: 92, 212, 200;
-            --accent-warning: #F4CC70;
-            --accent-danger: #E07090;
+            /* Functional */
+            --accent-success: #3CB888;
+            --accent-success-rgb: 60, 184, 136;
+            --accent-warning: #E8A838;
+            --accent-danger: #CC3858;
 
-            --text-primary: #E8EEF8;
-            --text-secondary: rgba(232, 238, 248, 0.7);
-            --text-tertiary: rgba(232, 238, 248, 0.5);
-            --text-muted: rgba(232, 238, 248, 0.4);
+            /* Text - deep plum on light */
+            --text-primary: #281828;
+            --text-secondary: rgba(40, 24, 40, 0.68);
+            --text-tertiary: rgba(40, 24, 40, 0.48);
+            --text-muted: rgba(40, 24, 40, 0.36);
 
-            --border-subtle: rgba(123, 158, 232, 0.08);
-            --border-medium: rgba(123, 158, 232, 0.15);
-            --border-accent: rgba(123, 158, 232, 0.3);
-            --shadow-color: rgba(0, 0, 20, 0.55);
+            /* Borders */
+            --border-subtle: rgba(232, 80, 110, 0.1);
+            --border-medium: rgba(232, 80, 110, 0.16);
+            --border-accent: rgba(232, 80, 110, 0.28);
+            --shadow-color: rgba(100, 20, 40, 0.07);
 
-            --accent-cyan-glow: rgba(92, 212, 200, 0.22);
+            --accent-cyan-glow: rgba(184, 112, 200, 0.14);
 
-            --input-bg: rgba(123, 158, 232, 0.05);
-            --button-text: #080E1C;
+            --input-bg: rgba(232, 80, 110, 0.03);
+            --button-text: #FFFFFF;
         }
 
         /* ========== OCEAN (Lagoon) ========== */
