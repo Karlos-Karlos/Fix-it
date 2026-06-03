@@ -17758,22 +17758,7 @@
     cursor: pointer; font-family: 'Plus Jakarta Sans', sans-serif;
 }
 
-/* Safe area padding for notched phones in standalone mode */
-@media (display-mode: standalone) {
-    .header {
-        padding-top: env(safe-area-inset-top, 0px);
-    }
-    .app-container {
-        padding-top: calc(env(safe-area-inset-top, 0px) + 90px);
-    }
-    .nav-bottom {
-        padding-bottom: env(safe-area-inset-bottom);
-    }
-    .wearable-overlay {
-        padding-top: env(safe-area-inset-top);
-        padding-bottom: env(safe-area-inset-bottom);
-    }
-}
+/* Safe area block moved to end of file so it wins over all breakpoint overrides */
 
 /* ══════════════════════════════════════════
    MOBILE PWA — Comprehensive Layout Fixes
@@ -17791,7 +17776,7 @@
     .app-container {
         padding-left: 25px;
         padding-right: 25px;
-        padding-top: 90px;
+        padding-top: calc(env(safe-area-inset-top, 0px) + 80px);
         /* Extra bottom so content never hides behind fixed PWA banner / browser chrome */
         padding-bottom: calc(120px + env(safe-area-inset-bottom));
     }
@@ -17806,7 +17791,11 @@
         background: var(--bg-card);
         backdrop-filter: blur(12px);
         -webkit-backdrop-filter: blur(12px);
-        padding: 10px 25px;
+        /* Use individual properties — shorthand would reset padding-top and clobber safe-area */
+        padding-top: 10px;
+        padding-left: 25px;
+        padding-right: 25px;
+        padding-bottom: 10px;
         border-bottom: 1px solid var(--border-subtle);
         box-shadow: 0 4px 24px rgba(0, 0, 0, 0.35);
         display: flex;
@@ -18195,4 +18184,38 @@ body.has-bottom-nav .coach-panel {
     font-size: 0.85rem;
     font-weight: 600;
     letter-spacing: 0.01em;
+}
+
+/* ══════════════════════════════════════════════════════════════
+   iOS SAFE AREA — placed LAST so it wins over every breakpoint.
+
+   With viewport-fit=cover the viewport extends under the status
+   bar. env(safe-area-inset-top) is the status-bar height.
+   The header background already covers that area (position:fixed,
+   top:0), but its padding-top must push the logo below the bar,
+   and .app-container must start below the full header height.
+══════════════════════════════════════════════════════════════ */
+
+/* Safari browser + any PWA on a notched iPhone */
+@supports (padding-top: env(safe-area-inset-top)) {
+    .header {
+        padding-top: env(safe-area-inset-top);
+    }
+}
+
+/* PWA / standalone — also covers Android TWA */
+@media (display-mode: standalone) {
+    .header {
+        padding-top: env(safe-area-inset-top, 0px);
+    }
+    .app-container {
+        padding-top: calc(env(safe-area-inset-top, 0px) + 90px);
+    }
+    .nav-bottom {
+        padding-bottom: env(safe-area-inset-bottom, 0px);
+    }
+    .wearable-overlay {
+        padding-top: env(safe-area-inset-top, 0px);
+        padding-bottom: env(safe-area-inset-bottom, 0px);
+    }
 }
