@@ -18197,39 +18197,44 @@ body.has-bottom-nav .coach-panel {
     letter-spacing: 0.01em;
 }
 
-/* ═══════════════════════════════════════════════════════════════
-   iOS STATUS BAR FIX — placed absolutely last so it wins over
-   every breakpoint rule above.
+/* ══════════════════════════════════════════════════════════════
+   STATUS BAR FIX — must be the very last rules in this file.
 
-   Uses max() so this is a no-op on non-notch / desktop devices:
-     max(20px, 0px)  = 20px  → desktop/non-notch: no change
-     max(20px, 47px) = 47px  → iPhone notch: header grows to cover status bar
-     max(20px, 59px) = 59px  → iPhone Dynamic Island: same
+   Individual padding-top always overrides a shorthand set earlier
+   in the cascade. max() is zero-cost on non-notch / desktop
+   because env(safe-area-inset-top) = 0 there:
 
-   viewport-fit=cover (added to <meta viewport>) is required so
-   that env(safe-area-inset-top) returns the real pixel value in
-   Safari browser; without it env() always returns 0.
-═══════════════════════════════════════════════════════════════ */
-@supports (padding: max(0px, env(safe-area-inset-top))) {
+     max(20px, 0px)  = 20px  → desktop / non-notch: no change
+     max(20px, 47px) = 47px  → iPhone notch: header covers bar
+     max(20px, 59px) = 59px  → Dynamic Island: same
 
-    /* Desktop & tablet: preserve existing 20px top padding on non-notch */
+   viewport-fit=cover in <meta> makes env() return real values in
+   Safari browser (not just PWA mode).
+
+   overscroll-behavior: none stops iOS rubber-band scroll from
+   pulling content above y=0 into the transparent status bar.
+══════════════════════════════════════════════════════════════ */
+
+html, body {
+    overscroll-behavior-y: none;
+}
+
+/* Desktop / tablet — individual property wins over earlier shorthands */
+.header {
+    padding-top: max(20px, env(safe-area-inset-top, 0px));
+}
+
+/* Mobile — tighter base padding, same safe-area logic */
+@media (max-width: 480px) {
     .header {
-        padding-top: max(20px, env(safe-area-inset-top));
+        padding-top: max(10px, env(safe-area-inset-top, 0px));
     }
-
-    /* Mobile ≤480px: preserve existing 10px top padding on non-notch */
-    @media (max-width: 480px) {
-        .header {
-            padding-top: max(10px, env(safe-area-inset-top));
-        }
-        /* Push content below the now-taller header */
-        .app-container {
-            padding-top: calc(max(0px, env(safe-area-inset-top)) + 90px);
-        }
+    .app-container {
+        padding-top: calc(max(0px, env(safe-area-inset-top, 0px)) + 90px);
     }
 }
 
-/* PWA standalone — bottom nav and wearable overlay adjustments */
+/* PWA standalone — bottom chrome adjustments */
 @media (display-mode: standalone) {
     .nav-bottom {
         padding-bottom: env(safe-area-inset-bottom, 0px);
