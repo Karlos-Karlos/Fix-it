@@ -215,52 +215,53 @@
             --button-text: #FFFFFF;
         }
 
-        /* ========== OCEAN (Lagoon) ========== */
+        /* ========== OCEAN (Brand Blue) ========== */
         [data-theme="ocean"] {
-            --bg-primary: #081620;
-            --bg-secondary: #0C1E2C;
-            --bg-tertiary: #102838;
-            --bg-card: #0A1C2A;
-            --bg-card-hover: #102430;
+            /* Backgrounds - Deep navy matching logo's dark body */
+            --bg-primary: #0C1524;
+            --bg-secondary: #111D30;
+            --bg-tertiary: #18273C;
+            --bg-card: #0F1E34;
+            --bg-card-hover: #162640;
 
-            /* Primary: Vibrant Teal - lively, tropical */
-            --accent-primary: #18CEB4;
-            --accent-primary-dim: rgba(24, 206, 180, 0.25);
-            --accent-primary-subtle: rgba(24, 206, 180, 0.08);
-            --accent-primary-rgb: 24, 206, 180;
+            /* Primary: Logo Electric Blue - the brand's signature color */
+            --accent-primary: #1E78F0;
+            --accent-primary-dim: rgba(30, 120, 240, 0.25);
+            --accent-primary-subtle: rgba(30, 120, 240, 0.08);
+            --accent-primary-rgb: 30, 120, 240;
 
-            /* Secondary: Bright Cyan */
-            --accent-secondary: #38C8F0;
-            --accent-secondary-dim: rgba(56, 200, 240, 0.28);
-            --accent-secondary-rgb: 56, 200, 240;
+            /* Secondary: Sky Blue - lighter logo complement */
+            --accent-secondary: #50C0F4;
+            --accent-secondary-dim: rgba(80, 192, 244, 0.28);
+            --accent-secondary-rgb: 80, 192, 244;
 
-            /* Tertiary: Light Aqua */
-            --accent-tertiary: #68E4D8;
-            --accent-tertiary-rgb: 104, 228, 216;
+            /* Tertiary: Cyan - water depth */
+            --accent-tertiary: #38D8F0;
+            --accent-tertiary-rgb: 56, 216, 240;
 
-            /* Warm: Coral Pink - energetic contrast */
-            --accent-warm: #FF8BA8;
-            --accent-warm-rgb: 255, 139, 168;
+            /* Warm: Teal - retains ocean identity */
+            --accent-warm: #20C8B0;
+            --accent-warm-rgb: 32, 200, 176;
 
-            --accent-success: #18CEB4;
-            --accent-success-rgb: 24, 206, 180;
-            --accent-warning: #FFD060;
-            --accent-danger: #F06488;
+            --accent-success: #28C890;
+            --accent-success-rgb: 40, 200, 144;
+            --accent-warning: #F0C850;
+            --accent-danger: #F05878;
 
-            --text-primary: #E0F4F0;
-            --text-secondary: rgba(224, 244, 240, 0.7);
-            --text-tertiary: rgba(224, 244, 240, 0.5);
-            --text-muted: rgba(224, 244, 240, 0.4);
+            --text-primary: #DCE8F8;
+            --text-secondary: rgba(220, 232, 248, 0.7);
+            --text-tertiary: rgba(220, 232, 248, 0.5);
+            --text-muted: rgba(220, 232, 248, 0.4);
 
-            --border-subtle: rgba(24, 206, 180, 0.1);
-            --border-medium: rgba(24, 206, 180, 0.18);
-            --border-accent: rgba(24, 206, 180, 0.32);
-            --shadow-color: rgba(0, 10, 20, 0.55);
+            --border-subtle: rgba(30, 120, 240, 0.1);
+            --border-medium: rgba(30, 120, 240, 0.18);
+            --border-accent: rgba(30, 120, 240, 0.35);
+            --shadow-color: rgba(0, 8, 24, 0.55);
 
-            --accent-cyan-glow: rgba(56, 200, 240, 0.22);
+            --accent-cyan-glow: rgba(56, 216, 240, 0.22);
 
-            --input-bg: rgba(24, 206, 180, 0.04);
-            --button-text: #081620;
+            --input-bg: rgba(30, 120, 240, 0.05);
+            --button-text: #FFFFFF;
         }
 
         /* ========== LAVENDER (Petal) ========== */
