@@ -1,5 +1,18 @@
 const https = require('https');
 
+// Resolve the public base URL once (used for logo src and reset links)
+function getBaseUrl() {
+  if (process.env.FRONTEND_URL) return process.env.FRONTEND_URL.replace(/\/$/, '');
+  if (process.env.RAILWAY_PUBLIC_DOMAIN) return `https://${process.env.RAILWAY_PUBLIC_DOMAIN}`;
+  return 'http://localhost:3000';
+}
+
+const LOGO_HEADER = (baseUrl) =>
+  `<div style="text-align:center;margin-bottom:24px;">` +
+  `<img src="${baseUrl}/Logo.png" alt="FiX-it" width="80" height="80" ` +
+  `style="border-radius:16px;display:block;margin:0 auto;" />` +
+  `</div>`;
+
 // ── Brevo HTTP API (no SMTP — works on Railway) ──
 function sendViaBrevo({ to, subject, html }) {
   const FROM_NAME = 'FiX-it';
@@ -55,13 +68,14 @@ async function sendMail({ to, subject, html }) {
 }
 
 async function sendVerificationEmail(to, code) {
+  const base = getBaseUrl();
   await sendMail({
     to,
     subject: 'Your FiX-it verification code',
     html: `
       <div style="font-family:'Segoe UI',Arial,sans-serif;max-width:480px;margin:0 auto;padding:32px;background:#1a1917;border-radius:12px;">
-        <h2 style="color:#c9a962;margin:0 0 8px 0;font-size:22px;">FiX-it</h2>
-        <p style="color:#d4d0c8;margin:0 0 24px 0;font-size:15px;">Enter this code to verify your account:</p>
+        ${LOGO_HEADER(base)}
+        <p style="color:#d4d0c8;margin:0 0 24px 0;font-size:15px;text-align:center;">Enter this code to verify your account:</p>
         <div style="background:#232120;border:1px solid #3a3632;border-radius:8px;padding:24px;text-align:center;margin-bottom:24px;">
           <span style="font-size:36px;font-weight:700;letter-spacing:8px;color:#ffffff;font-family:monospace;">${code}</span>
         </div>
@@ -72,8 +86,7 @@ async function sendVerificationEmail(to, code) {
 }
 
 async function sendPasswordResetEmail(to, token) {
-  const base = process.env.FRONTEND_URL
-    || (process.env.RAILWAY_PUBLIC_DOMAIN ? `https://${process.env.RAILWAY_PUBLIC_DOMAIN}` : 'http://localhost:3000');
+  const base = getBaseUrl();
   const link = `${base}?reset_token=${token}`;
 
   await sendMail({
@@ -81,8 +94,8 @@ async function sendPasswordResetEmail(to, token) {
     subject: 'Reset your FiX-it password',
     html: `
       <div style="font-family:'Segoe UI',Arial,sans-serif;max-width:480px;margin:0 auto;padding:32px;background:#1a1917;border-radius:12px;">
-        <h2 style="color:#c9a962;margin:0 0 8px 0;font-size:22px;">FiX-it</h2>
-        <p style="color:#d4d0c8;margin:0 0 24px 0;font-size:15px;">Click the button below to reset your password:</p>
+        ${LOGO_HEADER(base)}
+        <p style="color:#d4d0c8;margin:0 0 24px 0;font-size:15px;text-align:center;">Click the button below to reset your password:</p>
         <div style="text-align:center;margin-bottom:24px;">
           <a href="${link}" style="display:inline-block;padding:14px 32px;background:#c9a962;color:#141211;font-weight:700;font-size:15px;border-radius:8px;text-decoration:none;">Reset Password</a>
         </div>
