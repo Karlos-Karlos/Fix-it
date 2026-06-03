@@ -18196,3 +18196,46 @@ body.has-bottom-nav .coach-panel {
     font-weight: 600;
     letter-spacing: 0.01em;
 }
+
+/* ═══════════════════════════════════════════════════════════════
+   iOS STATUS BAR FIX — placed absolutely last so it wins over
+   every breakpoint rule above.
+
+   Uses max() so this is a no-op on non-notch / desktop devices:
+     max(20px, 0px)  = 20px  → desktop/non-notch: no change
+     max(20px, 47px) = 47px  → iPhone notch: header grows to cover status bar
+     max(20px, 59px) = 59px  → iPhone Dynamic Island: same
+
+   viewport-fit=cover (added to <meta viewport>) is required so
+   that env(safe-area-inset-top) returns the real pixel value in
+   Safari browser; without it env() always returns 0.
+═══════════════════════════════════════════════════════════════ */
+@supports (padding: max(0px, env(safe-area-inset-top))) {
+
+    /* Desktop & tablet: preserve existing 20px top padding on non-notch */
+    .header {
+        padding-top: max(20px, env(safe-area-inset-top));
+    }
+
+    /* Mobile ≤480px: preserve existing 10px top padding on non-notch */
+    @media (max-width: 480px) {
+        .header {
+            padding-top: max(10px, env(safe-area-inset-top));
+        }
+        /* Push content below the now-taller header */
+        .app-container {
+            padding-top: calc(max(0px, env(safe-area-inset-top)) + 90px);
+        }
+    }
+}
+
+/* PWA standalone — bottom nav and wearable overlay adjustments */
+@media (display-mode: standalone) {
+    .nav-bottom {
+        padding-bottom: env(safe-area-inset-bottom, 0px);
+    }
+    .wearable-overlay {
+        padding-top: env(safe-area-inset-top, 0px);
+        padding-bottom: env(safe-area-inset-bottom, 0px);
+    }
+}
