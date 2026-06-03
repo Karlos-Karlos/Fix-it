@@ -14465,7 +14465,7 @@ Please try again with a different photo.`;
                         if (!sw) return;
                         sw.addEventListener('statechange', () => {
                             if (sw.state === 'installed' && navigator.serviceWorker.controller) {
-                                showToast('App updated — refresh for the latest version', 'info');
+                                showToast('App updated — refresh for the latest version', 'success');
                             }
                         });
                     });
