@@ -163,55 +163,55 @@
             --button-text: #FFFFFF;
         }
 
-        /* ========== BLOOM (Warm Rose Light) ========== */
+        /* ========== BLOOM (Soft Rose Light) ========== */
         [data-theme="midnight"] {
-            /* Backgrounds - Warm blush white, soft & inviting */
-            --bg-primary: #FFF5F8;
-            --bg-secondary: #FDEEF3;
-            --bg-tertiary: #F8E3EC;
+            /* Backgrounds - Barely-there rose white, airy & soft */
+            --bg-primary: #FEF7F9;
+            --bg-secondary: #FCEEF3;
+            --bg-tertiary: #F8E6EE;
             --bg-card: #FFFFFF;
-            --bg-card-hover: #FDF0F5;
+            --bg-card-hover: #FDF3F7;
 
-            /* Primary: Vibrant Rose-Coral - energetic, warm, feminine */
-            --accent-primary: #E8506E;
-            --accent-primary-dim: rgba(232, 80, 110, 0.18);
-            --accent-primary-subtle: rgba(232, 80, 110, 0.07);
-            --accent-primary-rgb: 232, 80, 110;
+            /* Primary: Soft Rose - gentle, warm, not overpowering */
+            --accent-primary: #D4788E;
+            --accent-primary-dim: rgba(212, 120, 142, 0.18);
+            --accent-primary-subtle: rgba(212, 120, 142, 0.07);
+            --accent-primary-rgb: 212, 120, 142;
 
-            /* Secondary: Warm Amber - golden energy */
-            --accent-secondary: #F09848;
-            --accent-secondary-dim: rgba(240, 152, 72, 0.22);
-            --accent-secondary-rgb: 240, 152, 72;
+            /* Secondary: Soft Peach - warm golden glow */
+            --accent-secondary: #E8A878;
+            --accent-secondary-dim: rgba(232, 168, 120, 0.22);
+            --accent-secondary-rgb: 232, 168, 120;
 
-            /* Tertiary: Soft Mauve */
-            --accent-tertiary: #B870C8;
-            --accent-tertiary-rgb: 184, 112, 200;
+            /* Tertiary: Dusty Mauve */
+            --accent-tertiary: #C098CC;
+            --accent-tertiary-rgb: 192, 152, 204;
 
-            /* Warm: Peach Blush */
-            --accent-warm: #F08878;
-            --accent-warm-rgb: 240, 136, 120;
+            /* Warm: Soft Peach-Pink */
+            --accent-warm: #E89898;
+            --accent-warm-rgb: 232, 152, 152;
 
             /* Functional */
-            --accent-success: #3CB888;
-            --accent-success-rgb: 60, 184, 136;
-            --accent-warning: #E8A838;
-            --accent-danger: #CC3858;
+            --accent-success: #58C898;
+            --accent-success-rgb: 88, 200, 152;
+            --accent-warning: #E8B858;
+            --accent-danger: #C85870;
 
-            /* Text - deep plum on light */
-            --text-primary: #281828;
-            --text-secondary: rgba(40, 24, 40, 0.68);
-            --text-tertiary: rgba(40, 24, 40, 0.48);
-            --text-muted: rgba(40, 24, 40, 0.36);
+            /* Text - deep warm brown on light */
+            --text-primary: #2E1C24;
+            --text-secondary: rgba(46, 28, 36, 0.65);
+            --text-tertiary: rgba(46, 28, 36, 0.45);
+            --text-muted: rgba(46, 28, 36, 0.33);
 
             /* Borders */
-            --border-subtle: rgba(232, 80, 110, 0.1);
-            --border-medium: rgba(232, 80, 110, 0.16);
-            --border-accent: rgba(232, 80, 110, 0.28);
-            --shadow-color: rgba(100, 20, 40, 0.07);
+            --border-subtle: rgba(212, 120, 142, 0.1);
+            --border-medium: rgba(212, 120, 142, 0.16);
+            --border-accent: rgba(212, 120, 142, 0.26);
+            --shadow-color: rgba(80, 20, 35, 0.06);
 
-            --accent-cyan-glow: rgba(184, 112, 200, 0.14);
+            --accent-cyan-glow: rgba(192, 152, 204, 0.13);
 
-            --input-bg: rgba(232, 80, 110, 0.03);
+            --input-bg: rgba(212, 120, 142, 0.03);
             --button-text: #FFFFFF;
         }
 
