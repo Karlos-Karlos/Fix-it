@@ -18215,13 +18215,6 @@ body.has-bottom-nav .coach-panel {
    pulling content above y=0 into the transparent status bar.
 ══════════════════════════════════════════════════════════════ */
 
-/* Prevent iOS rubber-band scroll from pulling content into status bar.
-   Scoped to touch-only devices so desktop mouse wheel still works. */
-@media (hover: none) and (pointer: coarse) {
-    html, body {
-        overscroll-behavior-y: none;
-    }
-}
 
 /* Desktop / tablet — individual property wins over earlier shorthands */
 .header {
