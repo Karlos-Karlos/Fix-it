@@ -2955,20 +2955,9 @@
                 return;
             }
 
-            const errorMessage = `No Human Body Detected
+            const errorMessage = `No body detected in your photo.\n• Show your full body (head to feet)\n• Face the camera directly\n• Good lighting, minimal shadows`;
 
-The AI could not detect a human body in your photo.
-
-Please ensure:
-• Your FULL BODY is visible (head to feet)
-• You are facing the camera
-• Good lighting with minimal shadows
-• Plain background if possible
-• Photo is not blurry
-
-Please try again with a different photo.`;
-
-            showToast(errorMessage, 'error');
+            showToast(errorMessage, 'error', 6000);
 
             // Reset state and return to upload screen
             state.humanDetected = false;

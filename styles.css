@@ -11418,7 +11418,8 @@
 
         .toast-message {
             flex: 1;
-            line-height: 1.4;
+            line-height: 1.5;
+            white-space: pre-wrap;
         }
 
         .toast-close {
