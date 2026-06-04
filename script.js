@@ -691,6 +691,11 @@
             document.getElementById('user-menu-wrapper').style.display = 'none';
             document.getElementById('user-menu-wrapper').classList.remove('open');
             document.querySelector('.nav-steps').style.display = 'none';
+            const coachFab = document.getElementById('coach-fab');
+            const coachPanel = document.getElementById('coach-panel');
+            if (coachFab) coachFab.style.display = 'none';
+            if (coachPanel) { coachPanel.classList.remove('open'); coachPanel.style.display = 'none'; }
+            state.coachOpen = false;
 
             // Hide bottom nav — must be done explicitly since goToScreen() is not called
             const bottomNav = document.getElementById('bottom-nav');
@@ -707,6 +712,8 @@
         function enterApp() {
             // Hide auth screen
             document.getElementById('screen-auth').classList.remove('active');
+            const coachFab = document.getElementById('coach-fab');
+            if (coachFab) coachFab.style.display = '';
             document.querySelector('.nav-steps').style.display = 'flex';
 
             // Clear IndexedDB snapshots when a different user logs in on this device.
