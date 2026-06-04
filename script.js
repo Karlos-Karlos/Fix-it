@@ -1924,12 +1924,12 @@
                 const lShoulder = lm[11], rShoulder = lm[12];
                 const lHip = lm[23],      rHip      = lm[24];
                 const torsoAnchors = [lShoulder, rShoulder, lHip, rHip];
-                const ANCHOR_VIS = 0.6; // raised from 0.3
+                const ANCHOR_VIS = 0.4;
                 const allAnchorsVisible = torsoAnchors.every(p => p && p.visibility >= ANCHOR_VIS);
 
                 // ── 2. Enough landmarks are confident across the full body ────────
-                const confidentCount = lm.filter(p => p && p.visibility >= 0.5).length;
-                const CONFIDENT_MIN = 10; // at least 10 of 33 landmarks confident
+                const confidentCount = lm.filter(p => p && p.visibility >= 0.35).length;
+                const CONFIDENT_MIN = 8; // at least 8 of 33 landmarks confident
 
                 // ── 3. Geometric sanity: shoulders must be above hips ─────────────
                 // (in normalised image coords y increases downward)
