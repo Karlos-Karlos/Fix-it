@@ -16120,12 +16120,16 @@
     align-self: flex-start;
 }
 
-[data-theme="light"] #screen-results .confidence-badge {
+[data-theme="light"] #screen-results .confidence-badge,
+[data-theme="midnight"] #screen-results .confidence-badge,
+[data-theme="lavender"] #screen-results .confidence-badge {
     background: rgba(31, 35, 40, 0.08);
     border-color: rgba(31, 35, 40, 0.15);
 }
 
-[data-theme="light"] .confidence-text {
+[data-theme="light"] .confidence-text,
+[data-theme="midnight"] .confidence-text,
+[data-theme="lavender"] .confidence-text {
     color: var(--text-primary);
 }
 
