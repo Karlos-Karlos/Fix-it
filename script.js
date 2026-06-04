@@ -14758,13 +14758,13 @@ ${mealsHtml || '<p style="color:#888;font-style:italic">Open the Nutrition scree
                 };
             } else if (_isIosChrome()) {
                 btn.textContent = 'Open in Safari to Install';
-                btn.style.background = 'rgba(255,255,255,0.08)';
-                btn.style.color = 'rgba(255,255,255,0.6)';
-                btn.style.border = '1px solid rgba(255,255,255,0.12)';
+                btn.style.background = 'var(--input-bg)';
+                btn.style.color = 'var(--text-secondary)';
+                btn.style.border = '1px solid var(--border-medium)';
                 btn.onclick = () => {
                     if (note) {
                         note.style.display = 'block';
-                        note.innerHTML = 'Chrome on iPhone cannot install apps. Open this page in <strong style="color:#c9a962">Safari</strong>, then tap Share → <strong style="color:#c9a962">Add to Home Screen</strong>.';
+                        note.innerHTML = 'Chrome on iPhone cannot install apps. Open this page in <strong style="color:var(--accent-primary)">Safari</strong>, then tap Share → <strong style="color:var(--accent-primary)">Add to Home Screen</strong>.';
                     }
                 };
             } else if (_isIosSafari()) {
@@ -14772,7 +14772,7 @@ ${mealsHtml || '<p style="color:#888;font-style:italic">Open the Nutrition scree
                 btn.onclick = () => {
                     if (note) {
                         note.style.display = 'block';
-                        note.innerHTML = 'Tap the <strong style="color:#c9a962">Share</strong> button at the bottom of Safari, then tap <strong style="color:#c9a962">Add to Home Screen</strong>.';
+                        note.innerHTML = 'Tap the <strong style="color:var(--accent-primary)">Share</strong> button at the bottom of Safari, then tap <strong style="color:var(--accent-primary)">Add to Home Screen</strong>.';
                     }
                 };
             } else {
