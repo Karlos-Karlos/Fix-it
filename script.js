@@ -667,15 +667,37 @@
             if (state.accessToken) {
                 apiFetch('/auth/logout', { method: 'POST' }).catch(() => {});
             }
+
+            // Clear auth tokens
             state.accessToken = null;
             state.refreshToken = null;
             state.user = null;
             localStorage.removeItem('fixit-access-token');
             localStorage.removeItem('fixit-refresh-token');
             localStorage.removeItem('fixit-user');
+
+            // Wipe all sensitive in-memory data so it cannot be accessed post-logout
+            state.analysisResult = null;
+            state.imageData = null;
+            state.hasImage = false;
+            state.landmarks = null;
+            state.humanDetected = false;
+            state.macroTargets = null;
+            state._bmr = null;
+            state._tdee = null;
+            state.measurements = null;
+
+            // Hide app chrome
             document.getElementById('user-menu-wrapper').style.display = 'none';
             document.getElementById('user-menu-wrapper').classList.remove('open');
             document.querySelector('.nav-steps').style.display = 'none';
+
+            // Hide bottom nav — must be done explicitly since goToScreen() is not called
+            const bottomNav = document.getElementById('bottom-nav');
+            if (bottomNav) {
+                bottomNav.style.display = 'none';
+                document.body.classList.remove('has-bottom-nav');
+            }
 
             // Hide all screens, show auth
             document.querySelectorAll('.screen').forEach(s => s.classList.remove('active'));
@@ -2725,6 +2747,13 @@
         }
 
         function goToScreen(num) {
+            // Block unauthenticated access to any app screen
+            if (!state.accessToken && num !== 0) {
+                document.querySelectorAll('.screen').forEach(s => s.classList.remove('active'));
+                document.getElementById('screen-auth').classList.add('active');
+                return;
+            }
+
             // Block non-admin users from admin screen
             if (num === 10 && (!state.user || state.user.role !== 'admin')) {
                 showToast('You do not have permission to access the admin panel.', 'error');
