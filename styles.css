@@ -11763,6 +11763,18 @@
             font-weight: 400;
         }
 
+        .auth-credit {
+            position: fixed;
+            bottom: 16px;
+            right: 20px;
+            font-size: 0.68rem;
+            line-height: 1.5;
+            text-align: right;
+            color: var(--text-muted);
+            pointer-events: none;
+            z-index: 10;
+        }
+
 
         /* Email verification panel */
         .auth-verify {
