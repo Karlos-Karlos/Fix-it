@@ -11776,13 +11776,6 @@
             max-width: calc(100vw - 32px);
         }
 
-        @media (max-width: 480px) {
-            .auth-credit {
-                position: static;
-                margin-top: 12px;
-                text-align: center;
-            }
-        }
 
 
         /* Email verification panel */
