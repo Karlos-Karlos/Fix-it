@@ -2939,7 +2939,13 @@
 
             if (typeof createImageBitmap === 'function') {
                 try {
-                    const bitmap = await createImageBitmap(img, { imageOrientation: 'from-image' });
+                    // createImageBitmap can hang indefinitely on some iOS Safari
+                    // versions for certain images — race it against a short
+                    // timeout and fall back to the plain <img> if it never settles.
+                    const bitmap = await Promise.race([
+                        createImageBitmap(img, { imageOrientation: 'from-image' }),
+                        new Promise((_, reject) => setTimeout(() => reject(new Error('createImageBitmap timeout')), 3000))
+                    ]);
                     source = bitmap;
                     width = bitmap.width;
                     height = bitmap.height;
@@ -2981,7 +2987,13 @@
             try {
 
                 // Normalize orientation/size before handing the image to MediaPipe.
-                const canvas = await prepareImageForAnalysis(state.imageData);
+                // Guard with a hard timeout in case image decoding never settles
+                // (seen on some iOS Safari versions) — that would otherwise hang
+                // before the pose-detection timeout below is even reached.
+                const canvas = await Promise.race([
+                    prepareImageForAnalysis(state.imageData),
+                    new Promise((_, reject) => setTimeout(() => reject(new Error('image prep timeout')), 8000))
+                ]);
 
                 // Send to MediaPipe for pose detection. On phones the WASM/model
                 // files may still be downloading on the first run, which can take
