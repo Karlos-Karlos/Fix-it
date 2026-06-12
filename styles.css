@@ -18270,7 +18270,7 @@ body.has-bottom-nav .coach-panel {
 }
 
 .form-check-header {
-    padding-top: env(safe-area-inset-top, 0px);
+    padding-top: calc(env(safe-area-inset-top, 0px) + 12px);
 }
 
 .weekly-routine-modal {
