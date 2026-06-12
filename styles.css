@@ -8686,6 +8686,10 @@
             stroke: var(--accent-tertiary);
         }
 
+        .progress-logo svg {
+            stroke: var(--accent-success);
+        }
+
         .screen-title-row h1 {
             margin-bottom: 4px;
         }
