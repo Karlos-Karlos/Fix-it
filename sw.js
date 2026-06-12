@@ -1,4 +1,4 @@
-const CACHE = 'fixit-pwa-v34';
+const CACHE = 'fixit-pwa-v35';
 const PRECACHE = ['./index.html', './manifest.json'];
 
 // API path prefixes — never intercept these
@@ -29,12 +29,19 @@ self.addEventListener('fetch', e => {
     // Never intercept backend API calls
     if (API_PREFIXES.some(p => url.pathname.startsWith(p))) return;
 
-    // Navigation requests (page loads): serve cached index.html if available, else go to network.
-    // Never call respondWith(null) — if both fail, let the Promise reject so Safari shows
-    // a normal network error instead of "Returned response is null".
+    // Navigation requests (page loads): network first so HTML/inline bootstrap
+    // updates reach Safari immediately, falling back to the cached shell only
+    // when offline. Never call respondWith(null) — if both fail, let the
+    // Promise reject so Safari shows a normal network error instead of
+    // "Returned response is null".
     if (req.mode === 'navigate') {
         e.respondWith(
-            caches.match('./index.html').then(cached => cached || fetch(req))
+            fetch(req)
+                .then(res => {
+                    caches.open(CACHE).then(c => c.put('./index.html', res.clone()));
+                    return res;
+                })
+                .catch(() => caches.match('./index.html'))
         );
         return;
     }
