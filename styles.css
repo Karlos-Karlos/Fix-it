@@ -6048,6 +6048,12 @@
             color: var(--text-primary);
         }
 
+        /* Form Check panel always has a dark camera overlay background,
+           regardless of the active theme — keep its title legible. */
+        .form-check-panel .form-check-title {
+            color: rgba(255, 255, 255, 0.92);
+        }
+
         .form-check-dot {
             width: 8px;
             height: 8px;
@@ -6111,7 +6117,7 @@
             justify-content: center;
             gap: 12px;
             background: rgba(15, 14, 13, 0.85);
-            color: var(--text-secondary);
+            color: rgba(255, 255, 255, 0.6);
             font-size: 0.85rem;
             transition: opacity 0.3s;
         }
@@ -6329,7 +6335,7 @@
         .fc-mode-title {
             font-size: 0.82rem;
             font-weight: 700;
-            color: var(--text-primary);
+            color: rgba(255, 255, 255, 0.92);
             letter-spacing: -0.01em;
             white-space: nowrap;
         }
