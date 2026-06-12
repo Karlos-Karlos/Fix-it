@@ -2923,30 +2923,30 @@
         // mobile canvas/memory limits and speed up WASM inference.
         async function prepareImageForAnalysis(dataURL) {
             const MAX_DIMENSION = 1280;
-            const blob = await (await fetch(dataURL)).blob();
 
-            let source = null;
-            let width, height;
+            // Load via a plain <img> first — fetch() on data: URLs is unreliable
+            // on Safari/WebKit, so avoid it entirely.
+            const img = new Image();
+            img.src = dataURL;
+            await new Promise((resolve, reject) => {
+                img.onload = resolve;
+                img.onerror = reject;
+            });
+
+            let source = img;
+            let width = img.naturalWidth || img.width;
+            let height = img.naturalHeight || img.height;
+
             if (typeof createImageBitmap === 'function') {
                 try {
-                    source = await createImageBitmap(blob, { imageOrientation: 'from-image' });
-                    width = source.width;
-                    height = source.height;
+                    const bitmap = await createImageBitmap(img, { imageOrientation: 'from-image' });
+                    source = bitmap;
+                    width = bitmap.width;
+                    height = bitmap.height;
                 } catch (_) {
-                    source = null;
+                    // Fall back to the <img> element as-is (no EXIF correction)
+                    source = img;
                 }
-            }
-
-            if (!source) {
-                const img = new Image();
-                img.src = dataURL;
-                await new Promise((resolve, reject) => {
-                    img.onload = resolve;
-                    img.onerror = reject;
-                });
-                source = img;
-                width = img.naturalWidth || img.width;
-                height = img.naturalHeight || img.height;
             }
 
             const scale = Math.min(1, MAX_DIMENSION / Math.max(width, height));
