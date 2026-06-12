@@ -2916,10 +2916,11 @@
                 document.getElementById(id).classList.remove('active', 'completed');
             });
 
-            // Start visual progress
-            runAnalysisSteps();
+            // Start visual progress (resolves once the step animation finishes)
+            const stepsPromise = runAnalysisSteps();
 
             // Process image with MediaPipe
+            let posePromise = Promise.resolve();
             try {
 
                 // Create an image element from the uploaded data
@@ -2931,57 +2932,68 @@
                     img.onerror = reject;
                 });
 
-                // Send to MediaPipe for pose detection
-                await poseDetector.send({ image: img });
-
+                // Send to MediaPipe for pose detection. On phones the WASM/model
+                // files may still be downloading on the first run, which can take
+                // much longer than the fixed step animation — wait for it below
+                // instead of racing it, so slower devices don't get a false
+                // "no body detected" while detection is still in progress.
+                posePromise = poseDetector.send({ image: img });
 
             } catch (error) {
                 dbg.error('MediaPipe analysis failed:', error);
-                // Mark as no human detected - error will be shown by runAnalysisSteps
+                // Mark as no human detected
                 state.humanDetected = false;
                 state.analysisResult = null;
+            }
+
+            // Wait for both the visual animation and the real pose detection,
+            // with a generous timeout in case the MediaPipe model never finishes
+            // loading (e.g. blocked network) so the screen doesn't hang forever.
+            const poseTimeout = new Promise(resolve => setTimeout(resolve, 25000));
+            await Promise.allSettled([stepsPromise, Promise.race([posePromise, poseTimeout])]);
+
+            // Only proceed if still on analysis screen
+            if (state.currentScreen !== 2) {
+                return;
+            }
+
+            if (!state.humanDetected || !state.analysisResult) {
+                // No human body detected - show error and return to upload
+                showNoHumanDetectedError();
+            } else {
+                // Valid analysis - show gender confirmation first
+                showGenderConfirmation();
             }
         }
 
         function runAnalysisSteps() {
-            let currentStep = 0;
-            const stepDuration = 1500; // Longer to allow API time
+            return new Promise(resolve => {
+                let currentStep = 0;
+                const stepDuration = 1500; // Longer to allow API time
 
-            function advanceStep() {
-                // Only continue if still on analysis screen (screen 2)
-                if (state.currentScreen !== 2) {
-                    return;
+                function advanceStep() {
+                    // Stop (but still resolve) if no longer on analysis screen (screen 2)
+                    if (state.currentScreen !== 2) {
+                        resolve();
+                        return;
+                    }
+
+                    if (currentStep > 0) {
+                        document.getElementById(analysisSteps[currentStep - 1]).classList.remove('active');
+                        document.getElementById(analysisSteps[currentStep - 1]).classList.add('completed');
+                    }
+
+                    if (currentStep < analysisSteps.length) {
+                        document.getElementById(analysisSteps[currentStep]).classList.add('active');
+                        currentStep++;
+                        setTimeout(advanceStep, stepDuration);
+                    } else {
+                        resolve();
+                    }
                 }
 
-                if (currentStep > 0) {
-                    document.getElementById(analysisSteps[currentStep - 1]).classList.remove('active');
-                    document.getElementById(analysisSteps[currentStep - 1]).classList.add('completed');
-                }
-
-                if (currentStep < analysisSteps.length) {
-                    document.getElementById(analysisSteps[currentStep]).classList.add('active');
-                    currentStep++;
-                    setTimeout(advanceStep, stepDuration);
-                } else {
-                    // Analysis complete - check if human was detected
-                    setTimeout(() => {
-                        // Only proceed if still on analysis screen
-                        if (state.currentScreen !== 2) {
-                            return;
-                        }
-
-                        if (!state.humanDetected || !state.analysisResult) {
-                            // No human body detected - show error and return to upload
-                            showNoHumanDetectedError();
-                        } else {
-                            // Valid analysis - show gender confirmation first
-                            showGenderConfirmation();
-                        }
-                    }, 500);
-                }
-            }
-
-            advanceStep();
+                advanceStep();
+            });
         }
 
         // Show error when no human body is detected
