@@ -8730,6 +8730,10 @@
             animation: slideUp 0.4s cubic-bezier(0.34, 1.56, 0.64, 1);
             max-height: 90vh;
             overflow-y: auto;
+            /* Anchor the absolutely-positioned close (.meal-plan-close) to this
+               card instead of the full-screen overlay — otherwise it sits at
+               the very top of the viewport, on top of the iOS status bar. */
+            position: relative;
         }
 
         .gender-confirm-icon {
