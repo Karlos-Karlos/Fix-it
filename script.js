@@ -1953,12 +1953,15 @@
                 const lShoulder = lm[11], rShoulder = lm[12];
                 const lHip = lm[23],      rHip      = lm[24];
                 const torsoAnchors = [lShoulder, rShoulder, lHip, rHip];
-                const ANCHOR_VIS = 0.4;
+                // Hips are frequently partly occluded by hands/arms in body-comp
+                // photos (modesty pose) and read lower visibility than shoulders —
+                // 0.4 was rejecting otherwise-valid full-body photos.
+                const ANCHOR_VIS = 0.25;
                 const allAnchorsVisible = torsoAnchors.every(p => p && p.visibility >= ANCHOR_VIS);
 
                 // ── 2. Enough landmarks are confident across the full body ────────
                 const confidentCount = lm.filter(p => p && p.visibility >= 0.35).length;
-                const CONFIDENT_MIN = 8; // at least 8 of 33 landmarks confident
+                const CONFIDENT_MIN = 6; // at least 6 of 33 landmarks confident
 
                 // ── 3. Geometric sanity: shoulders must be above hips ─────────────
                 // (in normalised image coords y increases downward)
@@ -1972,6 +1975,14 @@
                 const bottomY = Math.max(lHip.y, rHip.y, lAnkle?.y ?? 0, rAnkle?.y ?? 0);
                 const bodySpan = bottomY - topY; // fraction of image height
                 const SPAN_MIN = 0.15; // body must span at least 15% of image height
+
+                // Diagnostic snapshot — surfaced in the "no body detected" toast
+                // when ?debug=1 is in the URL, since dbg.* is silent in production.
+                state.detectionDebug = {
+                    allAnchorsVisible, confidentCount, shouldersAboveHips,
+                    bodySpan: +bodySpan.toFixed(3),
+                    anchorVis: torsoAnchors.map(p => +(p?.visibility ?? 0).toFixed(2))
+                };
 
                 if (allAnchorsVisible && confidentCount >= CONFIDENT_MIN &&
                     shouldersAboveHips && bodySpan >= SPAN_MIN) {
@@ -1989,6 +2000,7 @@
                 state.humanDetected = false;
                 state.landmarks = null;
                 state.analysisResult = null;
+                state.detectionDebug = { noPose: true, count: results.poseLandmarks?.length ?? 0 };
             }
         }
 
@@ -3042,7 +3054,11 @@
                 return;
             }
 
-            const errorMessage = `No body detected in your photo.\n• Show your full body (head to feet)\n• Face the camera directly\n• Good lighting, minimal shadows`;
+            let errorMessage = `No body detected in your photo.\n• Show your full body (head to feet)\n• Face the camera directly\n• Good lighting, minimal shadows`;
+
+            if (new URLSearchParams(location.search).get('debug') === '1' && state.detectionDebug) {
+                errorMessage += `\n[debug] ${JSON.stringify(state.detectionDebug)}`;
+            }
 
             showToast(errorMessage, 'error', 6000);
 
