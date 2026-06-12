@@ -2903,6 +2903,51 @@
         }
 
         // Analysis with MediaPipe (Free AI)
+        // Normalize an uploaded photo before pose detection: phone photos
+        // carry an EXIF orientation tag that <img> display respects (so the
+        // preview looks upright) but canvas drawImage()/MediaPipe often
+        // ignores, leaving the body sideways for the pose model. Also
+        // downscale large camera photos to a safe max dimension to avoid
+        // mobile canvas/memory limits and speed up WASM inference.
+        async function prepareImageForAnalysis(dataURL) {
+            const MAX_DIMENSION = 1280;
+            const blob = await (await fetch(dataURL)).blob();
+
+            let source = null;
+            let width, height;
+            if (typeof createImageBitmap === 'function') {
+                try {
+                    source = await createImageBitmap(blob, { imageOrientation: 'from-image' });
+                    width = source.width;
+                    height = source.height;
+                } catch (_) {
+                    source = null;
+                }
+            }
+
+            if (!source) {
+                const img = new Image();
+                img.src = dataURL;
+                await new Promise((resolve, reject) => {
+                    img.onload = resolve;
+                    img.onerror = reject;
+                });
+                source = img;
+                width = img.naturalWidth || img.width;
+                height = img.naturalHeight || img.height;
+            }
+
+            const scale = Math.min(1, MAX_DIMENSION / Math.max(width, height));
+            const canvas = document.createElement('canvas');
+            canvas.width = Math.round(width * scale);
+            canvas.height = Math.round(height * scale);
+            canvas.getContext('2d').drawImage(source, 0, 0, canvas.width, canvas.height);
+
+            if (typeof source.close === 'function') source.close();
+
+            return canvas;
+        }
+
         async function startAnalysis() {
             if (analyzeBtn) {
                 analyzeBtn.disabled = true;
@@ -2923,21 +2968,15 @@
             let posePromise = Promise.resolve();
             try {
 
-                // Create an image element from the uploaded data
-                const img = new Image();
-                img.src = state.imageData;
-
-                await new Promise((resolve, reject) => {
-                    img.onload = resolve;
-                    img.onerror = reject;
-                });
+                // Normalize orientation/size before handing the image to MediaPipe.
+                const canvas = await prepareImageForAnalysis(state.imageData);
 
                 // Send to MediaPipe for pose detection. On phones the WASM/model
                 // files may still be downloading on the first run, which can take
                 // much longer than the fixed step animation — wait for it below
                 // instead of racing it, so slower devices don't get a false
                 // "no body detected" while detection is still in progress.
-                posePromise = poseDetector.send({ image: img });
+                posePromise = poseDetector.send({ image: canvas });
 
             } catch (error) {
                 dbg.error('MediaPipe analysis failed:', error);
