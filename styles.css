@@ -18261,3 +18261,18 @@ body.has-bottom-nav .coach-panel {
         padding-bottom: env(safe-area-inset-bottom, 0px);
     }
 }
+
+/* Full-screen overlay headers (workout player, form check, weekly plan) —
+   clear the iOS status bar/notch instead of rendering underneath it,
+   matching Chrome's behavior of keeping content below the status bar. */
+.player-header {
+    padding-top: env(safe-area-inset-top, 0px);
+}
+
+.form-check-header {
+    padding-top: env(safe-area-inset-top, 0px);
+}
+
+.weekly-routine-modal {
+    padding-top: max(20px, env(safe-area-inset-top, 0px));
+}
