@@ -24,7 +24,7 @@
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="styles.css?v=115">
+    <link rel="stylesheet" href="styles.css?v=116">
     <link rel="manifest" href="manifest.json">
     <!-- Chart.js for Progress Charts -->
     <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
@@ -418,14 +418,16 @@
                         </div>
 
                         <div class="upload-preview" id="upload-preview">
-                            <img class="preview-image" id="preview-image" src="" alt="Preview">
                             <div class="preview-badge">Image Ready</div>
+                            <div class="preview-image-wrap">
+                            <img class="preview-image" id="preview-image" src="" alt="Preview">
                             <button class="remove-preview" id="remove-preview" aria-label="Remove image preview">
                                 <svg viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                                     <line x1="18" y1="6" x2="6" y2="18"/>
                                     <line x1="6" y1="6" x2="18" y2="18"/>
                                 </svg>
                             </button>
+                            </div>
                         </div>
 
                         <!-- Image Quality Indicator -->

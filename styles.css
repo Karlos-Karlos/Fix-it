@@ -1160,11 +1160,14 @@
         /* Preview container */
         .upload-preview {
             display: none;
-            position: relative;
         }
 
         .upload-preview.has-image {
             display: block;
+        }
+
+        .preview-image-wrap {
+            position: relative;
         }
 
         .preview-image {
@@ -1176,12 +1179,10 @@
         }
 
         .preview-badge {
-            position: absolute;
-            top: 16px;
-            right: 16px;
-            /* Fixed dark background — this badge sits on top of an arbitrary
-               user photo, so theme-based colors can end up near-invisible
-               (e.g. light text on a light photo). */
+            /* Sits above the photo in normal flow, right-aligned, so it never
+               overlays (and can't lose contrast against) the user's image. */
+            width: fit-content;
+            margin: 0 0 10px auto;
             background: rgba(20, 18, 17, 0.65);
             backdrop-filter: blur(10px);
             padding: 8px 16px;
