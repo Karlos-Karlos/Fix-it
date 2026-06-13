@@ -9733,7 +9733,7 @@ ${mealsHtml || '<p style="color:#888;font-style:italic">Open the Nutrition scree
                     `Smart Insights (Progress screen):\n- 8 analysis engines:\n  1. Streak: ≥7 consecutive days → positive insight\n  2. Workout pattern: top 2 training days of week\n  3. Sleep/workout correlation: avg sleep diff on workout vs. rest days (±0.3h threshold)\n  4. Weight trend: 2-week rolling comparison\n  5. Calorie adherence: avg % of goal (±8% threshold)\n  6. Sleep quality: 5-night avg score + poor-night count\n  7. Measurement trend: waist/chest/arms ≥0.5cm change\n  8. Recovery score: <50 → warning insight\n- Output: up to 6 insights, typed: positive/warning/neutral\n- Rendered with color-coded left borders`,
                 ],
                 explain_calorie_balance: (ctx) => [
-                    `Calorie Balance card (Nutrition screen):\n- Eaten: sum of calories from today's food log entries\n- Burned: Σ(MET × weight_kg × duration_hours) for today's workouts\n  MET values: cardio=8.0, HIIT=10.0, strength=6.0, yoga=3.0, sports=7.0\n- Net: eaten − burned (positive = surplus, negative = deficit)\n- Data sources: fixit-calorie-log (today), fixit-workout-log (today)\n- Updates: on food log load + workout log render`,
+                    `Calorie Balance card (Nutrition screen):\n- Eaten: sum of calories from today's food log entries\n- Burned: Σ(MET × weight_kg × duration_hours) for today's workouts + step-tracker calories from Activity Hub sessions\n  MET values: cardio=8.0, HIIT=10.0, strength=6.0, yoga=3.0, sports=7.0\n- Net: eaten − burned (positive = surplus, negative = deficit)\n- Data sources: fixit-calorie-log (today), fixit-workout-log (today), fixit-wearable-sessions (today)\n- Updates: on food log load + workout log render`,
                 ],
                 explain_hydration_history: (ctx) => [
                     `Hydration History (Nutrition screen):\n- 14-day heatmap: one cell per day\n  - Empty: 0–1 glasses\n  - Partial: ≥2 glasses\n  - Half: ≥5 glasses\n  - Full: ≥8 glasses (goal met)\n- 7-day average: mean(glasses[last 7 days])\n- Goal streak: consecutive days backward from today with ≥8 glasses\n- Best streak: longest consecutive run in 30-day window\n- Storage: fixit-water-YYYY-MM-DD keys (one per day)`,
@@ -14291,7 +14291,16 @@ ${mealsHtml || '<p style="color:#888;font-style:italic">Open the Nutrition scree
                 return sum + kcal;
             }, 0);
 
-            return sessionBurned + exLogBurned;
+            // 3. Activity Hub step-tracker sessions (NEAT/walking)
+            const stepBurned = (() => {
+                try {
+                    return JSON.parse(localStorage.getItem(userKey('fixit-wearable-sessions')) || '[]')
+                        .filter(s => s.date && s.date.startsWith(today))
+                        .reduce((sum, s) => sum + (s.calories || 0), 0);
+                } catch (_) { return 0; }
+            })();
+
+            return sessionBurned + exLogBurned + stepBurned;
         }
 
         function renderCalorieBalance() {
@@ -14344,7 +14353,7 @@ ${mealsHtml || '<p style="color:#888;font-style:italic">Open the Nutrition scree
             if (hintEl && hintText) {
                 if (burned > 0) {
                     hintEl.style.display = '';
-                    hintText.textContent = `${burned} kcal burned in today's workout — keep it up!`;
+                    hintText.textContent = `${burned} kcal burned through today's activity — keep it up!`;
                 } else {
                     hintEl.style.display = 'none';
                 }
