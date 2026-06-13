@@ -3747,9 +3747,14 @@
                 'recomp': 'High Protein for Body Recomposition'
             };
             const deficit = tdee - targetCalories;
+            // computeTargetCalories() clamps to a floor/ceiling and slides
+            // toward the floor as BMI rises, so the real deficit % can be
+            // well above (or below) the baseline 25% -- compute it instead
+            // of hardcoding "25%" so the message stays accurate.
+            const deficitPct = tdee > 0 ? Math.round((deficit / tdee) * 100) : 0;
             const goalMessages = {
                 'lose-weight': deficit > 0
-                    ? `Based on your ${config.name} goal, we recommend a ${deficit} calorie deficit (about 25% below your estimated maintenance) while maintaining high protein to preserve muscle mass.`
+                    ? `Based on your ${config.name} goal, we recommend a ${deficit} calorie deficit (about ${deficitPct}% below your estimated maintenance) while maintaining high protein to preserve muscle mass.`
                     : `Based on your ${config.name} goal, your target is set at a safe minimum calorie level while maintaining high protein to preserve muscle mass.`,
                 'build-muscle': `For ${config.name}, you need a ${config.calorieAdjustment} calorie surplus with emphasis on protein (${config.proteinMultiplier}g per lb) for optimal muscle growth.`,
                 'maintain': `For weight maintenance, we've calculated your daily needs to keep your current physique while supporting overall health.`,
