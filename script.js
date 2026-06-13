@@ -6842,6 +6842,18 @@ ${mealsHtml || '<p style="color:#888;font-style:italic">Open the Nutrition scree
         }
 
         function calculateDailyTargets(config) {
+            // If the user already has a personalized daily calorie target
+            // (Metabolic Rate card on Nutrition, via computeTargetCalories()),
+            // use that as the meal plan's calorie ceiling instead of the
+            // generic goal/gender estimate below -- otherwise the meal plan
+            // can disagree with the user's own "daily max kcal".
+            let personalTarget = state.macroTargets?.calories;
+            if (!personalTarget) {
+                try {
+                    personalTarget = JSON.parse(localStorage.getItem(userKey('fixit-macro-targets')) || 'null')?.calories;
+                } catch (_) { /* ignore */ }
+            }
+
             // Base calories differ by gender
             // Men typically need 2200-2800 cal, Women typically need 1800-2200 cal
             const isMale = config.gender === 'male';
@@ -6888,6 +6900,11 @@ ${mealsHtml || '<p style="color:#888;font-style:italic">Open the Nutrition scree
                 carbsRatio = 0.5;
                 fatsRatio = 0.25;
             }
+
+            // Respect the user's personalized daily calorie target (if set)
+            // over the generic goal-based estimate -- macro ratios above
+            // still come from the meal plan's goal/diet selection.
+            if (personalTarget) calories = personalTarget;
 
             return {
                 calories,
