@@ -24,7 +24,7 @@
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="styles.css?v=119">
+    <link rel="stylesheet" href="styles.css?v=120">
     <link rel="manifest" href="manifest.json">
     <!-- Chart.js for Progress Charts -->
     <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
@@ -4366,13 +4366,6 @@
         <!-- Meal Plan Modal -->
         <div class="meal-plan-modal" id="meal-plan-modal">
             <div class="meal-plan-container">
-                <button class="meal-plan-close" id="meal-plan-close" aria-label="Close meal plan">
-                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                        <line x1="18" y1="6" x2="6" y2="18"/>
-                        <line x1="6" y1="6" x2="18" y2="18"/>
-                    </svg>
-                </button>
-
                 <!-- Header -->
                 <div class="meal-plan-header">
                     <div class="meal-plan-title-row">
@@ -4393,6 +4386,12 @@
                             <p class="meal-plan-subtitle">AI-generated nutrition plan based on your body analysis and goals</p>
                         </div>
                     </div>
+                    <button class="modal-close-btn" id="meal-plan-close" aria-label="Close meal plan">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <line x1="18" y1="6" x2="6" y2="18"/>
+                            <line x1="6" y1="6" x2="18" y2="18"/>
+                        </svg>
+                    </button>
                 </div>
 
                 <!-- Configuration Panel -->
