@@ -3705,7 +3705,7 @@
             }
             bmr = Math.round(bmr);
             const tdee = Math.round(bmr * multiplier);
-            const targetCalories = Math.round(tdee + config.calorieAdjustment);
+            const targetCalories = computeTargetCalories(tdee, goal, gender);
 
             // Store BMR/TDEE for the BMR card
             state._bmr = bmr;
@@ -3746,8 +3746,11 @@
                 'maintain': 'Balanced Nutrition for Maintenance',
                 'recomp': 'High Protein for Body Recomposition'
             };
+            const deficit = tdee - targetCalories;
             const goalMessages = {
-                'lose-weight': `Based on your ${config.name} goal, we recommend a ${Math.abs(config.calorieAdjustment)} calorie deficit while maintaining high protein to preserve muscle mass.`,
+                'lose-weight': deficit > 0
+                    ? `Based on your ${config.name} goal, we recommend a ${deficit} calorie deficit (about 25% below your estimated maintenance) while maintaining high protein to preserve muscle mass.`
+                    : `Based on your ${config.name} goal, your target is set at a safe minimum calorie level while maintaining high protein to preserve muscle mass.`,
                 'build-muscle': `For ${config.name}, you need a ${config.calorieAdjustment} calorie surplus with emphasis on protein (${config.proteinMultiplier}g per lb) for optimal muscle growth.`,
                 'maintain': `For weight maintenance, we've calculated your daily needs to keep your current physique while supporting overall health.`,
                 'recomp': `Body recomposition requires precise nutrition - high protein to build muscle while eating at maintenance to gradually lose fat.`
@@ -3769,6 +3772,22 @@
             const g = gender || 'male';
             if (!height) return Math.round(w * 24); // fallback
             return Math.round(10 * w + 6.25 * h - 5 * a + (g === 'male' ? 5 : -161));
+        }
+
+        // Convert TDEE into a daily calorie target for a goal. A flat -500
+        // deficit is a tiny percentage of TDEE for large bodies (and a huge
+        // one for small bodies), so "lose-weight" uses a 25% deficit instead
+        // -- then clamps to commonly recommended daily ranges so neither very
+        // high nor very low TDEE produces an unrealistic diet target.
+        function computeTargetCalories(tdee, goal, gender) {
+            if (goal === 'lose-weight') {
+                const floor = gender === 'male' ? 1500 : 1200;
+                const ceiling = gender === 'male' ? 2500 : 2000;
+                const target = Math.round(tdee * 0.75); // 25% deficit
+                return Math.min(ceiling, Math.max(floor, target));
+            }
+            if (goal === 'build-muscle') return tdee + 300; // caloric surplus
+            return tdee; // maintain / recomp
         }
 
         function renderBMRCard() {
@@ -3801,10 +3820,8 @@
 
             const bmr = state._bmr || computeBMR(weight, height, age, gender);
             const tdee = Math.round(bmr * mult);
-            const goalAdjustments = { 'lose-weight': -500, 'build-muscle': 300, 'maintain': 0, 'recomp': 0 };
             const selectedGoal = goalSel?.value || goal;
-            const adj = goalAdjustments[selectedGoal] ?? 0;
-            const target = tdee + adj;
+            const target = computeTargetCalories(tdee, selectedGoal, gender);
 
             // Update stat blocks
             const bmrEl = document.getElementById('bmr-display');
@@ -3851,9 +3868,7 @@
                     const mult = activityMultipliers[activityLevel] || 1.55;
                     const bmr = computeBMR(weight, height, age, gender);
                     const tdee = Math.round(bmr * mult);
-                    const goalAdjustments = { 'lose-weight': -500, 'build-muscle': 300, 'maintain': 0, 'recomp': 0 };
-                    const adj = goalAdjustments[selectedGoal] ?? 0;
-                    const targetCalories = tdee + adj;
+                    const targetCalories = computeTargetCalories(tdee, selectedGoal, gender);
 
                     // Apply to macro targets (adjusted body weight for obesity, see computeBMR)
                     const config = getGoalConfig(selectedGoal);
