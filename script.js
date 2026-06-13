@@ -3705,7 +3705,7 @@
             }
             bmr = Math.round(bmr);
             const tdee = Math.round(bmr * multiplier);
-            const targetCalories = computeTargetCalories(tdee, goal, gender);
+            const targetCalories = computeTargetCalories(tdee, goal, gender, weight, height);
 
             // Store BMR/TDEE for the BMR card
             state._bmr = bmr;
@@ -3779,12 +3779,23 @@
         // one for small bodies), so "lose-weight" uses a 25% deficit instead
         // -- then clamps to commonly recommended daily ranges so neither very
         // high nor very low TDEE produces an unrealistic diet target.
-        function computeTargetCalories(tdee, goal, gender) {
+        function computeTargetCalories(tdee, goal, gender, weight, height) {
             if (goal === 'lose-weight') {
                 const floor = gender === 'male' ? 1500 : 1200;
                 const ceiling = gender === 'male' ? 2500 : 2000;
-                const target = Math.round(tdee * 0.75); // 25% deficit
-                return Math.min(ceiling, Math.max(floor, target));
+                let target = Math.min(ceiling, Math.max(floor, Math.round(tdee * 0.75)));
+
+                // Past a certain body size, a flat percentage deficit still
+                // lands near the ceiling -- but larger fat reserves support
+                // a bigger cut. Slide the target down toward the floor as
+                // BMI climbs through the obese range (30 -> 40+), so heavier
+                // users get progressively lower targets, not higher ones.
+                const bmi = calculateBMI(height, weight);
+                if (bmi && bmi > 30) {
+                    const t = Math.min(1, (bmi - 30) / 10);
+                    target = Math.round(target - t * (target - floor));
+                }
+                return target;
             }
             if (goal === 'build-muscle') return tdee + 300; // caloric surplus
             return tdee; // maintain / recomp
@@ -3821,7 +3832,7 @@
             const bmr = state._bmr || computeBMR(weight, height, age, gender);
             const tdee = Math.round(bmr * mult);
             const selectedGoal = goalSel?.value || goal;
-            const target = computeTargetCalories(tdee, selectedGoal, gender);
+            const target = computeTargetCalories(tdee, selectedGoal, gender, weight, height);
 
             // Update stat blocks
             const bmrEl = document.getElementById('bmr-display');
@@ -3868,7 +3879,7 @@
                     const mult = activityMultipliers[activityLevel] || 1.55;
                     const bmr = computeBMR(weight, height, age, gender);
                     const tdee = Math.round(bmr * mult);
-                    const targetCalories = computeTargetCalories(tdee, selectedGoal, gender);
+                    const targetCalories = computeTargetCalories(tdee, selectedGoal, gender, weight, height);
 
                     // Apply to macro targets (adjusted body weight for obesity, see computeBMR)
                     const config = getGoalConfig(selectedGoal);
