@@ -8898,6 +8898,7 @@
             font-weight: 700;
             color: var(--text-primary);
             margin: 0;
+            padding-right: 56px;
         }
 
         .meal-plan-subtitle {
