@@ -3781,7 +3781,7 @@
         // high nor very low TDEE produces an unrealistic diet target.
         function computeTargetCalories(tdee, goal, gender, weight, height) {
             if (goal === 'lose-weight') {
-                const floor = gender === 'male' ? 1500 : 1200;
+                const floor = gender === 'male' ? 1800 : 1500;
                 const ceiling = gender === 'male' ? 2500 : 2000;
                 let target = Math.min(ceiling, Math.max(floor, Math.round(tdee * 0.75)));
 
