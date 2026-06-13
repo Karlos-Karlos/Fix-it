@@ -1806,6 +1806,31 @@
             return { category: 'Obese Class III', class: 'obese', score: 15 };
         }
 
+        // Devine formula ideal body weight (kg), used to correct BMR/protein
+        // math for obese users.
+        function idealBodyWeightKg(heightCm, gender) {
+            if (!heightCm) return null;
+            const heightInches = heightCm / 2.54;
+            const base = gender === 'male' ? 50 : 45.5;
+            return base + 2.3 * Math.max(0, heightInches - 60);
+        }
+
+        // Mifflin-St Jeor (and g/lb protein targets) scale linearly with body
+        // weight, but fat tissue burns far fewer calories than lean tissue --
+        // for obese users this overestimates BMR/TDEE and inflates protein
+        // targets to unrealistic levels (e.g. 600g+/day). Clinical practice
+        // substitutes an "adjusted body weight" (ideal weight + 25% of the
+        // excess) once BMI >= 30. Below that threshold this returns the
+        // actual weight unchanged.
+        function getMetabolicWeightKg(weightKg, heightCm, gender) {
+            if (!weightKg || !heightCm) return weightKg;
+            const bmi = calculateBMI(heightCm, weightKg);
+            if (!bmi || bmi < 30) return weightKg;
+            const ibw = idealBodyWeightKg(heightCm, gender);
+            if (!ibw) return weightKg;
+            return ibw + 0.25 * (weightKg - ibw);
+        }
+
         function ageRangeToMidpoint(range) {
             const map = { '18-24': 21, '25-34': 29, '35-44': 39, '45-54': 49, '55+': 57 };
             return map[range] || null;
@@ -3654,7 +3679,10 @@
             if (!goal || !weight) return;
 
             const config = getGoalConfig(goal);
-            const weightLbs = weight * 2.205; // Convert to lbs for protein calc
+            // Use adjusted body weight (not raw weight) for protein/BMR math
+            // once BMI indicates obesity -- see getMetabolicWeightKg().
+            const metabolicWeight = getMetabolicWeightKg(weight, height, gender);
+            const weightLbs = metabolicWeight * 2.205; // Convert to lbs for protein calc
 
             const activityMultipliers = {
                 'sedentary': 1.2,
@@ -3670,10 +3698,10 @@
             // Mifflin-St Jeor BMR formula
             let bmr;
             if (height) {
-                bmr = 10 * weight + 6.25 * height - 5 * age + (gender === 'male' ? 5 : -161);
+                bmr = 10 * metabolicWeight + 6.25 * height - 5 * age + (gender === 'male' ? 5 : -161);
             } else {
                 // Fallback if height not set: use weight-only estimate
-                bmr = weight * 24;
+                bmr = metabolicWeight * 24;
             }
             bmr = Math.round(bmr);
             const tdee = Math.round(bmr * multiplier);
@@ -3735,7 +3763,7 @@
         // ========== BMR / TDEE CARD ==========
         function computeBMR(weight, height, age, gender) {
             if (!weight) return null;
-            const w = weight; // kg
+            const w = getMetabolicWeightKg(weight, height, gender); // adjusted for obesity
             const h = height || (weight * 2.3); // rough cm estimate if missing (won't be used if height set)
             const a = age || 29;
             const g = gender || 'male';
@@ -3827,9 +3855,9 @@
                     const adj = goalAdjustments[selectedGoal] ?? 0;
                     const targetCalories = tdee + adj;
 
-                    // Apply to macro targets
+                    // Apply to macro targets (adjusted body weight for obesity, see computeBMR)
                     const config = getGoalConfig(selectedGoal);
-                    const weightLbs = weight * 2.205;
+                    const weightLbs = getMetabolicWeightKg(weight, height, gender) * 2.205;
                     const proteinGrams = Math.round(weightLbs * config.proteinMultiplier);
                     const proteinCalories = proteinGrams * 4;
                     const remaining = targetCalories - proteinCalories;
