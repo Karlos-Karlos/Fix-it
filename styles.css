@@ -8359,9 +8359,13 @@
                 display: none !important;
             }
 
-            .screen {
+            .screen.active {
                 display: block !important;
                 page-break-inside: avoid;
+            }
+
+            .screen:not(.active) {
+                display: none !important;
             }
 
             body {
@@ -8828,11 +8832,13 @@
             width: 100%;
             min-width: 0;
             max-width: 900px;
+            max-height: 90vh;
+            overflow-y: auto;
             background: var(--bg-secondary);
             border-radius: 24px;
             border: 1px solid var(--border-subtle);
             position: relative;
-            margin: 20px auto;
+            margin: auto;
             animation: slideUp 0.4s cubic-bezier(0.34, 1.56, 0.64, 1);
         }
 
