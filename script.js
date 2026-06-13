@@ -6768,7 +6768,7 @@
             if (timeline) {
                 timeline.querySelectorAll('.meal-card').forEach(card => {
                     const typeEl = card.querySelector('.meal-type-name');
-                    const timeEl = card.querySelector('.meal-time');
+                    const timeEl = card.querySelector('.meal-time-badge');
                     const calEl  = card.querySelector('.meal-calories-badge');
                     const type   = typeEl ? typeEl.textContent.trim() : '';
                     const time   = timeEl ? timeEl.textContent.trim() : '';
