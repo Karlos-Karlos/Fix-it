@@ -6739,13 +6739,13 @@
                     body += 'Active recovery — stretch, walk, or rest.';
                 } else {
                     d.exercises.forEach((ex, idx) => {
-                        const muscles = Array.isArray(ex.muscles) ? ex.muscles.slice(0,3).join(', ') : (ex.muscles || '');
+                        const muscles = Array.isArray(ex.muscles) ? ex.muscles.slice(0,3) : (ex.muscles ? [ex.muscles] : []);
                         body += `<div class="ex-row">
   <div class="ex-num">${idx + 1}</div>
   <div class="ex-info">
     <div class="ex-name">${escapeHtml(ex.name || '')}</div>
     <div class="ex-detail">${ex.sets || 3} sets × ${ex.reps || '10–12'} reps${ex.rest ? ' &nbsp;·&nbsp; Rest: ' + ex.rest + 's' : ''}</div>
-    ${muscles ? `<div class="ex-muscles">${escapeHtml(muscles)}</div>` : ''}
+    ${muscles.map(m => `<div class="ex-muscles">${escapeHtml(m)}</div>`).join('')}
   </div>
 </div>`;
                     });
