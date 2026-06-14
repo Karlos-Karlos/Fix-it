@@ -6017,7 +6017,7 @@
 
         function generateDayExercises(muscleGroups, config) {
             const exercises = [];
-            const exercisesPerGroup = Math.ceil(6 / muscleGroups.length);
+            const exercisesPerGroup = Math.ceil(4 / muscleGroups.length);
 
             // Pick database based on equipment filter
             const db = config.equipment === 'home' ? homeExerciseDatabase : exerciseDatabase;
@@ -6073,7 +6073,7 @@
                 });
             });
 
-            return exercises.slice(0, 6); // Limit to 6 exercises
+            return exercises.slice(0, 4); // Limit to 4 exercises
         }
 
         // Helper functions for rep adjustments
