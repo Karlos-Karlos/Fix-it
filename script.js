@@ -714,6 +714,8 @@
             document.getElementById('screen-auth').classList.remove('active');
             const coachFab = document.getElementById('coach-fab');
             if (coachFab) coachFab.style.display = '';
+            const coachPanel = document.getElementById('coach-panel');
+            if (coachPanel) coachPanel.style.display = '';
             document.querySelector('.nav-steps').style.display = 'flex';
 
             // Clear IndexedDB snapshots when a different user logs in on this device.
@@ -8266,6 +8268,7 @@ ${mealsHtml || '<p style="color:#888;font-style:italic">Open the Nutrition scree
         function openCoachPanel() {
             const panel = document.getElementById('coach-panel');
             if (!panel) return;
+            panel.style.display = '';
             panel.classList.add('open');
             state.coachOpen = true;
             // Only greet if no messages yet (first open or after persona switch)
