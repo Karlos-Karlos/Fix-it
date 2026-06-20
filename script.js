@@ -17005,22 +17005,61 @@ ${mealsHtml || '<p style="color:#888;font-style:italic">Open the Nutrition scree
                     if (tabQr)   tabQr.addEventListener('click',   () => showTab('qr'));
 
                     if (isPublicUrl) {
-                        const wearableUrl = origin + '/index.html?wearable=1';
-                        const urlEl = document.getElementById('wearable-qr-url');
-                        if (urlEl) urlEl.textContent = wearableUrl;
+                        const QR_TTL_SECS = 300; // 5 minutes
+                        let _qrTimerInterval = null;
 
-                        const img     = document.getElementById('wearable-qr-img');
-                        const loading = document.getElementById('wearable-qr-loading');
-                        if (img) {
-                            const qrUrl = `https://api.qrserver.com/v1/create-qr-code/?size=160x160&margin=8&data=${encodeURIComponent(wearableUrl)}`;
-                            img.onload  = () => { img.style.display = 'block'; if (loading) loading.style.display = 'none'; };
-                            img.onerror = () => { if (loading) loading.textContent = 'QR unavailable — use Copy below'; };
-                            img.src = qrUrl;
+                        function _generateQR() {
+                            const exp = Date.now() + QR_TTL_SECS * 1000;
+                            const wearableUrl = origin + `/index.html?wearable=1&exp=${exp}`;
+                            const urlEl  = document.getElementById('wearable-qr-url');
+                            const img    = document.getElementById('wearable-qr-img');
+                            const loading = document.getElementById('wearable-qr-loading');
+                            const timerEl = document.getElementById('wearable-qr-timer');
+                            const regenBtn = document.getElementById('wearable-qr-regen');
+                            const hintEl  = document.querySelector('.wr-qr-hint');
+
+                            if (urlEl) urlEl.textContent = wearableUrl;
+                            if (regenBtn) regenBtn.style.display = 'none';
+                            if (hintEl) hintEl.textContent = 'Scan to open the live tracker on your phone';
+                            if (img) {
+                                img.style.display = 'none';
+                                if (loading) { loading.style.display = ''; loading.textContent = 'Generating...'; }
+                                const qrUrl = `https://api.qrserver.com/v1/create-qr-code/?size=160x160&margin=8&data=${encodeURIComponent(wearableUrl)}`;
+                                img.onload  = () => { img.style.display = 'block'; if (loading) loading.style.display = 'none'; };
+                                img.onerror = () => { if (loading) loading.textContent = 'QR unavailable — use Copy below'; };
+                                img.src = qrUrl;
+                            }
+
+                            if (_qrTimerInterval) clearInterval(_qrTimerInterval);
+                            _qrTimerInterval = setInterval(() => {
+                                const left = Math.max(0, Math.round((exp - Date.now()) / 1000));
+                                const m = Math.floor(left / 60), s = left % 60;
+                                if (timerEl) timerEl.textContent = left > 0
+                                    ? `Expires in ${m}:${String(s).padStart(2, '0')}`
+                                    : '';
+                                if (left <= 0) {
+                                    clearInterval(_qrTimerInterval);
+                                    if (img) img.style.display = 'none';
+                                    if (hintEl) hintEl.textContent = 'QR code expired';
+                                    if (loading) { loading.style.display = ''; loading.textContent = 'Link no longer available'; }
+                                    if (regenBtn) regenBtn.style.display = '';
+                                    if (urlEl) urlEl.textContent = '';
+                                }
+                            }, 1000);
                         }
+
+                        _generateQR();
+
+                        const regenBtn = document.getElementById('wearable-qr-regen');
+                        if (regenBtn) regenBtn.addEventListener('click', _generateQR);
+
                         const copyBtn = document.getElementById('wearable-copy-link');
                         if (copyBtn) {
                             copyBtn.addEventListener('click', () => {
-                                navigator.clipboard.writeText(wearableUrl)
+                                const urlEl = document.getElementById('wearable-qr-url');
+                                const url = urlEl ? urlEl.textContent : '';
+                                if (!url) { showToast('QR expired — generate a new one', 'error'); return; }
+                                navigator.clipboard.writeText(url)
                                     .then(() => showToast('Link copied!', 'success'))
                                     .catch(() => showToast('Copy failed — select manually', 'error'));
                             });
@@ -17609,11 +17648,38 @@ ${mealsHtml || '<p style="color:#888;font-style:italic">Open the Nutrition scree
 
         // Auto-activate wearable overlay on mobile when ?wearable=1
         if (_wearableMode) {
-            // Wait for DOM to be ready
-            if (document.readyState === 'loading') {
-                document.addEventListener('DOMContentLoaded', initWearableOverlay);
+            const expParam = new URLSearchParams(location.search).get('exp');
+            const expired = expParam && Date.now() > Number(expParam);
+
+            function _showWearableExpired() {
+                const overlay = document.getElementById('wearable-overlay');
+                if (!overlay) return;
+                overlay.style.display = 'flex';
+                document.body.style.overflow = 'hidden';
+                const appContainer = document.querySelector('.app-container');
+                if (appContainer) appContainer.style.display = 'none';
+                overlay.innerHTML = `
+                    <div style="display:flex;flex-direction:column;align-items:center;justify-content:center;height:100%;text-align:center;padding:2rem;color:var(--text-secondary,#aaa);">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" width="64" height="64" style="margin-bottom:1rem;opacity:.5;">
+                            <circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/>
+                        </svg>
+                        <h2 style="color:var(--text-primary,#fff);margin:0 0 .5rem;">Link Expired</h2>
+                        <p>This QR code is no longer available.<br>Please scan a new QR code from your computer.</p>
+                    </div>`;
+            }
+
+            if (expired) {
+                if (document.readyState === 'loading') {
+                    document.addEventListener('DOMContentLoaded', _showWearableExpired);
+                } else {
+                    _showWearableExpired();
+                }
             } else {
-                initWearableOverlay();
+                if (document.readyState === 'loading') {
+                    document.addEventListener('DOMContentLoaded', initWearableOverlay);
+                } else {
+                    initWearableOverlay();
+                }
             }
         }
 
